@@ -1,0 +1,10 @@
+---
+name: VuLLM
+channels: [nvidia, pytorch, conda-forge, defaults, anaconda]
+dependencies:
+  - python=3.12
+  - nvidia::cudatoolkit
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - conda-forge::torchinfo
+  - conda-forge::transformers
