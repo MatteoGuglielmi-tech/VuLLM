@@ -12,38 +12,34 @@ class Builder():
         self.matchedMessageFlag: bool = False
 
     def __filter_metadata_line(self, lineContent: str) -> str:
-        # if message flag not set, check if current line matches the "message" field
-        if not self.matchedMessageFlag:
-            self.matchedMessageFlag = True if utils.match_regex(
-                pattern=r'"message"', target=lineContent) else False
-
         # remove tabs
         lineContent = utils.remove_tabs(lineContent=lineContent)
         # remove newline char
-        lineContent, self.matchedMessageFlag = utils.remove_newlines(
-            lineContent=lineContent, matchedMessageFlag=self.matchedMessageFlag)
+        lineContent = utils.remove_newlines(lineContent=lineContent)
         # substitute mutliple spaces with single space
         lineContent = utils.remove_multiplespaces(lineContent=lineContent)
-        # remove comments
-        lineContent = utils.remove_comments(lineContent=lineContent)
         # remove "\"
         lineContent = utils.remove_backslashes(lineContent=lineContent)
+        # # remove comments
+        lineContent = utils.remove_comments(lineContent=lineContent)
 
         return lineContent
 
-    def filter_file(self):
-        contentCpy: list[str] = []
-        for idx, line in enumerate(self.__fileContent):
-            contentCpy.append(self.__filter_metadata_line(line))
-
+    def filter_file(self) -> list[str]:
+        contentCpy: list[str] = [self.__filter_metadata_line(
+            line) for line in self.__fileContent]
         return contentCpy
 
     def run(self):
-        pp(self.filter_file())
-
-        # pp(self.__fileContent)
-        # pp(self.__filter_metadata_line(self.__fileContent[20]))
-        # pp(self.__filter_metadata_line(self.__fileContent[21]))
+        lol = self.filter_file()
+        # print(lol)
+        lol = utils.create_func_metadatablock(lol)
+        # pp(lol)
+        lol = utils.remove_unused_fiels(dic=lol)
+        # pp(lol)
+        utils.create_empty_tmp_source()
+        # pp(lol)
+        utils.populate_tmp_file(filepth="tmp.c", dic=lol)
 
 
 if __name__ == "__main__":
