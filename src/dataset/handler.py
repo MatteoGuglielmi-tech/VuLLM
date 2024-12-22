@@ -30,16 +30,29 @@ class Builder():
             line) for line in self.__fileContent]
         return contentCpy
 
+    def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
+        lol: list[str] = self.filter_file()  # list of lines
+        # string organized as dictionary
+        meta_d: dict[int, dict[str, str | list[str]]
+                     ] = utils.create_func_metadatablock(content=lol)
+        # filtering unnecessary fields
+        meta_d = utils.remove_unused_fields(dic=meta_d)
+
+        return meta_d
+
     def run(self):
-        lol = self.filter_file()
-        # print(lol)
-        lol = utils.create_func_metadatablock(lol)
-        # pp(lol)
-        lol = utils.remove_unused_fiels(dic=lol)
-        # pp(lol)
+        # translate string into valid json structure
+        dic: dict[int, dict[str, str | list[str]]] = self.__assemble_metadata()
+        # create empty temporary file to call "gnu indent refactor" upon
         utils.create_empty_tmp_source()
-        # pp(lol)
-        utils.populate_tmp_file(filepth="tmp.c", dic=lol)
+        # populate temporary file with dictionary "func" fields content
+        utils.populate_tmp_file(filepth="tmp.c", dic=dic)
+        # call refactor on temporary file
+        utils.spawn_refactor(filepath="tmp.c")
+        # substitute in "func" field refactored string version
+        dic = utils.build_refactored_json(dic=dic, src_pth="tmp.c")
+        utils.rm_tmp_file(filepath="tmp.c")
+        pp(dic)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import subprocess
 from pprint import pprint as pp
 
 from log import logger
@@ -169,7 +170,7 @@ def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | l
     return json_dict
 
 
-def remove_unused_fiels(dic: dict[int, dict[str, str | list[str]]]) -> dict[int, dict[str, str | list[str]]]:
+def remove_unused_fields(dic: dict[int, dict[str, str | list[str]]]) -> dict[int, dict[str, str | list[str]]]:
     lop: list[str] = ["func", "target", "cwe"]  # list of keys to preserve
 
     # needed because during iteration it is not possible to delete elements
@@ -193,18 +194,78 @@ def write_json(dic: dict, output: str) -> None:
 
 
 def create_empty_tmp_source():
-    with open('tmp.c', 'a+') as _:
+    with open('tmp.c', 'w') as _:
         pass
 
     logger.debug("Tmp empty file created successfully")
 
 
 def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
-    with open(file=filepth, mode="a+") as f:
+    with open(file=filepth, mode="w+") as f:
         for v in dic.values():
             f.write(str(v["func"]))  # casting to avoid linting issues
-            # f.write("\n")
-            # f.write("\n")
-            # f.write("====="*100)
-            # f.write("\n")
-            # f.write("\n")
+            f.write("\n")
+            f.write("/*" + "*" * 20 + "*/")
+
+
+def spawn_refactor(filepath: str) -> None:
+    exit_code_obj = subprocess.run(
+        args=[
+            "indent",
+            "-brf",
+            "-nbfda",
+            "-nbfde",
+            "-nut",
+            "-linux",
+            "-as",
+            "-i4",
+            "-nbad",
+            "-nhnl",
+            "-nbap",
+            "-l1000",  # TODO: investigate if line length affects performances
+            f"{filepath}"
+        ],
+        capture_output=True,
+        text=True
+    )
+    if exit_code_obj.returncode:
+        logger.error(exit_code_obj.stderr)
+    else:
+        logger.info("Refactor successfully achieved")
+
+
+def get_refactored_chunks(src_pth: str) -> list[str]:
+    loFuncBody: list[str] = []
+    with open(file=src_pth, mode="r") as f:
+        los: str = f.read()
+
+    # split based on function separator (comment)
+    loFuncBody = los.split(sep=("/*" + "*" * 20 + "*/"))
+    # filter out all final "newline" char added by formatter and empty strings
+    loFuncBody = list(filter(None, [l[1:-1] for l in loFuncBody]))
+
+    return loFuncBody
+
+
+def build_refactored_json(dic: dict[int, dict[str, str | list[str]]], src_pth: str) -> dict[int, dict[str, str | list[str]]]:
+    ref_chunks: list[str] = get_refactored_chunks(src_pth=src_pth)
+    for idx, k in enumerate(dic.keys()):
+        dic[k].update({"func": ref_chunks[idx]})
+
+    return dic
+
+
+def rm_tmp_file(filepath: str) -> None:
+    exit_code_obj = subprocess.run(
+        args=[
+            "rm",
+            f"{filepath}",
+            f"{filepath}~"
+        ],
+        capture_output=True,
+        text=True
+    )
+    if exit_code_obj.returncode:
+        logger.error(exit_code_obj.stderr)
+    else:
+        logger.info("Tmp file removed successfully")
