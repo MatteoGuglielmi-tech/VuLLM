@@ -1,4 +1,4 @@
-import json
+import re
 from dataclasses import dataclass
 from pprint import pprint as pp
 
@@ -51,8 +51,10 @@ class Builder():
         utils.spawn_refactor(filepath="tmp.c")
         # substitute in "func" field refactored string version
         dic = utils.build_refactored_json(dic=dic, src_pth="tmp.c")
+        # remove temp file and copy
         utils.rm_tmp_file(filepath="tmp.c")
-        pp(dic)
+        # write pretty json
+        utils.write_json(dic=dic, output="divfix.json")
 
 
 if __name__ == "__main__":
