@@ -242,7 +242,8 @@ def get_refactored_chunks(src_pth: str) -> list[str]:
     # split based on function separator (comment)
     loFuncBody = los.split(sep=("/*" + "*" * 20 + "*/"))
     # filter out all final "newline" char added by formatter and empty strings
-    loFuncBody = list(filter(None, [l[1:-1] for l in loFuncBody]))
+    loFuncBody = list(filter(None, [l[:-1] if not match_regex(pattern=re.compile(
+        pattern=r"^\s*"), target=l[0]) else re.sub(pattern=r"^\s*", repl="", string=l[:-1]) for l in loFuncBody]))
 
     return loFuncBody
 
