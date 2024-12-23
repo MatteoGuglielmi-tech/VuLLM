@@ -8,3 +8,7 @@ dependencies:
   - pytorch::torchvision
   - conda-forge::torchinfo
   - conda-forge::transformers
+  - conda-forge::google-generativeai
+  - conda-forge::grpcio
+  - conda-forge::grpcio-status
+  - anaconda::absl-py
