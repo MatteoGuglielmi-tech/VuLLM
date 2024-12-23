@@ -1,8 +1,8 @@
-import re
+import time
 from dataclasses import dataclass
-from pprint import pprint as pp
 
 import utils
+from gemini import Gemini
 
 
 @dataclass
@@ -10,6 +10,8 @@ class Builder():
     def __post_init__(self):
         self.__fileContent: list[str] = utils.read_json()
         self.matchedMessageFlag: bool = False
+        # self.gemini = Gemini(model_name="gemini-1.5-pro")
+        self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
 
     def __filter_metadata_line(self, lineContent: str) -> str:
         # remove tabs
@@ -25,13 +27,13 @@ class Builder():
 
         return lineContent
 
-    def filter_file(self) -> list[str]:
+    def __filter_file(self) -> list[str]:
         contentCpy: list[str] = [self.__filter_metadata_line(
             line) for line in self.__fileContent]
         return contentCpy
 
     def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
-        lol: list[str] = self.filter_file()  # list of lines
+        lol: list[str] = self.__filter_file()  # list of lines
         # string organized as dictionary
         meta_d: dict[int, dict[str, str | list[str]]
                      ] = utils.create_func_metadatablock(content=lol)
@@ -39,6 +41,13 @@ class Builder():
         meta_d = utils.remove_unused_fields(dic=meta_d)
 
         return meta_d
+
+    def __update_json(self, dic: dict[int, dict[str, str | list[str]]]) -> dict[int, dict[str, str | list[str]]]:
+        for k in dic.keys():
+            dic.update({k: utils.add_desc_to_metadata(
+                dic=dic[k], llm=self.gemini)})
+            # time.sleep(60)
+        return dic
 
     def run(self):
         # translate string into valid json structure
@@ -54,7 +63,10 @@ class Builder():
         # remove temp file and copy
         utils.rm_tmp_file(filepath="tmp.c")
         # write pretty json
-        utils.write_json(dic=dic, output="divfix.json")
+        # utils.write_json(dic=dic, output="divfix.json")
+        # add description information to metadata
+        dic = self.__update_json(dic=dic)
+        print(dic)
 
 
 if __name__ == "__main__":

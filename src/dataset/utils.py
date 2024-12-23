@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pprint import pprint as pp
 
 from log import logger
@@ -222,7 +223,7 @@ def spawn_refactor(filepath: str) -> None:
             "-nbad",
             "-nhnl",
             "-nbap",
-            "-l1000",  # TODO: investigate if line length affects performances
+            "-l1000",
             f"{filepath}"
         ],
         capture_output=True,
@@ -270,3 +271,13 @@ def rm_tmp_file(filepath: str) -> None:
         logger.error(exit_code_obj.stderr)
     else:
         logger.info("Tmp file removed successfully")
+
+
+def add_desc_to_metadata(dic: dict[str, str | list[str]], llm) -> dict[str, str | list[str]]:
+    # add an initial time delay to avoid resource echausted error
+    time.sleep(10)
+    # input the function body and get description
+    desc: str = llm.generate_description(dic["func"])
+    dic.update({"fdesc": desc})
+
+    return dic
