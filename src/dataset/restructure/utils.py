@@ -3,35 +3,35 @@ import os
 import re
 import subprocess
 import time
-from pprint import pprint as pp
 
 from log import logger
 
-PATH2JSON: str = "../../DiverseVul/small_diversevul.json"
+PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
-def remove_tabs(lineContent: str):
-    # remove tabs in function body
-    newlineRegEx: re.Pattern = re.compile(pattern=r"\\t")
-    lineContent = re.sub(pattern=newlineRegEx,
-                         repl=" ", string=lineContent)
-
-    return lineContent
-
-
 def findall_regex(pattern: str | re.Pattern, target: str) -> str | list[str]:
-    regex: str | re.Pattern = re.compile(
-        pattern=pattern) if isinstance(pattern, str) else pattern
+    regex: str | re.Pattern = (
+        re.compile(pattern=pattern) if isinstance(pattern, str) else pattern
+    )
     content = re.findall(pattern=regex, string=target)
     return content if content else ""
 
 
 def match_regex(pattern: str | re.Pattern, target: str) -> bool:
-    regex: str | re.Pattern = re.compile(
-        pattern=pattern) if isinstance(pattern, str) else pattern
+    regex: str | re.Pattern = (
+        re.compile(pattern=pattern) if isinstance(pattern, str) else pattern
+    )
     content = re.search(pattern=regex, string=target)
     return True if content else False
+
+
+def remove_tabs(lineContent: str):
+    # remove tabs in function body
+    newlineRegEx: re.Pattern = re.compile(pattern=r"\\t")
+    lineContent = re.sub(pattern=newlineRegEx, repl=" ", string=lineContent)
+
+    return lineContent
 
 
 def remove_newlines(lineContent: str) -> str:
@@ -47,9 +47,9 @@ def remove_newlines(lineContent: str) -> str:
     #     matchedMessageFlag = False
 
     # elif (not matchedMessageFlag) or (matchedMessageFlag and not match_regex(pattern=r"}\\n$", target=lineContent)):
-        # remove "newline" char in function body
-        # newlineRegEx: re.Pattern = re.compile(pattern=r"\n")
-        # lineContent = re.sub(pattern=newlineRegEx, repl='', string=lineContent)
+    # remove "newline" char in function body
+    # newlineRegEx: re.Pattern = re.compile(pattern=r"\n")
+    # lineContent = re.sub(pattern=newlineRegEx, repl='', string=lineContent)
 
     return lineContent  # , matchedMessageFlag
 
@@ -62,8 +62,7 @@ def remove_backslashes(lineContent: str) -> str:
 def remove_multiplespaces(lineContent: str) -> str:
     # remove multiple consecutive spaces in function body
     multipleSpacesRegEx: re.Pattern = re.compile(pattern=r"\s+(?=.)")
-    lineContent = re.sub(pattern=multipleSpacesRegEx,
-                         repl=" ", string=lineContent)
+    lineContent = re.sub(pattern=multipleSpacesRegEx, repl=" ", string=lineContent)
 
     return lineContent
 
@@ -76,8 +75,11 @@ def remove_comments(lineContent: str) -> str:
     # check for comments starting with // and match until the eol
     commentRegEx = re.compile(pattern=r"//.*")
 
-    loc: list[str] | str = findall_regex(pattern=commentAstRegEx, target=lineContent) if match_regex(
-        pattern=commentAstRegEx, target=lineContent) else findall_regex(pattern=commentRegEx, target=lineContent)
+    loc: list[str] | str = (
+        findall_regex(pattern=commentAstRegEx, target=lineContent)
+        if match_regex(pattern=commentAstRegEx, target=lineContent)
+        else findall_regex(pattern=commentRegEx, target=lineContent)
+    )
     if loc:
         for item in loc:
             lineContent = lineContent.replace(item, "")
@@ -92,7 +94,9 @@ def read_json() -> list[str]:
     return fileContent
 
 
-def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | list[str]]]:
+def create_func_metadatablock(
+    content: list[str],
+) -> dict[int, dict[str, str | list[str]]]:
     json_dict: dict[int, dict[str, str | list[str]]] = {}
     local_d: dict[str, str | list[str]] = {}
     el: str | list[str]
@@ -131,7 +135,7 @@ def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | l
         "commit_id": commitidRegEx,
         "hash": hashRegEx,
         "size": sizeRegEx,
-        "message": messageRegEx
+        "message": messageRegEx,
     }
     sub_regex_dict = {
         "func": subFuncRegEx,
@@ -141,7 +145,7 @@ def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | l
         "commit_id": subCommitRegEx,
         "hash": subHashRegEx,
         "size": subSizeRegEx,
-        "message": subMsgRegEx
+        "message": subMsgRegEx,
     }
 
     # merge blocks in between "{" and "}\n"
@@ -150,19 +154,20 @@ def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | l
         local_d = {}
         for key, val in regex_dict.items():
             # apply regex to extract field content
-            el = findall_regex(pattern=val, target=content[lineIdx])[0] if match_regex(
-                pattern=val, target=content[lineIdx]) else ""
+            el = (
+                findall_regex(pattern=val, target=content[lineIdx])[0]
+                if match_regex(pattern=val, target=content[lineIdx])
+                else ""
+            )
             # remove unnecessary chars
-            el = re.sub(
-                pattern=sub_regex_dict[key], repl="", string=el) if el else ""
+            el = re.sub(pattern=sub_regex_dict[key], repl="", string=el) if el else ""
 
             el = el.strip()
             # in case of "func" field, remove leading and trailing dquotes
             el = el[1:-1] if (el and key == "func") else el
             # in case of "cwe" field, check if there are more codes
-            if (key == "cwe"):
-                el = [e[1:-1]
-                      for e in el.split(sep=",")] if ("," in el) else el[1:-1]
+            if key == "cwe":
+                el = [e[1:-1] for e in el.split(sep=",")] if ("," in el) else el[1:-1]
 
             local_d[key] = el
 
@@ -171,7 +176,9 @@ def create_func_metadatablock(content: list[str]) -> dict[int, dict[str, str | l
     return json_dict
 
 
-def remove_unused_fields(dic: dict[int, dict[str, str | list[str]]]) -> dict[int, dict[str, str | list[str]]]:
+def remove_unused_fields(
+    dic: dict[int, dict[str, str | list[str]]]
+) -> dict[int, dict[str, str | list[str]]]:
     lop: list[str] = ["func", "target", "cwe"]  # list of keys to preserve
 
     # needed because during iteration it is not possible to delete elements
@@ -195,7 +202,7 @@ def write_json(dic: dict, output: str) -> None:
 
 
 def create_empty_tmp_source():
-    with open('tmp.c', 'w') as _:
+    with open("tmp.c", "w") as _:
         pass
 
     logger.debug("Tmp empty file created successfully")
@@ -224,10 +231,10 @@ def spawn_refactor(filepath: str) -> None:
             "-nhnl",
             "-nbap",
             "-l1000",
-            f"{filepath}"
+            f"{filepath}",
         ],
         capture_output=True,
-        text=True
+        text=True,
     )
     if exit_code_obj.returncode:
         logger.error(exit_code_obj.stderr)
@@ -243,13 +250,26 @@ def get_refactored_chunks(src_pth: str) -> list[str]:
     # split based on function separator (comment)
     loFuncBody = los.split(sep=("/*" + "*" * 20 + "*/"))
     # filter out all final "newline" char added by formatter and empty strings
-    loFuncBody = list(filter(None, [l[:-1] if not match_regex(pattern=re.compile(
-        pattern=r"^\s*"), target=l[0]) else re.sub(pattern=r"^\s*", repl="", string=l[:-1]) for l in loFuncBody]))
+    loFuncBody = list(
+        filter(
+            None,
+            [
+                (
+                    l[:-1]
+                    if not match_regex(pattern=re.compile(pattern=r"^\s*"), target=l[0])
+                    else re.sub(pattern=r"^\s*", repl="", string=l[:-1])
+                )
+                for l in loFuncBody
+            ],
+        )
+    )
 
     return loFuncBody
 
 
-def build_refactored_json(dic: dict[int, dict[str, str | list[str]]], src_pth: str) -> dict[int, dict[str, str | list[str]]]:
+def build_refactored_json(
+    dic: dict[int, dict[str, str | list[str]]], src_pth: str
+) -> dict[int, dict[str, str | list[str]]]:
     ref_chunks: list[str] = get_refactored_chunks(src_pth=src_pth)
     for idx, k in enumerate(dic.keys()):
         dic[k].update({"func": ref_chunks[idx]})
@@ -259,13 +279,7 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]], src_pth: s
 
 def rm_tmp_file(filepath: str) -> None:
     exit_code_obj = subprocess.run(
-        args=[
-            "rm",
-            f"{filepath}",
-            f"{filepath}~"
-        ],
-        capture_output=True,
-        text=True
+        args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
     )
     if exit_code_obj.returncode:
         logger.error(exit_code_obj.stderr)
@@ -273,11 +287,13 @@ def rm_tmp_file(filepath: str) -> None:
         logger.info("Tmp file removed successfully")
 
 
-def add_desc_to_metadata(dic: dict[str, str | list[str]], llm) -> dict[str, str | list[str]]:
+def add_desc_to_metadata(
+    dic: dict[str, str | list[str]], llm
+) -> dict[str, str | list[str]]:
     # add an initial time delay to avoid resource echausted error
     time.sleep(10)
     # input the function body and get description
     desc: str = llm.generate_description(dic["func"])
-    dic.update({"fdesc": desc})
+    dic.update({"fdesc": desc[1:-1]})
 
     return dic
