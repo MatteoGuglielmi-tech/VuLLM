@@ -11,4 +11,5 @@ dependencies:
   - conda-forge::google-generativeai
   - conda-forge::grpcio
   - conda-forge::grpcio-status
+  - conda-forge::alive-progress
   - anaconda::absl-py

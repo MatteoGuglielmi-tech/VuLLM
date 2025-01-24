@@ -1,17 +1,20 @@
 from dataclasses import dataclass
-from pprint import pprint as pp
 
 import utils
-from gemini import Gemini
+from log import logger
+
+# from gemini import Gemini
+
+# from pprint import pprint as pp
 
 
 @dataclass
 class Builder:
     def __post_init__(self):
         self.__fileContent: list[str] = utils.read_json()
-        self.matchedMessageFlag: bool = False
+        # self.matchedMessageFlag: bool = False
         # self.gemini = Gemini(model_name="gemini-1.5-pro")
-        self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
+        # self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
 
     def __filter_metadata_line(self, lineContent: str) -> str:
         # remove tabs
@@ -36,6 +39,7 @@ class Builder:
     def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
         lol: list[str] = self.__filter_file()  # list of lines
         # string organized as dictionary
+        logger.debug(msg="Creating dictionary dataset")
         meta_d: dict[int, dict[str, str | list[str]]] = utils.create_func_metadatablock(
             content=lol
         )
@@ -44,13 +48,12 @@ class Builder:
 
         return meta_d
 
-    def __update_json(
-        self, dic: dict[int, dict[str, str | list[str]]]
-    ) -> dict[int, dict[str, str | list[str]]]:
-        for k in dic.keys():
-            dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
-            # time.sleep(60)
-        return dic
+    # def __update_json_with_funcdesc(
+    #     self, dic: dict[int, dict[str, str | list[str]]]
+    # ) -> dict[int, dict[str, str | list[str]]]:
+    #     for k in dic.keys():
+    #         dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
+    #     return dic
 
     def run(self):
         # translate string into valid json structure
@@ -67,8 +70,8 @@ class Builder:
         utils.rm_tmp_file(filepath="tmp.c")
         # write pretty json
         # add description information to metadata
-        dic = self.__update_json(dic=dic)
-        pp(dic)
+        # dic = self.__update_json_with_funcdesc(dic=dic)
+        # pp(dic)
         utils.write_json(dic=dic, output="divfix.json")
 
 

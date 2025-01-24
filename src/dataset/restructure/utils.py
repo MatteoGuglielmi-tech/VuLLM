@@ -2,11 +2,16 @@ import json
 import os
 import re
 import subprocess
-import time
 
+import animate
+from alive_progress import alive_bar
 from log import logger
 
-PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+# import time
+
+
+# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
 FIELDS_IN_JSON = 9
 
 
@@ -68,7 +73,6 @@ def remove_multiplespaces(lineContent: str) -> str:
 
 
 def remove_comments(lineContent: str) -> str:
-
     # extract comment encapsulated in /**/
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
@@ -89,8 +93,11 @@ def remove_comments(lineContent: str) -> str:
 
 def read_json() -> list[str]:
     fileContent: list[str] = []
-    with open(PATH2JSON, "r") as json:
-        fileContent = json.readlines()
+    with animate.Loader(
+        desc="Reading original dataset malformed Json", end="List of lines obtained"
+    ):
+        with open(PATH2JSON, "r") as json:
+            fileContent = json.readlines()
     return fileContent
 
 
@@ -150,28 +157,39 @@ def create_func_metadatablock(
 
     # merge blocks in between "{" and "}\n"
     # iterate in the list and start merging to form blocks
-    for lineIdx in range(len(content)):
-        local_d = {}
-        for key, val in regex_dict.items():
-            # apply regex to extract field content
-            el = (
-                findall_regex(pattern=val, target=content[lineIdx])[0]
-                if match_regex(pattern=val, target=content[lineIdx])
-                else ""
-            )
-            # remove unnecessary chars
-            el = re.sub(pattern=sub_regex_dict[key], repl="", string=el) if el else ""
+    content_len: int = len(content)
+    with alive_bar(total=content_len, title="", lenght=60, bar="smooth") as bar:
+        for lineIdx in range(content_len):
+            local_d = {}
+            for key, val in regex_dict.items():
+                # apply regex to extract field content
+                el = (
+                    findall_regex(pattern=val, target=content[lineIdx])[0]
+                    if match_regex(pattern=val, target=content[lineIdx])
+                    else ""
+                )
+                # remove unnecessary chars
+                el = (
+                    re.sub(pattern=sub_regex_dict[key], repl="", string=el)
+                    if el
+                    else ""
+                )
 
-            el = el.strip()
-            # in case of "func" field, remove leading and trailing dquotes
-            el = el[1:-1] if (el and key == "func") else el
-            # in case of "cwe" field, check if there are more codes
-            if key == "cwe":
-                el = [e[1:-1] for e in el.split(sep=",")] if ("," in el) else el[1:-1]
+                el = el.strip()
+                # in case of "func" field, remove leading and trailing dquotes
+                el = el[1:-1] if (el and key == "func") else el
+                # in case of "cwe" field, check if there are more codes
+                if key == "cwe":
+                    el = (
+                        [e[1:-1] for e in el.split(sep=",")]
+                        if ("," in el)
+                        else el[1:-1]
+                    )
 
-            local_d[key] = el
+                local_d[key] = el
 
-        json_dict[lineIdx] = local_d
+            json_dict[lineIdx] = local_d
+            bar()
 
     return json_dict
 
@@ -186,12 +204,14 @@ def remove_unused_fields(
     localD: dict[str, str | list[str]] = {}
     ##
 
-    for k, v in dic.items():
-        localD = {}
-        for key in v.keys():
-            if key in lop:
-                localD[key] = v[key]
-        shrinkedDict[k] = localD
+    with animate.Loader(desc="Removing unnecessary keys", end="Key removal completed!"):
+        for k, v in dic.items():
+            localD = {}
+            for key in v.keys():
+                if key in lop:
+                    localD[key] = v[key]
+            shrinkedDict[k] = localD
+
     return shrinkedDict
 
 
@@ -199,6 +219,8 @@ def write_json(dic: dict, output: str) -> None:
     output, _ = os.path.splitext(p=output)
     with open(f"{output}.json", "w") as outfile:
         json.dump(obj=dic, fp=outfile, indent=2, sort_keys=True)
+
+    logger.debug(msg="Processed dictionary successfully saved as JSON file")
 
 
 def create_empty_tmp_source():
@@ -209,11 +231,19 @@ def create_empty_tmp_source():
 
 
 def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
+    total_len: int = len(dic.values())
     with open(file=filepth, mode="w+") as f:
-        for v in dic.values():
-            f.write(str(v["func"]))  # casting to avoid linting issues
-            f.write("\n")
-            f.write("/*" + "*" * 20 + "*/")
+        with alive_bar(
+            total=total_len,
+            title="Populating tmp.c file with function bodies ...",
+            lenght=60,
+            bar="smooth",
+        ) as bar:
+            for v in dic.values():
+                f.write(str(v["func"]))  # casting to avoid linting issues
+                f.write("\n")
+                f.write("/*" + "*" * 20 + "*/")
+                bar()
 
 
 def spawn_refactor(filepath: str) -> None:
@@ -250,19 +280,24 @@ def get_refactored_chunks(src_pth: str) -> list[str]:
     # split based on function separator (comment)
     loFuncBody = los.split(sep=("/*" + "*" * 20 + "*/"))
     # filter out all final "newline" char added by formatter and empty strings
-    loFuncBody = list(
-        filter(
-            None,
-            [
-                (
-                    l[:-1]
-                    if not match_regex(pattern=re.compile(pattern=r"^\s*"), target=l[0])
-                    else re.sub(pattern=r"^\s*", repl="", string=l[:-1])
-                )
-                for l in loFuncBody
-            ],
+    with animate.Loader(
+        desc="Retrieving refactored chunks", end="List of refactored chunks completed!"
+    ):
+        loFuncBody = list(
+            filter(
+                None,
+                [
+                    (
+                        l[:-1]
+                        if not match_regex(
+                            pattern=re.compile(pattern=r"^\s*"), target=l[0]
+                        )
+                        else re.sub(pattern=r"^\s*", repl="", string=l[:-1])
+                    )
+                    for l in loFuncBody
+                ],
+            )
         )
-    )
 
     return loFuncBody
 
@@ -271,8 +306,12 @@ def build_refactored_json(
     dic: dict[int, dict[str, str | list[str]]], src_pth: str
 ) -> dict[int, dict[str, str | list[str]]]:
     ref_chunks: list[str] = get_refactored_chunks(src_pth=src_pth)
-    for idx, k in enumerate(dic.keys()):
-        dic[k].update({"func": ref_chunks[idx]})
+    with animate.Loader(
+        desc="Updating dictionary with refactored function bodies",
+        end="Replacement done!",
+    ):
+        for idx, k in enumerate(dic.keys()):
+            dic[k].update({"func": ref_chunks[idx]})
 
     return dic
 
@@ -290,8 +329,8 @@ def rm_tmp_file(filepath: str) -> None:
 def add_desc_to_metadata(
     dic: dict[str, str | list[str]], llm
 ) -> dict[str, str | list[str]]:
-    # add an initial time delay to avoid resource echausted error
-    time.sleep(10)
+    # add an initial time delay to avoid resource exhausted error
+    # time.sleep(10)
     # input the function body and get description
     desc: str = llm.generate_description(dic["func"])
     dic.update({"fdesc": desc[1:-1]})
