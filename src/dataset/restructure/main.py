@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 
+from alive_progress import alive_bar
+
 import utils
-from log import logger
+from log import std_logger
 
 # from gemini import Gemini
 
@@ -17,29 +19,48 @@ class Builder:
         # self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
 
     def __filter_metadata_line(self, lineContent: str) -> str:
-        # remove tabs
-        lineContent = utils.remove_tabs(lineContent=lineContent)
-        # remove newline char
-        lineContent = utils.remove_newlines(lineContent=lineContent)
-        # substitute mutliple spaces with single space
-        lineContent = utils.remove_multiplespaces(lineContent=lineContent)
-        # remove "\"
-        lineContent = utils.remove_backslashes(lineContent=lineContent)
-        # # remove comments
-        lineContent = utils.remove_comments(lineContent=lineContent)
+        # line content is a string representing a line in the Diversevul.json file with all metadata information
+        # dictionary of "field_name" : "corpus" pairs
+        dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
 
-        return lineContent
+        # remove tabs from func body only: removing tabs should be pretty safe
+        dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
+        # remove '\"' chars
+        dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
+        # substitute mutliple spaces with single space
+        dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
+
+        # remove block and inline comments
+        # WARNING: order is important, first clear comments and then newline chars
+        dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
+
+        # substitute multiple newlines with single newline
+        dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
+        dof.update(
+            {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
+        )
+
+        return "{" + ",".join([item for item in dof.values()]) + "}"
 
     def __filter_file(self) -> list[str]:
-        contentCpy: list[str] = [
-            self.__filter_metadata_line(line) for line in self.__fileContent
-        ]
+        contentCpy: list[str] = []
+        with alive_bar(
+            total=len(self.__fileContent),
+            title="Fixing lines syntax",
+            length=60,
+            bar="smooth",
+        ) as bar:
+            for line in self.__fileContent:
+                contentCpy.append(self.__filter_metadata_line(line))
+                bar()
+
         return contentCpy
 
     def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
+        std_logger.debug(msg="Assembling metadata")
         lol: list[str] = self.__filter_file()  # list of lines
         # string organized as dictionary
-        logger.debug(msg="Creating dictionary dataset")
+        std_logger.debug(msg="Creating dictionary dataset")
         meta_d: dict[int, dict[str, str | list[str]]] = utils.create_func_metadatablock(
             content=lol
         )
@@ -60,19 +81,14 @@ class Builder:
         dic: dict[int, dict[str, str | list[str]]] = self.__assemble_metadata()
         # create empty temporary file to call "gnu indent refactor" upon
         utils.create_empty_tmp_source()
-        # populate temporary file with dictionary "func" fields content
-        utils.populate_tmp_file(filepth="tmp.c", dic=dic)
-        # call refactor on temporary file
-        utils.spawn_refactor(filepath="tmp.c")
         # substitute in "func" field refactored string version
-        dic = utils.build_refactored_json(dic=dic, src_pth="tmp.c")
+        dic = utils.build_refactored_json(dic=dic)
         # remove temp file and copy
         utils.rm_tmp_file(filepath="tmp.c")
-        # write pretty json
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
-        # pp(dic)
-        utils.write_json(dic=dic, output="divfix.json")
+        # save processed dataset as json
+        utils.write_json(dic=dic, output="DiverseVul_fixed.json")
 
 
 if __name__ == "__main__":

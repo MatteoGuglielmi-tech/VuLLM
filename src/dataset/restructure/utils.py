@@ -3,9 +3,10 @@ import os
 import re
 import subprocess
 
-import animate
 from alive_progress import alive_bar
-from log import logger
+
+import animate
+from log import std_logger
 
 # import time
 
@@ -31,6 +32,37 @@ def match_regex(pattern: str | re.Pattern, target: str) -> bool:
     return True if content else False
 
 
+def split_lineContent(lineContent: str) -> dict[str, str]:
+    d: dict[str, str] = {}
+    regex_dict = {
+        # extract "func": "...{ ... }"
+        "func": re.compile(pattern=r"\"func\".*}\""),
+        # extract "target": \d* "
+        "target": re.compile(pattern=r"\"target\"\s*:\s*\d*"),
+        # extract "cwe": [whatever is inside] "
+        "cwe": re.compile(pattern=r"\"cwe\"\s*:\s*\[.*\]"),
+        # extract "project": "prjname"
+        "project": re.compile(pattern=r"\"project\"\s*:\s*\"\w*\""),
+        # extract "commit_id": "alphanumeric"
+        "commit_id": re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*\""),
+        # extract "hash": "numeric"
+        "hash": re.compile(pattern=r"\"hash\"\s*:\s*\d*"),
+        # extract "size": "size"
+        "size": re.compile(pattern=r"\"size\"\s*:\s*\d*"),
+        # extract "message": "commit_message"
+        "message": re.compile(pattern=r"\"message\"\s*:\s*\".*\""),
+    }
+
+    for key, reg in regex_dict.items():
+        # extract block of metadata ("<field>" : "<body>")
+        content = findall_regex(pattern=reg, target=lineContent)
+        content = content if isinstance(content, str) else content[0]
+
+        d[key] = content
+
+    return d
+
+
 def remove_tabs(lineContent: str):
     # remove tabs in function body
     newlineRegEx: re.Pattern = re.compile(pattern=r"\\t")
@@ -39,29 +71,19 @@ def remove_tabs(lineContent: str):
     return lineContent
 
 
-def remove_newlines(lineContent: str) -> str:
+def remove_multiple_newlines(lineContent: str) -> str:
     # remove "\n" char in function body
-    if match_regex(pattern=r"\\n", target=lineContent):
+    if match_regex(pattern=r"(\\n){2,}", target=lineContent):
         lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
     if match_regex(pattern=r"\n", target=lineContent):
         lineContent = re.sub(pattern=r"\n", repl="", string=lineContent)
 
-    # do not remove newline char if we encountered "message" since it indicates we are at the
-    # end of the function metadata block. Let's keep division between function metadata
-    # if (matchedMessageFlag and match_regex(pattern=r"}\\n$", target=lineContent)):
-    #     matchedMessageFlag = False
-
-    # elif (not matchedMessageFlag) or (matchedMessageFlag and not match_regex(pattern=r"}\\n$", target=lineContent)):
-    # remove "newline" char in function body
-    # newlineRegEx: re.Pattern = re.compile(pattern=r"\n")
-    # lineContent = re.sub(pattern=newlineRegEx, repl='', string=lineContent)
-
-    return lineContent  # , matchedMessageFlag
+    return lineContent
 
 
-def remove_backslashes(lineContent: str) -> str:
-    obj: str | list[str] = findall_regex(pattern=r"\\", target=lineContent)
-    return lineContent if not obj else lineContent.strip().replace(obj[0], "")
+def remove_escaping_quotes(lineContent: str) -> str:
+    obj: str | list[str] = findall_regex(pattern=r"\\\"", target=lineContent)
+    return lineContent if not obj else lineContent.strip().replace(obj[0], '"')
 
 
 def remove_multiplespaces(lineContent: str) -> str:
@@ -77,13 +99,16 @@ def remove_comments(lineContent: str) -> str:
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
     # check for comments starting with // and match until the eol
-    commentRegEx = re.compile(pattern=r"//.*")
+    commentRegEx = re.compile(pattern=r"//.*?(?=\\n)")
 
-    loc: list[str] | str = (
-        findall_regex(pattern=commentAstRegEx, target=lineContent)
-        if match_regex(pattern=commentAstRegEx, target=lineContent)
-        else findall_regex(pattern=commentRegEx, target=lineContent)
-    )
+    # list of block comments
+    lobc: list[str] | str = findall_regex(pattern=commentAstRegEx, target=lineContent)
+    loc: list[str] | str = findall_regex(pattern=commentRegEx, target=lineContent)
+
+    # findall_regex(pattern=commentRegEx, target=lineContent)
+    if lobc:
+        for item in lobc:
+            lineContent = lineContent.replace(item, "")
     if loc:
         for item in loc:
             lineContent = lineContent.replace(item, "")
@@ -158,7 +183,12 @@ def create_func_metadatablock(
     # merge blocks in between "{" and "}\n"
     # iterate in the list and start merging to form blocks
     content_len: int = len(content)
-    with alive_bar(total=content_len, title="", lenght=60, bar="smooth") as bar:
+    with alive_bar(
+        total=content_len,
+        title="Creating valid datastructure (JSON)",
+        length=60,
+        bar="smooth",
+    ) as bar:
         for lineIdx in range(content_len):
             local_d = {}
             for key, val in regex_dict.items():
@@ -202,15 +232,18 @@ def remove_unused_fields(
     # needed because during iteration it is not possible to delete elements
     shrinkedDict: dict[int, dict[str, str | list[str]]] = {}
     localD: dict[str, str | list[str]] = {}
-    ##
-
-    with animate.Loader(desc="Removing unnecessary keys", end="Key removal completed!"):
+    ##############################
+    dic_len: int = len(dic.keys())
+    with alive_bar(
+        total=dic_len, title="Removing unused fields -> ", length=60, bar="smooth"
+    ) as bar:
         for k, v in dic.items():
             localD = {}
             for key in v.keys():
                 if key in lop:
                     localD[key] = v[key]
             shrinkedDict[k] = localD
+            bar()
 
     return shrinkedDict
 
@@ -220,33 +253,45 @@ def write_json(dic: dict, output: str) -> None:
     with open(f"{output}.json", "w") as outfile:
         json.dump(obj=dic, fp=outfile, indent=2, sort_keys=True)
 
-    logger.debug(msg="Processed dictionary successfully saved as JSON file")
+    std_logger.debug(msg="Processed dictionary successfully saved as JSON file")
 
 
 def create_empty_tmp_source():
     with open("tmp.c", "w") as _:
         pass
 
-    logger.debug("Tmp empty file created successfully")
+    std_logger.debug("Tmp empty file created successfully")
 
 
-def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
-    total_len: int = len(dic.values())
-    with open(file=filepth, mode="w+") as f:
-        with alive_bar(
-            total=total_len,
-            title="Populating tmp.c file with function bodies ...",
-            lenght=60,
-            bar="smooth",
-        ) as bar:
-            for v in dic.values():
-                f.write(str(v["func"]))  # casting to avoid linting issues
-                f.write("\n")
-                f.write("/*" + "*" * 20 + "*/")
-                bar()
+# def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
+def populate_tmp_file(func_str_body: str) -> None:
+    # total_len: int = len(dic.values())
+    # with open(file=filepth, mode="w+") as f:
+    # with alive_bar(
+    #     total=total_len,
+    #     title="Populating tmp.c file with function bodies ...",
+    #     length=60,
+    #     bar="smooth",
+    # ) as bar:
+    # for v in dic.values():
+    #     f.write(str(v["func"]))  # casting to avoid linting issues
+    #     f.write("\n")
+    #     f.write("/*" + "*" * 20 + "*/")
+    #     bar()
+
+    regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
+    function_name: str = re.findall(pattern=regex_functionName, string=func_str_body)[0]
+
+    std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
+
+    # override content with current function
+    with open(file="tmp.c", mode="w") as f:
+        f.write(func_str_body)
 
 
 def spawn_refactor(filepath: str) -> None:
+    std_logger.debug("GNU Indent spawned")
+    # with animate.Loader(desc="Refactoring "):
     exit_code_obj = subprocess.run(
         args=[
             "indent",
@@ -267,51 +312,35 @@ def spawn_refactor(filepath: str) -> None:
         text=True,
     )
     if exit_code_obj.returncode:
-        logger.error(exit_code_obj.stderr)
-    else:
-        logger.info("Refactor successfully achieved")
+        std_logger.error(exit_code_obj.stderr)
+    # else:
+    # std_logger.info("Refactor successfully achieved")
 
 
-def get_refactored_chunks(src_pth: str) -> list[str]:
-    loFuncBody: list[str] = []
-    with open(file=src_pth, mode="r") as f:
-        los: str = f.read()
+def read_file_content_as_str(filepath: str) -> str:
+    with open(file=filepath, mode="r") as f:
+        file_content: str = f.read()
 
-    # split based on function separator (comment)
-    loFuncBody = los.split(sep=("/*" + "*" * 20 + "*/"))
-    # filter out all final "newline" char added by formatter and empty strings
-    with animate.Loader(
-        desc="Retrieving refactored chunks", end="List of refactored chunks completed!"
-    ):
-        loFuncBody = list(
-            filter(
-                None,
-                [
-                    (
-                        l[:-1]
-                        if not match_regex(
-                            pattern=re.compile(pattern=r"^\s*"), target=l[0]
-                        )
-                        else re.sub(pattern=r"^\s*", repl="", string=l[:-1])
-                    )
-                    for l in loFuncBody
-                ],
-            )
-        )
-
-    return loFuncBody
+    return file_content
 
 
 def build_refactored_json(
-    dic: dict[int, dict[str, str | list[str]]], src_pth: str
+    dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
 ) -> dict[int, dict[str, str | list[str]]]:
-    ref_chunks: list[str] = get_refactored_chunks(src_pth=src_pth)
-    with animate.Loader(
-        desc="Updating dictionary with refactored function bodies",
-        end="Replacement done!",
-    ):
+    refactored_chunk: str = ""
+    content_len: int = len(dic.keys())
+    with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
         for idx, k in enumerate(dic.keys()):
-            dic[k].update({"func": ref_chunks[idx]})
+            # str() casting to avoid linting error
+            # populate temporary file with current "func" field content
+            populate_tmp_file(func_str_body=str(dic[idx]["func"]))
+            # spawn refactor on just added function body
+            spawn_refactor(filepath=src_pth)
+            refactored_chunk = read_file_content_as_str(filepath=src_pth)
+            dic[k].update({"func": refactored_chunk})
+            # if idx == 18:
+            # exit()
+            bar()
 
     return dic
 
@@ -321,9 +350,9 @@ def rm_tmp_file(filepath: str) -> None:
         args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
     )
     if exit_code_obj.returncode:
-        logger.error(exit_code_obj.stderr)
+        std_logger.error(exit_code_obj.stderr)
     else:
-        logger.info("Tmp file removed successfully")
+        std_logger.info("Tmp file removed successfully")
 
 
 def add_desc_to_metadata(
