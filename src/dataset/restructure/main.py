@@ -14,7 +14,6 @@ from log import std_logger
 class Builder:
     def __post_init__(self):
         self.__fileContent: list[str] = utils.read_json()
-        # self.matchedMessageFlag: bool = False
         # self.gemini = Gemini(model_name="gemini-1.5-pro")
         # self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
 
@@ -22,18 +21,15 @@ class Builder:
         # line content is a string representing a line in the Diversevul.json file with all metadata information
         # dictionary of "field_name" : "corpus" pairs
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
-
         # remove tabs from func body only: removing tabs should be pretty safe
         dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
         # remove '\"' chars
         dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
         # substitute mutliple spaces with single space
         dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
-
         # remove block and inline comments
         # WARNING: order is important, first clear comments and then newline chars
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
-
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
         dof.update(
@@ -51,7 +47,7 @@ class Builder:
             bar="smooth",
         ) as bar:
             for line in self.__fileContent:
-                contentCpy.append(self.__filter_metadata_line(line))
+                contentCpy.append(self.__filter_metadata_line(lineContent=line))
                 bar()
 
         return contentCpy

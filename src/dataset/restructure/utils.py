@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+from ast import pattern
 
 from alive_progress import alive_bar
 
@@ -36,7 +37,8 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
     d: dict[str, str] = {}
     regex_dict = {
         # extract "func": "...{ ... }"
-        "func": re.compile(pattern=r"\"func\".*}\""),
+        # .*? is necessary since some functions have comments at the end
+        "func": re.compile(pattern=r"\"func\".*}.*?\""),
         # extract "target": \d* "
         "target": re.compile(pattern=r"\"target\"\s*:\s*\d*"),
         # extract "cwe": [whatever is inside] "
@@ -72,11 +74,12 @@ def remove_tabs(lineContent: str):
 
 
 def remove_multiple_newlines(lineContent: str) -> str:
-    # remove "\n" char in function body
-    if match_regex(pattern=r"(\\n){2,}", target=lineContent):
+    # remove "\\n" within string
+    if match_regex(pattern=r"\\\\n", target=lineContent):
+        lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
+    # remove "\n" within string
+    if match_regex(pattern=r"\\n", target=lineContent):
         lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
-    if match_regex(pattern=r"\n", target=lineContent):
-        lineContent = re.sub(pattern=r"\n", repl="", string=lineContent)
 
     return lineContent
 
@@ -134,7 +137,7 @@ def create_func_metadatablock(
     el: str | list[str]
 
     # extract "func": ".... }"
-    funcRegEx = re.compile(pattern=r"\"func\".*}\"")
+    funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"")
     subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
     # extract "target": \d* "
     targetRegEx = re.compile(pattern=r"\"target\"\s*:\s*\d*")
@@ -265,22 +268,17 @@ def create_empty_tmp_source():
 
 # def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
 def populate_tmp_file(func_str_body: str) -> None:
-    # total_len: int = len(dic.values())
-    # with open(file=filepth, mode="w+") as f:
-    # with alive_bar(
-    #     total=total_len,
-    #     title="Populating tmp.c file with function bodies ...",
-    #     length=60,
-    #     bar="smooth",
-    # ) as bar:
-    # for v in dic.values():
-    #     f.write(str(v["func"]))  # casting to avoid linting issues
-    #     f.write("\n")
-    #     f.write("/*" + "*" * 20 + "*/")
-    #     bar()
-
     regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
-    function_name: str = re.findall(pattern=regex_functionName, string=func_str_body)[0]
+    function_name: list[str] | str = re.findall(
+        pattern=regex_functionName, string=func_str_body
+    )
+    try:
+        function_name = (
+            function_name if isinstance(function_name, str) else function_name[0]
+        )
+    except:
+        if match_regex(pattern=r"^\\n", target=func_str_body):
+            func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
 
     std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
 
@@ -289,7 +287,7 @@ def populate_tmp_file(func_str_body: str) -> None:
         f.write(func_str_body)
 
 
-def spawn_refactor(filepath: str) -> None:
+def spawn_refactor(filepath: str) -> int:
     std_logger.debug("GNU Indent spawned")
     # with animate.Loader(desc="Refactoring "):
     exit_code_obj = subprocess.run(
@@ -313,8 +311,10 @@ def spawn_refactor(filepath: str) -> None:
     )
     if exit_code_obj.returncode:
         std_logger.error(exit_code_obj.stderr)
-    # else:
-    # std_logger.info("Refactor successfully achieved")
+    else:
+        std_logger.info("Refactor successful")
+
+    return exit_code_obj.returncode
 
 
 def read_file_content_as_str(filepath: str) -> str:
@@ -328,19 +328,29 @@ def build_refactored_json(
     dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
 ) -> dict[int, dict[str, str | list[str]]]:
     refactored_chunk: str = ""
+    faulty_refactor: list[int] = []
     content_len: int = len(dic.keys())
     with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
         for idx, k in enumerate(dic.keys()):
             # str() casting to avoid linting error
             # populate temporary file with current "func" field content
-            populate_tmp_file(func_str_body=str(dic[idx]["func"]))
+            if populate_tmp_file(func_str_body=str(dic[idx]["func"])):
+                faulty_refactor.append(idx)
             # spawn refactor on just added function body
             spawn_refactor(filepath=src_pth)
             refactored_chunk = read_file_content_as_str(filepath=src_pth)
+            try:
+                refactored_chunk = (
+                    refactored_chunk
+                    if not refactored_chunk[-1] == "\n"
+                    else refactored_chunk[:-1]
+                )
+            except:
+                refactored_chunk = refactored_chunk
             dic[k].update({"func": refactored_chunk})
-            # if idx == 18:
-            # exit()
             bar()
+
+    std_logger.error(f"Refactor not worked in the following indexes: {faulty_refactor}")
 
     return dic
 
