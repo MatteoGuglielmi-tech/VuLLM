@@ -137,7 +137,7 @@ def create_func_metadatablock(
     el: str | list[str]
 
     # extract "func": ".... }"
-    funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"")
+    funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")")
     subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
     # extract "target": \d* "
     targetRegEx = re.compile(pattern=r"\"target\"\s*:\s*\d*")
@@ -268,6 +268,7 @@ def create_empty_tmp_source():
 
 # def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
 def populate_tmp_file(func_str_body: str) -> None:
+    print(func_str_body)
     regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
     function_name: list[str] | str = re.findall(
         pattern=regex_functionName, string=func_str_body
@@ -328,16 +329,21 @@ def build_refactored_json(
     dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
 ) -> dict[int, dict[str, str | list[str]]]:
     refactored_chunk: str = ""
-    faulty_refactor: list[int] = []
+    # faulty_refactor: list[int] = []
     content_len: int = len(dic.keys())
     with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
         for idx, k in enumerate(dic.keys()):
             # str() casting to avoid linting error
             # populate temporary file with current "func" field content
-            if populate_tmp_file(func_str_body=str(dic[idx]["func"])):
-                faulty_refactor.append(idx)
+            populate_tmp_file(func_str_body=str(dic[idx]["func"]))
+
             # spawn refactor on just added function body
-            spawn_refactor(filepath=src_pth)
+            if spawn_refactor(filepath=src_pth):
+                std_logger.critical(
+                    msg="Problem encountered in refactoring current function"
+                )
+                pause_exection()
+
             refactored_chunk = read_file_content_as_str(filepath=src_pth)
             try:
                 refactored_chunk = (
@@ -350,9 +356,13 @@ def build_refactored_json(
             dic[k].update({"func": refactored_chunk})
             bar()
 
-    std_logger.error(f"Refactor not worked in the following indexes: {faulty_refactor}")
+    # std_logger.error(f"Refactor not worked in the following indexes: {faulty_refactor}")
 
     return dic
+
+
+def pause_exection():
+    input("Press enter to continue ...")
 
 
 def rm_tmp_file(filepath: str) -> None:
