@@ -10,7 +10,7 @@ Cpp11BracedListStyle: true
 AlignAfterOpenBracket: Align
 AlignArrayOfStructures: Right
 BreakBeforeBraces: Custom
-BraceWrapping: 
+BraceWrapping:
   AfterEnum: false
   AfterStruct: false
   AfterClass: false
@@ -18,7 +18,7 @@ BraceWrapping:
   AfterUnion: false
   AfterExternBlock: false
   BeforeCatch: false
-  BeforeElse: false 
+  BeforeElse: false
   BeforeWhile: false
   SplitEmptyFunction: false
   SplitEmptyRecord: false
@@ -30,21 +30,18 @@ BreakArrays: false
 BreakFunctionDefinitionParameters: false
 BreakStringLiterals: true
 IndentCaseLabels: true
-# IndentExportBlock: true # present from clangs 21
-# IndentExternalBlock: true # present from clangs 21
+# IndentExportBlock: true  # present from clangs 21
+# IndentExternalBlock: true  # present from clangs 21
 IndentGotoLabels: true
 IndentPPDirectives: BeforeHash
-MacroBlockBegin: "^NS_MAP_BEGIN|\
-NS_TABLE_HEAD$"
-MacroBlockEnd: "^\
-NS_MAP_END|\
-NS_TABLE_.*_END$"
+MacroBlockBegin: ^NS_MAP_BEGIN|NS_TABLE_HEAD$
+MacroBlockEnd: ^NS_MAP_END|NS_TABLE_.*_END$
 PointerAlignment: Right
 QualifierAlignment: Custom
-QualifierOrder: [inline, static, volatile, const, type ]
+QualifierOrder: [inline, static, volatile, const, type]
 ReferenceAlignment: Right
 RemoveBracesLLVM: false
-# RemoveEmptyLinesInUnwrappedLines: true # present from clangd 21
+# RemoveEmptyLinesInUnwrappedLines: true  # present from clangd 21
 RemoveParentheses: ReturnStatement
 RemoveSemicolon: true
 SeparateDefinitionBlocks: Leave
@@ -65,5 +62,3 @@ SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
 SpacesInAngles: false
 SpacesInParens: Never
-
-
