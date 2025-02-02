@@ -30,8 +30,8 @@ BreakArrays: false
 BreakFunctionDefinitionParameters: false
 BreakStringLiterals: true
 IndentCaseLabels: true
-# IndentExportBlock: true  # present from clangs 21
-# IndentExternalBlock: true  # present from clangs 21
+# IndentExportBlock: true  # present from clangd 21
+# IndentExternalBlock: true  # present from clangd 21
 IndentGotoLabels: true
 IndentPPDirectives: BeforeHash
 MacroBlockBegin: ^NS_MAP_BEGIN|NS_TABLE_HEAD$
