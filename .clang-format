@@ -28,6 +28,7 @@ BreakAdjacentStringLiterals: false
 BreakAfterReturnType: All
 BreakArrays: false
 BreakFunctionDefinitionParameters: false
+# BinPackParameters: BinPack
 BreakStringLiterals: true
 IndentCaseLabels: true
 # IndentExportBlock: true  # present from clangd 21
