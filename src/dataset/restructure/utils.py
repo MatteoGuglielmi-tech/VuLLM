@@ -2,18 +2,19 @@ import json
 import os
 import re
 import subprocess
-from ast import pattern
 
 from alive_progress import alive_bar
 
 import animate
 from log import std_logger
 
+# from itertools import zip_longest
+
+
 # import time
 
-
-# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
+# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
@@ -38,7 +39,7 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
-        "func": re.compile(pattern=r"\"func\".*}.*?\""),
+        "func": re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")"),
         # extract "target": \d* "
         "target": re.compile(pattern=r"\"target\"\s*:\s*\d*"),
         # extract "cwe": [whatever is inside] "
@@ -74,12 +75,46 @@ def remove_tabs(lineContent: str):
 
 
 def remove_multiple_newlines(lineContent: str) -> str:
+    hashIfRegex: re.Pattern = re.compile(pattern=r"#if")
+    hashDefineRegex: re.Pattern = re.compile(pattern=r"#define")
+    hashEndIfDefineRegex: re.Pattern = re.compile(pattern=r"#endif")
+    strBlocks: list[str]
+
     # remove "\\n" within string
     if match_regex(pattern=r"\\\\n", target=lineContent):
         lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
-    # remove "\n" within string
-    if match_regex(pattern=r"\\n", target=lineContent):
-        lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
+
+    # TODO:
+    # 1. parse if some pre-processor instructions are there
+    if not (
+        match_regex(pattern=hashDefineRegex, target=lineContent)
+        or match_regex(pattern=hashIfRegex, target=lineContent)
+        or match_regex(pattern=hashEndIfDefineRegex, target=lineContent)
+    ):
+        if match_regex(pattern=r"\\n", target=lineContent):
+            lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
+
+        return lineContent
+
+    # 2. split line based on "\n" if pre-processor macros are present
+    strBlocks = lineContent.split(sep="\\n")
+
+    # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
+    strBlocks = [
+        (
+            s
+            if not (
+                match_regex(pattern=hashDefineRegex, target=s)
+                or match_regex(pattern=hashIfRegex, target=s)
+                or match_regex(pattern=hashEndIfDefineRegex, target=s)
+            )
+            else "\\n" + s + "\\n"
+        )
+        for s in strBlocks
+    ]
+
+    # 4. merge blocks together
+    lineContent = " ".join(strBlocks)
 
     return lineContent
 
@@ -201,7 +236,7 @@ def create_func_metadatablock(
                     if match_regex(pattern=val, target=content[lineIdx])
                     else ""
                 )
-                # remove unnecessary chars
+                # remove field name
                 el = (
                     re.sub(pattern=sub_regex_dict[key], repl="", string=el)
                     if el
@@ -228,7 +263,7 @@ def create_func_metadatablock(
 
 
 def remove_unused_fields(
-    dic: dict[int, dict[str, str | list[str]]]
+    dic: dict[int, dict[str, str | list[str]]],
 ) -> dict[int, dict[str, str | list[str]]]:
     lop: list[str] = ["func", "target", "cwe"]  # list of keys to preserve
 
@@ -273,49 +308,65 @@ def populate_tmp_file(func_str_body: str) -> None:
     function_name: list[str] | str = re.findall(
         pattern=regex_functionName, string=func_str_body
     )
-    try:
+    func_str_body_blocks: list[str]
+
+    if function_name:
         function_name = (
             function_name if isinstance(function_name, str) else function_name[0]
         )
-    except:
-        if match_regex(pattern=r"^\\n", target=func_str_body):
-            func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
+
+    if match_regex(pattern=r"^\\n", target=func_str_body):
+        func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
 
     std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
 
+    # at this point, the char "\n" can only be found where pre-processor instructions are
+    # split based on that character and enforce new line to avoid refactoring error
     # override content with current function
     with open(file="tmp.c", mode="w") as f:
-        f.write(func_str_body)
+        try:
+            f.writelines("\n".join(func_str_body.split(sep="\\n")))
+        except:
+            f.write(func_str_body)
 
 
 def spawn_refactor(filepath: str) -> int:
     std_logger.debug("GNU Indent spawned")
-    # with animate.Loader(desc="Refactoring "):
-    exit_code_obj = subprocess.run(
-        args=[
-            "indent",
-            "-brf",
-            "-nbfda",
-            "-nbfde",
-            "-nut",
-            "-linux",
-            "-as",
-            "-i4",
-            "-nbad",
-            "-nhnl",
-            "-nbap",
-            "-l1000",
-            f"{filepath}",
-        ],
-        capture_output=True,
-        text=True,
+    # clang-format provided by clangd.
+    # Using nvim as editor, I've installed it via Mason
+    # for some reason, subprocess cannot run clang-format
+    exit_code = os.system(
+        command=f"~/.local/share/nvim/mason/bin/clang-format {filepath} >> {filepath}"
     )
-    if exit_code_obj.returncode:
-        std_logger.error(exit_code_obj.stderr)
-    else:
-        std_logger.info("Refactor successful")
 
-    return exit_code_obj.returncode
+    # GNU Indent
+    # args=[
+    #     "indent",
+    #     "-brf",
+    #     "-nbfda",
+    #     "-nbfde",
+    #     "-nut",
+    #     "-linux",
+    #     "-as",
+    #     "-i4",
+    #     "-nbad",
+    #     "-nhnl",
+    #     "-nbap",
+    #     "-l80",
+    #     "-cdw",
+    #     "-cli4",
+    #     f"{filepath}",
+    # ],
+    # capture_output=True,
+    # text=True,
+    # )
+
+    if exit_code != 0:
+        std_logger.error(msg="Some error has occured")
+    else:
+        std_logger.info(msg="Refactor successfully accomplished")
+
+    return exit_code
 
 
 def read_file_content_as_str(filepath: str) -> str:
@@ -366,13 +417,16 @@ def pause_exection():
 
 
 def rm_tmp_file(filepath: str) -> None:
-    exit_code_obj = subprocess.run(
-        args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
-    )
-    if exit_code_obj.returncode:
-        std_logger.error(exit_code_obj.stderr)
-    else:
-        std_logger.info("Tmp file removed successfully")
+    try:
+        exit_code_obj = subprocess.run(
+            args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
+        )
+    except:
+        return
+    # if exit_code_obj.returncode:
+    #     std_logger.error(exit_code_obj.stderr)
+    # else:
+    # std_logger.info("Tmp file removed successfully")
 
 
 def add_desc_to_metadata(
