@@ -38,7 +38,6 @@ class Builder:
         )
 
         return dof
-        # return "{" + ",".join([item for item in dof.values()]) + "}"
 
     def __filter_file(self) -> list[dict[str, str]]:
         contentCpy: list[dict[str, str]] = []
@@ -67,12 +66,12 @@ class Builder:
 
         return meta_d
 
-    # def __update_json_with_funcdesc(
-    #     self, dic: dict[int, dict[str, str | list[str]]]
-    # ) -> dict[int, dict[str, str | list[str]]]:
-    #     for k in dic.keys():
-    #         dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
-    #     return dic
+    def __update_json_with_funcdesc(
+        self, dic: dict[int, dict[str, str | list[str]]]
+    ) -> dict[int, dict[str, str | list[str]]]:
+        for k in dic.keys():
+            dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
+        return dic
 
     def run(self):
         # translate string into valid json structure
@@ -82,7 +81,7 @@ class Builder:
         # substitute in "func" field refactored string version
         dic = utils.build_refactored_json(dic=dic)
         # remove temp file and copy
-        # utils.rm_tmp_file(filepath="tmp.c")
+        utils.rm_tmp_file(filepath="tmp.c")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
         # save processed dataset as json

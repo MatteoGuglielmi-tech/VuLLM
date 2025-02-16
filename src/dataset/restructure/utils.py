@@ -8,13 +8,8 @@ from alive_progress import alive_bar
 import animate
 from log import std_logger
 
-# from itertools import zip_longest
-
-
-# import time
-
-# PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
-PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
+# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
@@ -203,41 +198,22 @@ def create_func_metadatablock(
     el: str | list[str]
 
     # extract "func": ".... }"
-    # funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")")
     subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
     # extract "target": \d* "
-    # targetRegEx = re.compile(pattern=r"\"target\"\s*:\s*\d*")
     subTargetRegEx = re.compile(pattern=r"\"target\"\s*:\s*")
     # extract "cwe": [whatever is inside] "
-    # cweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[.*?(?=\])")
     subCweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[")
-
     # extract "project": "prjname"
-    # projectRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"\w*(?=\")")
     subPrjRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"")
     # extract "commit_id": "alphanumeric"
-    # commitidRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*(?=\")")
     subCommitRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"")
     # extract "hash": "numeric"
-    # hashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*\d*")
     subHashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*")
     # extract "size": "size"
-    # sizeRegEx = re.compile(pattern=r"\"size\"\s*:\s*\d*")
     subSizeRegEx = re.compile(pattern=r"\"size\"\s*:")
     # extract "message": "commit_message"
-    # messageRegEx = re.compile(pattern=r"\"message\"\s*:\s*\".*(?=\")")
     subMsgRegEx = re.compile(pattern=r"\"message\"\s*:\s*\"")
 
-    # regex_dict = {
-    #     "func": funcRegEx,
-    #     "target": targetRegEx,
-    #     "cwe": cweRegEx,
-    #     "project": projectRegEx,
-    #     "commit_id": commitidRegEx,
-    #     "hash": hashRegEx,
-    #     "size": sizeRegEx,
-    #     "message": messageRegEx,
-    # }
     sub_regex_dict = {
         "func": subFuncRegEx,
         "target": subTargetRegEx,
@@ -261,12 +237,6 @@ def create_func_metadatablock(
         for lineIdx in range(content_len):
             local_d = {}
             for key in content[lineIdx].keys():
-                # # apply regex to extract field content
-                # el = (
-                #     findall_regex(pattern=val, target=content[lineIdx])[0]
-                #     if match_regex(pattern=val, target=content[lineIdx])
-                #     else ""
-                # )
                 # remove field name
                 el = re.sub(
                     pattern=sub_regex_dict[key], repl="", string=content[lineIdx][key]
@@ -361,7 +331,6 @@ def spawn_refactor(filepath: str) -> int:
     # clang-format provided by clangd.
     # Using nvim as editor, I've installed it via Mason
     # for some reason, subprocess cannot run clang-format
-
     exit_code = os.system(
         command=f"~/.local/share/nvim/mason/bin/clang-format -i {filepath}"
     )
@@ -385,7 +354,6 @@ def build_refactored_json(
     dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
 ) -> dict[int, dict[str, str | list[str]]]:
     refactored_chunk: str = ""
-    # faulty_refactor: list[int] = []
     content_len: int = len(dic.keys())
     with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
         for idx, k in enumerate(dic.keys()):
@@ -412,8 +380,6 @@ def build_refactored_json(
             dic[k].update({"func": refactored_chunk})
             bar()
 
-    # std_logger.error(f"Refactor not worked in the following indexes: {faulty_refactor}")
-
     return dic
 
 
@@ -428,10 +394,6 @@ def rm_tmp_file(filepath: str) -> None:
         )
     except:
         return
-    # if exit_code_obj.returncode:
-    #     std_logger.error(exit_code_obj.stderr)
-    # else:
-    # std_logger.info("Tmp file removed successfully")
 
 
 def add_desc_to_metadata(
