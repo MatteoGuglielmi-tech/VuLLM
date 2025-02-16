@@ -13,8 +13,8 @@ from log import std_logger
 
 # import time
 
-PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
-# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+# PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
+PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
@@ -34,18 +34,29 @@ def match_regex(pattern: str | re.Pattern, target: str) -> bool:
     return True if content else False
 
 
+def replace(target: str, old: str, new: str) -> str:
+    return target.replace(old, new)
+
+
 def split_lineContent(lineContent: str) -> dict[str, str]:
+    func_check_closing_bracket: re.Pattern = re.compile(
+        pattern=r"\"func\".*}.*?}\"(?=.*\"target\")"
+    )
+    func_check_syntax_block_comment: re.Pattern = re.compile(
+        pattern=r"(?<=\")\s+.*?\*/"
+    )
+
     d: dict[str, str] = {}
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
-        "func": re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")"),
+        "func": re.compile(pattern=r"\"func\".*\"(?=.*\"target\")"),
         # extract "target": \d* "
         "target": re.compile(pattern=r"\"target\"\s*:\s*\d*"),
         # extract "cwe": [whatever is inside] "
         "cwe": re.compile(pattern=r"\"cwe\"\s*:\s*\[.*\]"),
         # extract "project": "prjname"
-        "project": re.compile(pattern=r"\"project\"\s*:\s*\"\w*\""),
+        "project": re.compile(pattern=r"\"project\"\s*:\s*\"\w*\W*?\w*\""),
         # extract "commit_id": "alphanumeric"
         "commit_id": re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*\""),
         # extract "hash": "numeric"
@@ -60,6 +71,20 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         # extract block of metadata ("<field>" : "<body>")
         content = findall_regex(pattern=reg, target=lineContent)
         content = content if isinstance(content, str) else content[0]
+
+        if key == "func":
+            if not match_regex(pattern=func_check_closing_bracket, target=content):
+                # adding closing braket at the end of the function
+                content = content[:-1] + "}" + '"'
+            if match_regex(pattern=func_check_syntax_block_comment, target=content):
+                comment_to_correct = findall_regex(
+                    pattern=func_check_syntax_block_comment, target=content
+                )[0]
+                content = replace(
+                    target=content,
+                    old=comment_to_correct,
+                    new="/*" + comment_to_correct,
+                )
 
         d[key] = content
 
@@ -81,10 +106,15 @@ def remove_multiple_newlines(lineContent: str) -> str:
     strBlocks: list[str]
 
     # remove "\\n" within string
+    # WARN: here \\\\n is used to escape the new line character inside a string
+    # since it is not worrying for the application, this specific char has been removed
     if match_regex(pattern=r"\\\\n", target=lineContent):
-        lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
+        lineContent = re.sub(
+            pattern=r"\\\\n",
+            repl="",
+            string=lineContent,
+        )
 
-    # TODO:
     # 1. parse if some pre-processor instructions are there
     if not (
         match_regex(pattern=hashDefineRegex, target=lineContent)
@@ -92,7 +122,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
         or match_regex(pattern=hashEndIfDefineRegex, target=lineContent)
     ):
         if match_regex(pattern=r"\\n", target=lineContent):
-            lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
+            lineContent = re.sub(pattern=r"\\n", repl="", string=lineContent)
 
         return lineContent
 
@@ -120,8 +150,17 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
 
 def remove_escaping_quotes(lineContent: str) -> str:
-    obj: str | list[str] = findall_regex(pattern=r"\\\"", target=lineContent)
-    return lineContent if not obj else lineContent.strip().replace(obj[0], '"')
+    # INFO: the following regex are used to understand if the double
+    # quotes are needed or not. In particular, they are needed if used
+    # to escape quotes when inside functions like printf
+    opening_quotes: re.Pattern = re.compile(pattern=r"(?<=,|\()\s*\\\"\s*")
+    closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\))")
+
+    # if no matches, lineContent is returned unchanged
+    modified_line: str = re.sub(pattern=opening_quotes, repl='"', string=lineContent)
+    modified_line = re.sub(pattern=closing_quotes, repl='"', string=modified_line)
+
+    return modified_line
 
 
 def remove_multiplespaces(lineContent: str) -> str:
@@ -137,19 +176,10 @@ def remove_comments(lineContent: str) -> str:
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
     # check for comments starting with // and match until the eol
-    commentRegEx = re.compile(pattern=r"//.*?(?=\\n)")
+    commentRegEx = re.compile(pattern=r"(?<=\(|\)|{|}|;)\s*//.*?(?=\\n)")
 
-    # list of block comments
-    lobc: list[str] | str = findall_regex(pattern=commentAstRegEx, target=lineContent)
-    loc: list[str] | str = findall_regex(pattern=commentRegEx, target=lineContent)
-
-    # findall_regex(pattern=commentRegEx, target=lineContent)
-    if lobc:
-        for item in lobc:
-            lineContent = lineContent.replace(item, "")
-    if loc:
-        for item in loc:
-            lineContent = lineContent.replace(item, "")
+    lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
+    lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
 
     return lineContent
 
@@ -165,48 +195,49 @@ def read_json() -> list[str]:
 
 
 def create_func_metadatablock(
-    content: list[str],
+    content: list[dict[str, str]],
 ) -> dict[int, dict[str, str | list[str]]]:
+
     json_dict: dict[int, dict[str, str | list[str]]] = {}
     local_d: dict[str, str | list[str]] = {}
     el: str | list[str]
 
     # extract "func": ".... }"
-    funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")")
+    # funcRegEx = re.compile(pattern=r"\"func\".*}.*?\"(?=.*\"target\")")
     subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
     # extract "target": \d* "
-    targetRegEx = re.compile(pattern=r"\"target\"\s*:\s*\d*")
+    # targetRegEx = re.compile(pattern=r"\"target\"\s*:\s*\d*")
     subTargetRegEx = re.compile(pattern=r"\"target\"\s*:\s*")
     # extract "cwe": [whatever is inside] "
-    cweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[.*?(?=\])")
+    # cweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[.*?(?=\])")
     subCweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[")
 
     # extract "project": "prjname"
-    projectRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"\w*(?=\")")
+    # projectRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"\w*(?=\")")
     subPrjRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"")
     # extract "commit_id": "alphanumeric"
-    commitidRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*(?=\")")
+    # commitidRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*(?=\")")
     subCommitRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"")
     # extract "hash": "numeric"
-    hashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*\d*")
+    # hashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*\d*")
     subHashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*")
     # extract "size": "size"
-    sizeRegEx = re.compile(pattern=r"\"size\"\s*:\s*\d*")
+    # sizeRegEx = re.compile(pattern=r"\"size\"\s*:\s*\d*")
     subSizeRegEx = re.compile(pattern=r"\"size\"\s*:")
     # extract "message": "commit_message"
-    messageRegEx = re.compile(pattern=r"\"message\"\s*:\s*\".*(?=\")")
+    # messageRegEx = re.compile(pattern=r"\"message\"\s*:\s*\".*(?=\")")
     subMsgRegEx = re.compile(pattern=r"\"message\"\s*:\s*\"")
 
-    regex_dict = {
-        "func": funcRegEx,
-        "target": targetRegEx,
-        "cwe": cweRegEx,
-        "project": projectRegEx,
-        "commit_id": commitidRegEx,
-        "hash": hashRegEx,
-        "size": sizeRegEx,
-        "message": messageRegEx,
-    }
+    # regex_dict = {
+    #     "func": funcRegEx,
+    #     "target": targetRegEx,
+    #     "cwe": cweRegEx,
+    #     "project": projectRegEx,
+    #     "commit_id": commitidRegEx,
+    #     "hash": hashRegEx,
+    #     "size": sizeRegEx,
+    #     "message": messageRegEx,
+    # }
     sub_regex_dict = {
         "func": subFuncRegEx,
         "target": subTargetRegEx,
@@ -229,20 +260,17 @@ def create_func_metadatablock(
     ) as bar:
         for lineIdx in range(content_len):
             local_d = {}
-            for key, val in regex_dict.items():
-                # apply regex to extract field content
-                el = (
-                    findall_regex(pattern=val, target=content[lineIdx])[0]
-                    if match_regex(pattern=val, target=content[lineIdx])
-                    else ""
-                )
+            for key in content[lineIdx].keys():
+                # # apply regex to extract field content
+                # el = (
+                #     findall_regex(pattern=val, target=content[lineIdx])[0]
+                #     if match_regex(pattern=val, target=content[lineIdx])
+                #     else ""
+                # )
                 # remove field name
-                el = (
-                    re.sub(pattern=sub_regex_dict[key], repl="", string=el)
-                    if el
-                    else ""
+                el = re.sub(
+                    pattern=sub_regex_dict[key], repl="", string=content[lineIdx][key]
                 )
-
                 el = el.strip()
                 # in case of "func" field, remove leading and trailing dquotes
                 el = el[1:-1] if (el and key == "func") else el
@@ -294,21 +322,19 @@ def write_json(dic: dict, output: str) -> None:
     std_logger.debug(msg="Processed dictionary successfully saved as JSON file")
 
 
-def create_empty_tmp_source():
-    with open("tmp.c", "w") as _:
+def create_empty_tmp_source(filename: str = "tmp.c") -> None:
+    with open(file=filename, mode="w") as _:
         pass
 
     std_logger.debug("Tmp empty file created successfully")
 
 
-# def populate_tmp_file(filepth: str, dic: dict[int, dict[str, str | list[str]]]):
 def populate_tmp_file(func_str_body: str) -> None:
     print(func_str_body)
     regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
     function_name: list[str] | str = re.findall(
         pattern=regex_functionName, string=func_str_body
     )
-    func_str_body_blocks: list[str]
 
     if function_name:
         function_name = (
@@ -335,31 +361,10 @@ def spawn_refactor(filepath: str) -> int:
     # clang-format provided by clangd.
     # Using nvim as editor, I've installed it via Mason
     # for some reason, subprocess cannot run clang-format
-    exit_code = os.system(
-        command=f"~/.local/share/nvim/mason/bin/clang-format {filepath} >> {filepath}"
-    )
 
-    # GNU Indent
-    # args=[
-    #     "indent",
-    #     "-brf",
-    #     "-nbfda",
-    #     "-nbfde",
-    #     "-nut",
-    #     "-linux",
-    #     "-as",
-    #     "-i4",
-    #     "-nbad",
-    #     "-nhnl",
-    #     "-nbap",
-    #     "-l80",
-    #     "-cdw",
-    #     "-cli4",
-    #     f"{filepath}",
-    # ],
-    # capture_output=True,
-    # text=True,
-    # )
+    exit_code = os.system(
+        command=f"~/.local/share/nvim/mason/bin/clang-format -i {filepath}"
+    )
 
     if exit_code != 0:
         std_logger.error(msg="Some error has occured")
@@ -418,7 +423,7 @@ def pause_exection():
 
 def rm_tmp_file(filepath: str) -> None:
     try:
-        exit_code_obj = subprocess.run(
+        subprocess.run(
             args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
         )
     except:

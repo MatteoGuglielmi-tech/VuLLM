@@ -17,7 +17,7 @@ class Builder:
         # self.gemini = Gemini(model_name="gemini-1.5-pro")
         # self.gemini = Gemini(model_name="gemini-2.0-flash-exp")
 
-    def __filter_metadata_line(self, lineContent: str) -> str:
+    def __filter_metadata_line(self, lineContent: str) -> dict[str, str]:
         # line content is a string representing a line in the Diversevul.json file with all metadata information
         # dictionary of "field_name" : "corpus" pairs
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
@@ -32,14 +32,16 @@ class Builder:
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
+        std_logger.info("removing multiple lines")
         dof.update(
             {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
         )
 
-        return "{" + ",".join([item for item in dof.values()]) + "}"
+        return dof
+        # return "{" + ",".join([item for item in dof.values()]) + "}"
 
-    def __filter_file(self) -> list[str]:
-        contentCpy: list[str] = []
+    def __filter_file(self) -> list[dict[str, str]]:
+        contentCpy: list[dict[str, str]] = []
         with alive_bar(
             total=len(self.__fileContent),
             title="Fixing lines syntax",
@@ -54,7 +56,7 @@ class Builder:
 
     def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
         std_logger.debug(msg="Assembling metadata")
-        lol: list[str] = self.__filter_file()  # list of lines
+        lol: list[dict[str, str]] = self.__filter_file()  # list of lines
         # string organized as dictionary
         std_logger.debug(msg="Creating dictionary dataset")
         meta_d: dict[int, dict[str, str | list[str]]] = utils.create_func_metadatablock(
@@ -80,7 +82,7 @@ class Builder:
         # substitute in "func" field refactored string version
         dic = utils.build_refactored_json(dic=dic)
         # remove temp file and copy
-        utils.rm_tmp_file(filepath="tmp.c")
+        # utils.rm_tmp_file(filepath="tmp.c")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
         # save processed dataset as json
