@@ -148,8 +148,8 @@ def remove_escaping_quotes(lineContent: str) -> str:
     # INFO: the following regex are used to understand if the double
     # quotes are needed or not. In particular, they are needed if used
     # to escape quotes when inside functions like printf
-    opening_quotes: re.Pattern = re.compile(pattern=r"(?<=,|\()\s*\\\"\s*")
-    closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\))")
+    opening_quotes: re.Pattern = re.compile(pattern=r"(?<=,|\(|{)\s*\\\"\s*")
+    closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\)|})")
 
     # if no matches, lineContent is returned unchanged
     modified_line: str = re.sub(pattern=opening_quotes, repl='"', string=lineContent)
@@ -171,7 +171,7 @@ def remove_comments(lineContent: str) -> str:
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
     # check for comments starting with // and match until the eol
-    commentRegEx = re.compile(pattern=r"(?<=\(|\)|{|}|;)\s*//.*?(?=\\n)")
+    commentRegEx = re.compile(pattern=r"(?:\\n|{|}|;|\(|\))\s*//.*?(?=\\n)")
 
     lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
     lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
@@ -300,7 +300,7 @@ def create_empty_tmp_source(filename: str = "tmp.c") -> None:
 
 
 def populate_tmp_file(func_str_body: str) -> None:
-    print(func_str_body)
+    # print(func_str_body)
     regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
     function_name: list[str] | str = re.findall(
         pattern=regex_functionName, string=func_str_body
@@ -327,7 +327,7 @@ def populate_tmp_file(func_str_body: str) -> None:
 
 
 def spawn_refactor(filepath: str) -> int:
-    std_logger.debug("GNU Indent spawned")
+    # std_logger.debug("GNU Indent spawned")
     # clang-format provided by clangd.
     # Using nvim as editor, I've installed it via Mason
     # for some reason, subprocess cannot run clang-format
@@ -337,8 +337,8 @@ def spawn_refactor(filepath: str) -> int:
 
     if exit_code != 0:
         std_logger.error(msg="Some error has occured")
-    else:
-        std_logger.info(msg="Refactor successfully accomplished")
+    # else:
+    #     std_logger.info(msg="Refactor successfully accomplished")
 
     return exit_code
 
@@ -363,9 +363,9 @@ def build_refactored_json(
 
             # spawn refactor on just added function body
             if spawn_refactor(filepath=src_pth):
-                std_logger.critical(
-                    msg="Problem encountered in refactoring current function"
-                )
+                # std_logger.critical(
+                #     msg="Problem encountered in refactoring current function"
+                # )
                 pause_exection()
 
             refactored_chunk = read_file_content_as_str(filepath=src_pth)
