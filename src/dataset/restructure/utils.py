@@ -2,14 +2,15 @@ import json
 import os
 import re
 import subprocess
+from pprint import pprint as pp
 
 from alive_progress import alive_bar
 
 import animate
 from log import std_logger
 
-PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
-# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+# PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
+PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
@@ -35,7 +36,8 @@ def replace(target: str, old: str, new: str) -> str:
 
 def split_lineContent(lineContent: str) -> dict[str, str]:
     func_check_closing_bracket: re.Pattern = re.compile(
-        pattern=r"\"func\".*}.*?}\"(?=.*\"target\")"
+        pattern=r"\"func\".*\}\"(?=.*\"target\")"
+        # pattern=r"\"func\".*\}\"" @)
     )
     func_check_syntax_block_comment: re.Pattern = re.compile(
         pattern=r"(?<=\")\s+.*?\*/"
@@ -49,12 +51,12 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         # extract "target": \d* "
         "target": re.compile(pattern=r"\"target\"\s*:\s*\d*"),
         # extract "cwe": [whatever is inside] "
-        "cwe": re.compile(pattern=r"\"cwe\"\s*:\s*\[.*\]"),
+        "cwe": re.compile(pattern=r"\"cwe\"\s*:\s*\[.*\](?=.*\"project\")"),
         # extract "project": "prjname"
-        "project": re.compile(pattern=r"\"project\"\s*:\s*\"\w*\W*?\w*\""),
+        "project": re.compile(pattern=r"\"project\"\s*:\s*\".*?\""),
         # extract "commit_id": "alphanumeric"
-        "commit_id": re.compile(pattern=r"\"commit_id\"\s*:\s*\"\w*\""),
-        # extract "hash": "numeric"
+        "commit_id": re.compile(pattern=r"\"commit_id\"\s*:\s*\".*?\""),
+        # extract "hash": numeric
         "hash": re.compile(pattern=r"\"hash\"\s*:\s*\d*"),
         # extract "size": "size"
         "size": re.compile(pattern=r"\"size\"\s*:\s*\d*"),
@@ -68,7 +70,8 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         content = content if isinstance(content, str) else content[0]
 
         if key == "func":
-            if not match_regex(pattern=func_check_closing_bracket, target=content):
+
+            if not match_regex(pattern=func_check_closing_bracket, target=lineContent):
                 # adding closing braket at the end of the function
                 content = content[:-1] + "}" + '"'
             if match_regex(pattern=func_check_syntax_block_comment, target=content):
@@ -246,11 +249,24 @@ def create_func_metadatablock(
                 el = el[1:-1] if (el and key == "func") else el
                 # in case of "cwe" field, check if there are more codes
                 if key == "cwe":
-                    el = (
-                        [e[1:-1] for e in el.split(sep=",")]
-                        if ("," in el)
-                        else el[1:-1]
-                    )
+                    # if multiple cwe
+                    if "," in el:
+                        it: list[str] = el.split(sep=",")
+                        el = [
+                            (
+                                # remove spaces and " from 1st up to (n-1)th elements
+                                # in case of last element, remove ] too
+                                re.sub(pattern=r"\s*", repl="", string=e)[1:-1]
+                                if idx != len(it)
+                                else re.sub(pattern=r"\s*", repl="", string=e)[1:-2]
+                            )
+                            for idx, e in enumerate(iterable=it, start=1)
+                        ]
+                    else:
+                        el = el[1:-2]
+                if (key == "project") or (key == "commit_id"):
+                    # remove final quotes
+                    el = el[:-1]
 
                 local_d[key] = el
 
@@ -332,7 +348,7 @@ def spawn_refactor(filepath: str) -> int:
     # Using nvim as editor, I've installed it via Mason
     # for some reason, subprocess cannot run clang-format
     exit_code = os.system(
-        command=f"~/.local/share/nvim/mason/bin/clang-format -i {filepath}"
+        command=f"~/.local/share/nvim/mason/bin/clang-format -style=file -i {filepath}"
     )
 
     if exit_code != 0:
