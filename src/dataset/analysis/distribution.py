@@ -1,10 +1,14 @@
+import re
+from pprint import pprint as pp
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import utils
 from matplotlib import font_manager as fm
-from matplotlib.patches import Wedge
+
+import utils
+from animate import Loader
 
 fpath_italic = "/usr/share/fonts/TTF/CascadiaCodeNFItalic.ttf"
 fpath = "/usr/share/fonts/TTF/CascadiaCodeNF.ttf"
@@ -42,8 +46,8 @@ class DataDistribution:
         label_names = class_counts.index.values.tolist()
 
         # Create the pie chart
-        fig, ax = plt.subplots(figsize=(5, 2))
-        wedges, texts, autotexts = ax.pie(
+        _, ax = plt.subplots(figsize=(5, 2))
+        _, texts, autotexts = ax.pie(
             x=counts,
             labels=label_names,
             colors=colors,
@@ -70,24 +74,33 @@ class DataDistribution:
         return "{:.1f}%\n({:d})".format(pct, absolute)
 
     def pie_chart_vulnerability(self) -> None:
+
         # | str only for linting issues
-        label_names: list[str] | str = list(set(self.data_df["cwe"]))
-        colors = sns.color_palette("pastel")[0 : len(label_names)]
-        explode = tuple([0.005 for _ in range(len(label_names))])
 
         # filter non-vulnerable targets
-        working_copy = self.data_df.copy()
+        working_copy: pd.DataFrame = self.data_df.copy()
         vulnerable_df: pd.DataFrame = working_copy.loc[working_copy["target"] != "0"]
 
         # subsitute empty CWE field with Unk identifier
         cwe_series = vulnerable_df["cwe"]
-        cwe_series = cwe_series.replace(to_replace="", value="UNK", regex=True)
-        vulnerable_df["cwe"] = cwe_series
+        cwe_series = cwe_series.replace(to_replace="", value="None", regex=True)
+        # some of the functions have multiple vulnerability codes
+        cwe_extended: list[str] | pd.DataFrame = []
+        for el in cwe_series:
+            if isinstance(el, list):
+                for e in el:
+                    cwe_extended.append(re.sub(pattern=r"\s*", repl="", string=e))
+            else:
+                cwe_extended.append(el)
 
-        class_counts = vulnerable_df.groupby(by="cwe").size()
+        cwe_extended = pd.DataFrame(data={"cwe": cwe_extended})
+
+        class_counts: pd.Series | pd.DataFrame = cwe_extended.groupby(by="cwe").size()
         # get label names and frequency
         label_names = class_counts.index.values.tolist()
-        counts = class_counts.values.tolist()
+        counts: list[int] = class_counts.values.tolist()
+        colors = sns.color_palette("pastel")[0 : len(label_names)]
+        explode = tuple([0.005 for _ in range(len(label_names))])
 
         # create pie chart
         _, ax = plt.subplots(figsize=(5, 2))
@@ -109,11 +122,18 @@ class DataDistribution:
             loc="center",
             fontproperties=prop_title,
         )
+
         plt.tight_layout()
         plt.show()
 
+    def __debug(self):
+        with open("debug.txt", "a") as f:
+            for i, item in enumerate(self.data_df["cwe"].tolist()):
+                print(f"{i} : {item}", file=f)
+
 
 if __name__ == "__main__":
-    data = DataDistribution(pth2json="./divfix.json")
+    data = DataDistribution(pth2json="../restructure/DiverseVul_fixed_small.json")
     # data.pie_chart_target()
+    # with Loader(desc="Plotting distribution "):
     data.pie_chart_vulnerability()
