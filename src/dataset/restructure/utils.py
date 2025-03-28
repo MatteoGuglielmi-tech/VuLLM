@@ -174,7 +174,9 @@ def remove_comments(lineContent: str) -> str:
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
     # check for comments starting with // and match until the eol
-    commentRegEx = re.compile(pattern=r"(?:\\n|{|}|;|\(|\))\s*//.*?(?=\\n)")
+    commentRegEx = re.compile(
+        pattern=r"(?:(?<=\\n)|(?<=\{)|(?<=\})|(?<=;)|(?<=\()|(?<=\)))\s*//.*?(?=\\n)"
+    )
 
     lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
     lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
