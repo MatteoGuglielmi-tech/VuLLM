@@ -63,3 +63,4 @@ SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
 SpacesInAngles: false
 SpacesInParens: Never
+# SkipMacroDefinitionBody: true
