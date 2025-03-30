@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import string
 import subprocess
 from pprint import pprint as pp
 
@@ -14,12 +15,12 @@ PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
-def findall_regex(pattern: str | re.Pattern, target: str) -> str | list[str]:
+def findall_regex(pattern: str | re.Pattern, target: str) -> list[str]:
     regex: str | re.Pattern = (
         re.compile(pattern=pattern) if isinstance(pattern, str) else pattern
     )
     content = re.findall(pattern=regex, string=target)
-    return content if content else ""
+    return content
 
 
 def match_regex(pattern: str | re.Pattern, target: str) -> bool:
@@ -66,8 +67,8 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
 
     for key, reg in regex_dict.items():
         # extract block of metadata ("<field>" : "<body>")
-        content = findall_regex(pattern=reg, target=lineContent)
-        content = content if isinstance(content, str) else content[0]
+        content = findall_regex(pattern=reg, target=lineContent)  # list[str]
+        content = content[0] if content else ""
 
         if key == "func":
 
@@ -100,18 +101,30 @@ def remove_tabs(lineContent: str):
 def remove_multiple_newlines(lineContent: str) -> str:
     hashIfRegex: re.Pattern = re.compile(pattern=r"#if")
     hashDefineRegex: re.Pattern = re.compile(pattern=r"#define")
+    dowhileMacroRegex: re.Pattern = re.compile(
+        pattern=r"#define\s*.*?\(.*?\)\s*do(?:\{|\()\s*.*?(?:\}\)|\})\s*while\(0\)"
+    )
+    multilineMacroRegex: re.Pattern = re.compile(
+        pattern=r"#define\s*.*?\(.*?\)\s*(?:\(\{|\{)\s*.*?(?:\}\)|\})\s*.*?\\\\n\}(?=\\n)"
+    )
     hashEndIfDefineRegex: re.Pattern = re.compile(pattern=r"#endif")
-    strBlocks: list[str]
 
+    strBlocks: list[str]
+    flag: bool = False
     # remove "\\n" within string
-    # WARN: here \\\\n is used to escape the new line character inside a string
-    # since it is not worrying for the application, this specific char has been removed
-    if match_regex(pattern=r"\\\\n", target=lineContent):
-        lineContent = re.sub(
-            pattern=r"\\\\n",
-            repl="",
-            string=lineContent,
-        )
+    if not (
+        match_regex(pattern=multilineMacroRegex, target=lineContent)
+        or match_regex(pattern=dowhileMacroRegex, target=lineContent)
+    ):
+        if match_regex(pattern=r"\\\\n", target=lineContent):
+            lineContent = re.sub(
+                pattern=r"\\\\n",
+                repl="",
+                string=lineContent,
+            )
+    # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
+    else:
+        flag = True
 
     # 1. parse if some pre-processor instructions are there
     if not (
@@ -125,6 +138,34 @@ def remove_multiple_newlines(lineContent: str) -> str:
         return lineContent
 
     # 2. split line based on "\n" if pre-processor macros are present
+    if flag:
+
+        multilineMacro: list[str] = findall_regex(
+            pattern=multilineMacroRegex, target=lineContent
+        )
+        dowhileMacro: list[str] = findall_regex(
+            pattern=dowhileMacroRegex, target=lineContent
+        )
+
+        tmp: str = ""
+
+        if multilineMacro:
+            for i, v in enumerate(multilineMacro):
+                if match_regex(pattern=r"\\\\n", target=v):
+                    tmp = re.sub(pattern=r"\\\\n", repl="", string=v)
+                    tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=tmp)
+
+                lineContent = lineContent.replace(multilineMacro[i], tmp)
+
+        if dowhileMacro:
+            tmp: str = ""
+            for i, v in enumerate(dowhileMacro):
+                if match_regex(pattern=r"\\\\n", target=v):
+                    tmp = re.sub(pattern=r"\\\\n", repl="", string=v)
+                    tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=tmp)
+
+                lineContent = lineContent.replace(dowhileMacro[i], tmp)
+
     strBlocks = lineContent.split(sep="\\n")
 
     # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
@@ -148,10 +189,9 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
 
 def remove_escaping_quotes(lineContent: str) -> str:
-    # INFO: the following regex are used to understand if the double
-    # quotes are needed or not. In particular, they are needed if used
-    # to escape quotes when inside functions like printf
-    opening_quotes: re.Pattern = re.compile(pattern=r"(?<=,|\(|{)\s*\\\"\s*")
+    opening_quotes: re.Pattern = re.compile(
+        pattern=r"(?:(?<=,)|(?<=\()|(?<=\{)|(?:\\t)|(?:\\n))\s*\\\"\s*"
+    )
     closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\)|})")
 
     # if no matches, lineContent is returned unchanged
@@ -318,7 +358,6 @@ def create_empty_tmp_source(filename: str = "tmp.c") -> None:
 
 
 def populate_tmp_file(func_str_body: str) -> None:
-    # print(func_str_body)
     regex_functionName: re.Pattern = re.compile(pattern=r"^(.*?)(?=\{)")
     function_name: list[str] | str = re.findall(
         pattern=regex_functionName, string=func_str_body
@@ -381,9 +420,6 @@ def build_refactored_json(
 
             # spawn refactor on just added function body
             if spawn_refactor(filepath=src_pth):
-                # std_logger.critical(
-                #     msg="Problem encountered in refactoring current function"
-                # )
                 pause_exection()
 
             refactored_chunk = read_file_content_as_str(filepath=src_pth)

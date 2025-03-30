@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from alive_progress import alive_bar
@@ -6,8 +7,6 @@ import utils
 from log import std_logger
 
 # from gemini import Gemini
-
-# from pprint import pprint as pp
 
 
 @dataclass
@@ -32,7 +31,6 @@ class Builder:
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
-        std_logger.info("removing multiple lines")
         dof.update(
             {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
         )
@@ -66,12 +64,12 @@ class Builder:
 
         return meta_d
 
-    def __update_json_with_funcdesc(
-        self, dic: dict[int, dict[str, str | list[str]]]
-    ) -> dict[int, dict[str, str | list[str]]]:
-        for k in dic.keys():
-            dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
-        return dic
+    # def __update_json_with_funcdesc(
+    #     self, dic: dict[int, dict[str, str | list[str]]]
+    # ) -> dict[int, dict[str, str | list[str]]]:
+    #     for k in dic.keys():
+    #         dic.update({k: utils.add_desc_to_metadata(dic=dic[k], llm=self.gemini)})
+    #     return dic
 
     def run(self):
         # translate string into valid json structure
@@ -85,7 +83,7 @@ class Builder:
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
         # save processed dataset as json
-        utils.write_json(dic=dic, output="DiverseVul_fixed.json")
+        utils.write_json(dic=dic, output="ReadyToUse_DiverseVul.json")
 
 
 if __name__ == "__main__":
