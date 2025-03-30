@@ -1,9 +1,7 @@
 import json
 import os
 import re
-import string
 import subprocess
-from pprint import pprint as pp
 
 from alive_progress import alive_bar
 
