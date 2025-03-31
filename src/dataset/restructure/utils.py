@@ -36,11 +36,13 @@ def replace(target: str, old: str, new: str) -> str:
 def split_lineContent(lineContent: str) -> dict[str, str]:
     func_check_closing_bracket: re.Pattern = re.compile(
         pattern=r"\"func\".*\}\"(?=.*\"target\")"
-        # pattern=r"\"func\".*\}\"" @)
     )
-    func_check_syntax_block_comment: re.Pattern = re.compile(
-        pattern=r"(?<=\")\s+.*?\*/"
-    )
+
+    # this checks for missing opening block comment
+    # inside parenthesis (printf like function)
+    # func_check_syntax_block_comment: re.Pattern = re.compile(
+    #     pattern=r"(?<=\")\s+.*?\*/"
+    # )
 
     d: dict[str, str] = {}
     regex_dict = {
@@ -69,19 +71,24 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         content = content[0] if content else ""
 
         if key == "func":
-
             if not match_regex(pattern=func_check_closing_bracket, target=lineContent):
                 # adding closing braket at the end of the function
                 content = content[:-1] + "}" + '"'
-            if match_regex(pattern=func_check_syntax_block_comment, target=content):
-                comment_to_correct = findall_regex(
-                    pattern=func_check_syntax_block_comment, target=content
-                )[0]
-                content = replace(
-                    target=content,
-                    old=comment_to_correct,
-                    new="/*" + comment_to_correct,
-                )
+
+            # comments_to_correct: list[str] = findall_regex(
+            #     pattern=func_check_syntax_block_comment, target=content
+            # )
+            #
+            # if comments_to_correct:
+            #     for idx, el in enumerate(comments_to_correct):
+            #         if match_regex(pattern=r"/\*", target=el):
+            #             continue
+            #         else:
+            #             content = replace(
+            #                 target=content,
+            #                 old=comments_to_correct[idx],
+            #                 new="/*" + comments_to_correct[idx],
+            #             )
 
         d[key] = content
 
@@ -99,72 +106,53 @@ def remove_tabs(lineContent: str):
 def remove_multiple_newlines(lineContent: str) -> str:
     hashIfRegex: re.Pattern = re.compile(pattern=r"#if")
     hashDefineRegex: re.Pattern = re.compile(pattern=r"#define")
-    dowhileMacroRegex: re.Pattern = re.compile(
-        pattern=r"#define\s*.*?\(.*?\)\s*do(?:\{|\()\s*.*?(?:\}\)|\})\s*while\(0\)"
-    )
-    multilineMacroRegex: re.Pattern = re.compile(
-        pattern=r"#define\s*.*?\(.*?\)\s*(?:\(\{|\{)\s*.*?(?:\}\)|\})\s*.*?\\\\n\}(?=\\n)"
-    )
-    hashEndIfDefineRegex: re.Pattern = re.compile(pattern=r"#endif")
-
-    strBlocks: list[str]
-    flag: bool = False
-    # remove "\\n" within string
-    if not (
-        match_regex(pattern=multilineMacroRegex, target=lineContent)
-        or match_regex(pattern=dowhileMacroRegex, target=lineContent)
-    ):
-        if match_regex(pattern=r"\\\\n", target=lineContent):
-            lineContent = re.sub(
-                pattern=r"\\\\n",
-                repl="",
-                string=lineContent,
-            )
-    # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
-    else:
-        flag = True
+    # 305 steps required
+    dowhileMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?do\{.*?while\(0\)")
+    # 345 steps required
+    multilineMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?\{.*?\\\\n\}")
 
     # 1. parse if some pre-processor instructions are there
     if not (
         match_regex(pattern=hashDefineRegex, target=lineContent)
         or match_regex(pattern=hashIfRegex, target=lineContent)
-        or match_regex(pattern=hashEndIfDefineRegex, target=lineContent)
     ):
-        if match_regex(pattern=r"\\n", target=lineContent):
-            lineContent = re.sub(pattern=r"\\n", repl="", string=lineContent)
+        lineContent = re.sub(pattern=r"\\n", repl="", string=lineContent)
 
         return lineContent
 
-    # 2. split line based on "\n" if pre-processor macros are present
-    if flag:
+    multilineMacros: list[str] = findall_regex(
+        pattern=multilineMacroRegex, target=lineContent
+    )
+    dowhileMacros: list[str] = findall_regex(
+        pattern=dowhileMacroRegex, target=lineContent
+    )
 
-        multilineMacro: list[str] = findall_regex(
-            pattern=multilineMacroRegex, target=lineContent
-        )
-        dowhileMacro: list[str] = findall_regex(
-            pattern=dowhileMacroRegex, target=lineContent
-        )
+    # If the pattern isn’t found, string is returned unchanged.
+    lineContent = re.sub(pattern=r"\\\\n", repl="", string=lineContent)
 
+    # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
+    if not (multilineMacros or dowhileMacros):
         tmp: str = ""
 
-        if multilineMacro:
-            for i, v in enumerate(multilineMacro):
-                if match_regex(pattern=r"\\\\n", target=v):
-                    tmp = re.sub(pattern=r"\\\\n", repl="", string=v)
-                    tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=tmp)
+        # hashDefineRegex matches, also multilineMacroRegex and dowhileMacroRegex do
+        for i, multiline in enumerate(multilineMacros):
+            if match_regex(pattern=r"do\{", target=multiline):
+                continue
+            # remove every \ to go to the next line an let the refactor
+            # do all the work
+            # tmp = re.sub(pattern=r"\\\\n", repl="", string=multiline)
+            tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=multiline)
 
-                lineContent = lineContent.replace(multilineMacro[i], tmp)
+            lineContent = lineContent.replace(multilineMacros[i], tmp)
 
-        if dowhileMacro:
-            tmp: str = ""
-            for i, v in enumerate(dowhileMacro):
-                if match_regex(pattern=r"\\\\n", target=v):
-                    tmp = re.sub(pattern=r"\\\\n", repl="", string=v)
-                    tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=tmp)
+        for i, dowhile in enumerate(dowhileMacros):
+            # tmp = re.sub(pattern=r"\\\\n", repl="", string=dowhile)
+            tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=dowhile)
 
-                lineContent = lineContent.replace(dowhileMacro[i], tmp)
+            lineContent = lineContent.replace(dowhileMacros[i], tmp)
 
-    strBlocks = lineContent.split(sep="\\n")
+    # 2. split line based on "\n" if pre-processor macros are present
+    strBlocks: list[str] = lineContent.split(sep="\\n")
 
     # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
     strBlocks = [
@@ -173,7 +161,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
             if not (
                 match_regex(pattern=hashDefineRegex, target=s)
                 or match_regex(pattern=hashIfRegex, target=s)
-                or match_regex(pattern=hashEndIfDefineRegex, target=s)
             )
             else "\\n" + s + "\\n"
         )
@@ -188,7 +175,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
 def remove_escaping_quotes(lineContent: str) -> str:
     opening_quotes: re.Pattern = re.compile(
-        pattern=r"(?:(?<=,)|(?<=\()|(?<=\{)|(?:\\t)|(?:\\n))\s*\\\"\s*"
+        pattern=r"(?:(?<=,)|(?<=\()|(?<=\{)|(?:\\n))\s*\\\"\s*"
     )
     closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\)|})")
 
@@ -392,8 +379,6 @@ def spawn_refactor(filepath: str) -> int:
 
     if exit_code != 0:
         std_logger.error(msg="Some error has occured")
-    # else:
-    #     std_logger.info(msg="Refactor successfully accomplished")
 
     return exit_code
 
@@ -429,6 +414,7 @@ def build_refactored_json(
                 )
             except:
                 refactored_chunk = refactored_chunk
+
             dic[k].update({"func": refactored_chunk})
             bar()
 

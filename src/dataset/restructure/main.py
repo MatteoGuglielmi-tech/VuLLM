@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 
 from alive_progress import alive_bar
