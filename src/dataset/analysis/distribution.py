@@ -1,11 +1,15 @@
 import re
-from pprint import pprint as pp
+from collections import Counter
+from typing import Text
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import font_manager as fm
+from matplotlib import legend
+from matplotlib.patches import Patch, Wedge
+from matplotlib.ticker import MultipleLocator
 
 import utils
 from animate import Loader
@@ -16,48 +20,80 @@ prop_title = fm.FontProperties(fname=fpath, size=20)
 prop = fm.FontProperties(fname=fpath, size=14)
 prop_it = fm.FontProperties(fname=fpath, size=20)
 
-plt.rcParams.update(
-    {
-        "lines.color": "white",
-        "patch.edgecolor": "white",
-        "text.color": "black",
-        "axes.facecolor": "white",
-        "axes.edgecolor": "lightgray",
-        "figure.facecolor": "lightgray",
-        "figure.edgecolor": "black",
-        "savefig.facecolor": "lightgray",
-        "savefig.edgecolor": "black",
-    }
-)
+
+# sns.set_theme(
+#     style="darkgrid",
+#     rc={
+#         "figure.facecolor": "white",
+#         "axes.facecolor": "#c4d8e2",
+#         "grid.linestyle": "--",
+#         "grid.color": "white",
+#         "axes.edgecolor": "grey",
+#         "xtick.bottom": True,
+#         "ytick.left": True,
+#     },
+# )
+
+sns.axes_style(style="darkgrid")
+sns.set_style(style="ticks")
+sns.set_theme(style="ticks", rc={"axes.spines.right": False, "axes.spines.top": False})
+
+# plt.rcParams.update({"font.size": 20})
+# plt.style.use(["fivethirtyeight"])
+
+# plt.rcParams.update(
+#     {
+#         "lines.color": "white",
+#         "patch.edgecolor": "white",
+#         "text.color": "black",
+#         "axes.facecolor": "white",
+#         "axes.edgecolor": "lightgray",
+#         "figure.facecolor": "lightgray",
+#         "figure.edgecolor": "black",
+#         "savefig.facecolor": "lightgray",
+#         "savefig.edgecolor": "black",
+#     }
+# )
 
 
 class DataDistribution:
     def __init__(self, pth2json: str) -> None:
         self.__data_dict: dict = utils.read_json(pth=pth2json)
         self.data_df: pd.DataFrame = pd.DataFrame(data=self.__data_dict).T
+        # don't care about func field
+        self.data_df = self.data_df.drop(labels=["func"], axis=1)
 
         self.__nb_samples: int = len(self.data_df["cwe"])
 
     def pie_chart_target(self) -> None:
-        colors = sns.color_palette("pastel")[0:1]
+        palette = sns.color_palette(
+            palette="pastel", n_colors=len(self.data_df["target"])
+        )
 
-        class_counts = self.data_df.groupby(by="target").size()
+        target_df: pd.DataFrame = self.data_df.drop(labels=["cwe"], axis=1)
+
+        class_counts = target_df.groupby(by="target").size()
         counts = class_counts.values.tolist()
         label_names = class_counts.index.values.tolist()
 
         # Create the pie chart
-        _, ax = plt.subplots(figsize=(5, 2))
-        _, texts, autotexts = ax.pie(
+        fig, ax = plt.subplots(figsize=(5, 2))
+        ret = ax.pie(  # not typed since linter goes crazy
             x=counts,
             labels=label_names,
-            colors=colors,
+            colors=palette,
             startangle=90,
             autopct=lambda pct: self.__func(pct, counts),
             textprops=dict(color="k"),
             explode=(0.005, 0.005),
         )
 
-        plt.setp(autotexts, size=15, style="italic")
+        if len(ret) == 3:
+            wedges, texts, autotexts = ret[0], ret[1], ret[2]
+            plt.setp(autotexts, size=15, style="italic")
+        else:
+            wedges, texts = ret[0], ret[1]
+
         plt.setp(texts, size=15, fontproperties=prop_title, weight="bold")
 
         plt.title(
@@ -66,65 +102,102 @@ class DataDistribution:
             fontproperties=prop_title,
         )
 
+        names = ["Non-Vulnerable", "Vulnerable"]
+
+        plt.legend(wedges, names, loc="upper right")
+
         plt.tight_layout()
         plt.show()
+        fig.savefig("pie_target.png", dpi=300, bbox_inches="tight", pad_inches=0.1)
 
     def __func(self, pct, allvals):
         absolute = int(pct / 100.0 * np.sum(allvals))
         return "{:.1f}%\n({:d})".format(pct, absolute)
 
     def pie_chart_vulnerability(self) -> None:
-
-        # | str only for linting issues
-
         # filter non-vulnerable targets
-        working_copy: pd.DataFrame = self.data_df.copy()
-        vulnerable_df: pd.DataFrame = working_copy.loc[working_copy["target"] != "0"]
+        vulnerable_df: pd.DataFrame = self.data_df.loc[self.data_df["target"] != "0"]
+        # at this point, target is not necessary anymore
+        vulnerable_df = vulnerable_df.drop(labels=["target"], axis=1)
 
-        # subsitute empty CWE field with Unk identifier
-        cwe_series = vulnerable_df["cwe"]
-        cwe_series = cwe_series.replace(to_replace="", value="None", regex=True)
+        # subsitute empty CWE field
+        vulnerable_df.loc[:, "cwe"] = vulnerable_df["cwe"].replace(
+            to_replace="", value="None", regex=True
+        )
+
         # some of the functions have multiple vulnerability codes
-        cwe_extended: list[str] | pd.DataFrame = []
-        for el in cwe_series:
+        cwe_extended: list[str] = []
+        for el in vulnerable_df["cwe"]:
             if isinstance(el, list):
                 for e in el:
                     cwe_extended.append(re.sub(pattern=r"\s*", repl="", string=e))
             else:
                 cwe_extended.append(el)
 
-        cwe_extended = pd.DataFrame(data={"cwe": cwe_extended})
+        del vulnerable_df
+        class_freq: dict[str, int] = dict(Counter(cwe_extended))
+        del cwe_extended
 
-        class_counts: pd.Series | pd.DataFrame = cwe_extended.groupby(by="cwe").size()
-        # get label names and frequency
-        label_names = class_counts.index.values.tolist()
-        counts: list[int] = class_counts.values.tolist()
-        colors = sns.color_palette("pastel")[0 : len(label_names)]
-        explode = tuple([0.005 for _ in range(len(label_names))])
-
-        # create pie chart
-        _, ax = plt.subplots(figsize=(5, 2))
-        _, texts, autotexts = ax.pie(
-            x=counts,
-            labels=label_names,
-            colors=colors,
-            startangle=90,
-            autopct=lambda pct: self.__func(pct, counts),
-            textprops=dict(color="k"),
-            explode=explode,
+        vulnerable_df: pd.DataFrame = (
+            pd.DataFrame(data=class_freq, index=pd.Series([0]))
+            .rename(index={0: "freq"})
+            .T
         )
 
-        plt.setp(autotexts, size=15, style="italic")
-        plt.setp(texts, size=15, fontproperties=prop_title, weight="bold")
+        vulnerable_df.reset_index(inplace=True)
+        vulnerable_df.rename(columns={"index": "cwe"}, inplace=True)
 
-        plt.title(
-            f"Vulnerability codes distribution\nTotal number of samples : {self.__nb_samples}",
-            loc="center",
-            fontproperties=prop_title,
+        # create pie chart
+        fig, ax = plt.subplots(1, 1)
+        fig.set_size_inches(25, 10)
+
+        ax = sns.barplot(
+            data=vulnerable_df,
+            x="cwe",
+            y="freq",
+            hue="cwe",
+            palette=sns.color_palette(
+                palette="pastel", n_colors=len(vulnerable_df["cwe"])
+            ),
+            zorder=10,
+            legend=True,
+        )
+        plt.grid(True, zorder=0)
+
+        fig.suptitle(
+            "Statistical distribution for all thickness values in a single respiratory cycle."
+        )
+
+        ax.tick_params(axis="x", labelrotation=90)
+        ax.set_xlabel("CWE")
+        ax.set_ylabel("Count")
+        ax.yaxis.set_major_locator(MultipleLocator(50))
+        ax.yaxis.set_major_formatter("{x:.0f}")
+        ax.yaxis.set_minor_locator(MultipleLocator(25))
+        ax.yaxis.set_minor_formatter("{x:.0f}")
+        ax.set_ylim(0, int(vulnerable_df["freq"].max() + 25))
+        ax.grid(True, zorder=100, which="minor", linestyle="--", alpha=0.5)
+        ax.grid(True, zorder=100, which="major", linestyle="-", alpha=0.7)
+
+        handles, labels = ax.get_legend_handles_labels()
+
+        labels = [labels[i] + f" [{v}]" for i, v in enumerate(vulnerable_df["freq"])]
+
+        plt.legend(
+            handles,
+            labels,
+            title="CWE of vulnerable functions",
+            loc="upper right",
+            ncol=5,
+            bbox_to_anchor=[0.935, 0.9],
+            bbox_transform=fig.transFigure,
         )
 
         plt.tight_layout()
         plt.show()
+        ax.figure.figure.savefig(
+            "cwe_distr.png", dpi=300, bbox_inches="tight", pad_inches=0.1
+        )
 
     def __debug(self):
         with open("debug.txt", "a") as f:
@@ -133,7 +206,7 @@ class DataDistribution:
 
 
 if __name__ == "__main__":
-    data = DataDistribution(pth2json="../restructure/DiverseVul_fixed_small.json")
-    # data.pie_chart_target()
-    # with Loader(desc="Plotting distribution "):
-    data.pie_chart_vulnerability()
+    with Loader(desc="Plotting distribution "):
+        data = DataDistribution(pth2json="../restructure/ReadyToUse_DiverseVul.json")
+        data.pie_chart_target()
+        # data.pie_chart_vulnerability()

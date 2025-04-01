@@ -8,8 +8,8 @@ from alive_progress import alive_bar
 import animate
 from log import std_logger
 
-# PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
-PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
+# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
 FIELDS_IN_JSON = 9
 
 
