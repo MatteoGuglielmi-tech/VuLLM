@@ -209,4 +209,4 @@ if __name__ == "__main__":
     with Loader(desc="Plotting distribution "):
         data = DataDistribution(pth2json="../restructure/ReadyToUse_DiverseVul.json")
         data.pie_chart_target()
-        # data.pie_chart_vulnerability()
+        data.pie_chart_vulnerability()
