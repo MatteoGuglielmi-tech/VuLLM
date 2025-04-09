@@ -30,9 +30,9 @@ class Builder:
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
-        dof.update(
-            {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
-        )
+        # dof.update(
+        #     {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
+        # )
 
         return dof
 
