@@ -104,11 +104,13 @@ def remove_tabs(lineContent: str):
 
 
 def remove_multiple_newlines(lineContent: str) -> str:
-    hashIfRegex: re.Pattern = re.compile(pattern=r"#if")
-    hashEndIfRegex: re.Pattern = re.compile(pattern=r"#endif")
-    hashUndefRegex: re.Pattern = re.compile(pattern=r"#undef")
-    hashDefineRegex: re.Pattern = re.compile(pattern=r"#define")
-    hashIncludeRegex: re.Pattern = re.compile(pattern=r"#include")
+    hashIfRegex: re.Pattern = re.compile(pattern=r"#\s*if")
+    hashElseRegex: re.Pattern = re.compile(pattern=r"#\s*else")
+    hashElifRegex: re.Pattern = re.compile(pattern=r"#\s*elif")
+    hashEndIfRegex: re.Pattern = re.compile(pattern=r"#\s*endif")
+    hashUndefRegex: re.Pattern = re.compile(pattern=r"#\s*undef")
+    hashDefineRegex: re.Pattern = re.compile(pattern=r"#\s*define")
+    hashIncludeRegex: re.Pattern = re.compile(pattern=r"#\s*include")
     # 305 steps required
     dowhileMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?do\{.*?while\(0\)")
     # 345 steps required
@@ -116,6 +118,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
     list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
     list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
+    list_elses: list[str] = findall_regex(pattern=hashElseRegex, target=lineContent)
+    list_elifs: list[str] = findall_regex(pattern=hashElifRegex, target=lineContent)
     list_endifs: list[str] = findall_regex(pattern=hashEndIfRegex, target=lineContent)
     list_undefs: list[str] = findall_regex(pattern=hashUndefRegex, target=lineContent)
     list_includes: list[str] = findall_regex(
@@ -128,6 +132,9 @@ def remove_multiple_newlines(lineContent: str) -> str:
         # or match_regex(pattern=hashIfRegex, target=lineContent)
         list_defines
         or list_ifs
+        or list_elses
+        or list_elifs
+        or list_endifs
         or list_undefs
         or list_includes
     ):
@@ -177,6 +184,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
             if not (
                 match_regex(pattern=hashDefineRegex, target=s)
                 or match_regex(pattern=hashIfRegex, target=s)
+                or match_regex(pattern=hashElseRegex, target=s)
+                or match_regex(pattern=hashElifRegex, target=s)
                 or match_regex(pattern=hashEndIfRegex, target=s)
                 or match_regex(pattern=hashUndefRegex, target=s)
                 or match_regex(pattern=hashIncludeRegex, target=s)
@@ -202,6 +211,11 @@ def remove_multiple_newlines(lineContent: str) -> str:
         std_logger.critical(
             msg=f"Mismatched pre-processor instruction\n # #if : {len(list_ifs)}, # #endif: {len(list_endifs)}"
         )
+        std_logger.info(msg="Adding processed function to address problem")
+        populate_tmp_file(func_str_body=lineContent)
+        pause_exection()
+        # read fix line and proceed
+        lineContent = read_file_content_as_str(filepath="tmp.c")
 
     return lineContent
 
@@ -228,7 +242,7 @@ def remove_multiplespaces(lineContent: str) -> str:
 
 
 def remove_comments(lineContent: str) -> str:
-    # extract comment encapsulated in /**/
+    # extract commen)t encapsulated in /**/
     # it is important to use the greedy search to stop the matching at first match
     commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
     # check for comments starting with // and match until the eol
@@ -371,7 +385,7 @@ def create_func_metadatablock(
 def remove_unused_fields(
     dic: dict[int, dict[str, str | list[str]]],
 ) -> dict[int, dict[str, str | list[str]]]:
-    lop: list[str] = ["func", "target", "cwe"]  # list of keys to preserve
+    lop: list[str] = ["func", "target", "cwe", "project"]  # list of keys to preserve
 
     # needed because during iteration it is not possible to delete elements
     shrinkedDict: dict[int, dict[str, str | list[str]]] = {}
