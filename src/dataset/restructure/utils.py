@@ -105,18 +105,33 @@ def remove_tabs(lineContent: str):
 
 def remove_multiple_newlines(lineContent: str) -> str:
     hashIfRegex: re.Pattern = re.compile(pattern=r"#if")
+    hashEndIfRegex: re.Pattern = re.compile(pattern=r"#endif")
+    hashUndefRegex: re.Pattern = re.compile(pattern=r"#undef")
     hashDefineRegex: re.Pattern = re.compile(pattern=r"#define")
+    hashIncludeRegex: re.Pattern = re.compile(pattern=r"#include")
     # 305 steps required
     dowhileMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?do\{.*?while\(0\)")
     # 345 steps required
     multilineMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?\{.*?\\\\n\}")
 
+    list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
+    list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
+    list_endifs: list[str] = findall_regex(pattern=hashEndIfRegex, target=lineContent)
+    list_undefs: list[str] = findall_regex(pattern=hashUndefRegex, target=lineContent)
+    list_includes: list[str] = findall_regex(
+        pattern=hashIncludeRegex, target=lineContent
+    )
+
     # 1. parse if some pre-processor instructions are there
     if not (
-        match_regex(pattern=hashDefineRegex, target=lineContent)
-        or match_regex(pattern=hashIfRegex, target=lineContent)
+        # match_regex(pattern=hashDefineRegex, target=lineContent)
+        # or match_regex(pattern=hashIfRegex, target=lineContent)
+        list_defines
+        or list_ifs
+        or list_undefs
+        or list_includes
     ):
-        lineContent = re.sub(pattern=r"\\n", repl="", string=lineContent)
+        lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
 
         return lineContent
 
@@ -128,10 +143,10 @@ def remove_multiple_newlines(lineContent: str) -> str:
     )
 
     # If the pattern isn’t found, string is returned unchanged.
-    lineContent = re.sub(pattern=r"\\\\n", repl="", string=lineContent)
+    lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
 
     # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
-    if not (multilineMacros or dowhileMacros):
+    if multilineMacros or dowhileMacros:
         tmp: str = ""
 
         # hashDefineRegex matches, also multilineMacroRegex and dowhileMacroRegex do
@@ -153,6 +168,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
     # 2. split line based on "\n" if pre-processor macros are present
     strBlocks: list[str] = lineContent.split(sep="\\n")
+    # print(strBlocks)
 
     # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
     strBlocks = [
@@ -161,27 +177,44 @@ def remove_multiple_newlines(lineContent: str) -> str:
             if not (
                 match_regex(pattern=hashDefineRegex, target=s)
                 or match_regex(pattern=hashIfRegex, target=s)
+                or match_regex(pattern=hashEndIfRegex, target=s)
+                or match_regex(pattern=hashUndefRegex, target=s)
+                or match_regex(pattern=hashIncludeRegex, target=s)
             )
-            else "\\n" + s + "\\n"
+            # in #include instructions, the quotes are not matched by precvious regex
+            # idx = 0 will always contain "func and the name of it"
+            else (
+                (re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
+                if idx == 0
+                else ("\\n" + re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
+            )
         )
-        for s in strBlocks
+        for idx, s in enumerate(strBlocks)
     ]
 
     # 4. merge blocks together
     lineContent = " ".join(strBlocks)
 
+    # here I want to check if some pre-processor instructions
+    # ain't properly matched
+    if not (len(list_ifs) == len(list_endifs)):
+        # manually check the error
+        std_logger.critical(
+            msg=f"Mismatched pre-processor instruction\n # #if : {len(list_ifs)}, # #endif: {len(list_endifs)}"
+        )
+
     return lineContent
 
 
 def remove_escaping_quotes(lineContent: str) -> str:
-    opening_quotes: re.Pattern = re.compile(
-        pattern=r"(?:(?<=,)|(?<=\()|(?<=\{)|(?:\\n))\s*\\\"\s*"
-    )
-    closing_quotes: re.Pattern = re.compile(pattern=r"\s*\\\"\s*(?=,|\)|})")
+    # remove the escape character for all opening double quotes
+    rm_esc_quotes: re.Pattern = re.compile(pattern=r"(?<!\\)\\\"")
+    # replace \\\" with \"
+    rm_multiple_esc: re.Pattern = re.compile(pattern=r"\\\\\"")
 
     # if no matches, lineContent is returned unchanged
-    modified_line: str = re.sub(pattern=opening_quotes, repl='"', string=lineContent)
-    modified_line = re.sub(pattern=closing_quotes, repl='"', string=modified_line)
+    modified_line: str = re.sub(pattern=rm_esc_quotes, repl='"', string=lineContent)
+    modified_line = re.sub(pattern=rm_multiple_esc, repl='"', string=modified_line)
 
     return modified_line
 
@@ -229,6 +262,8 @@ def create_func_metadatablock(
 
     # extract "func": ".... }"
     subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
+    # extract " ... { "
+    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
     # extract "target": \d* "
     subTargetRegEx = re.compile(pattern=r"\"target\"\s*:\s*")
     # extract "cwe": [whatever is inside] "
@@ -272,8 +307,38 @@ def create_func_metadatablock(
                     pattern=sub_regex_dict[key], repl="", string=content[lineIdx][key]
                 )
                 el = el.strip()
-                # in case of "func" field, remove leading and trailing dquotes
+                # in case of "func" field, remove leading and trailing quotes
                 el = el[1:-1] if (el and key == "func") else el
+
+                if key == "func":
+                    # remove "func":
+                    el = re.sub(pattern=subFuncRegEx, repl="", string=el)
+
+                    func_prototype: str = findall_regex(
+                        pattern=subFuncNameRegEx, target=el
+                    )[0]
+
+                    if func_prototype:
+                        # update el
+                        el = el.replace(func_prototype, "")
+
+                        # remove comments, \n, \t
+                        func_prototype = remove_tabs(lineContent=func_prototype)
+                        func_prototype = remove_comments(lineContent=func_prototype)
+                        func_prototype = re.sub(
+                            pattern=r"\\n", repl=" ", string=func_prototype
+                        )
+                        # in case some block comments were not originally correctly added
+                        # i.e. only */ or /* is present
+                        func_prototype = re.sub(
+                            pattern=r"\*/", repl="", string=func_prototype
+                        )
+                        func_prototype = re.sub(
+                            pattern=r"/\*", repl="", string=func_prototype
+                        )
+
+                        el = func_prototype + el
+
                 # in case of "cwe" field, check if there are more codes
                 if key == "cwe":
                     # if multiple cwe
@@ -352,6 +417,7 @@ def populate_tmp_file(func_str_body: str) -> None:
         function_name = (
             function_name if isinstance(function_name, str) else function_name[0]
         )
+        function_name = re.sub(pattern=r"\\n", repl=" ", string=function_name)
 
     if match_regex(pattern=r"^\\n", target=func_str_body):
         func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
