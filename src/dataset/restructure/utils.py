@@ -6,11 +6,14 @@ import subprocess
 from alive_progress import alive_bar
 
 import animate
+import argparser
 from log import std_logger
+from treesitter import TreeSitter
 
-PATH2JSON: str = "../../../DiverseVul/diversevul_20230702.json"
-# PATH2JSON: str = "../../../DiverseVul/small_diversevul.json"
+PATH2JSON: str = argparser.args.path
 FIELDS_IN_JSON = 9
+
+ts: TreeSitter = TreeSitter()
 
 
 def findall_regex(pattern: str | re.Pattern, target: str) -> list[str]:
@@ -29,6 +32,15 @@ def match_regex(pattern: str | re.Pattern, target: str) -> bool:
     return True if content else False
 
 
+def pop_regex(
+    pattern: str | re.Pattern, target: str, repl: str = ""
+) -> tuple[str, str | list[str]]:
+    matches: list[str] = findall_regex(pattern=pattern, target=target)
+    slice: str = re.sub(pattern=pattern, repl=repl, string=target)
+
+    return slice, matches
+
+
 def replace(target: str, old: str, new: str) -> str:
     return target.replace(old, new)
 
@@ -38,13 +50,10 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         pattern=r"\"func\".*\}\"(?=.*\"target\")"
     )
 
-    # this checks for missing opening block comment
-    # inside parenthesis (printf like function)
-    # func_check_syntax_block_comment: re.Pattern = re.compile(
-    #     pattern=r"(?<=\")\s+.*?\*/"
-    # )
-
+    # the only possible list is cwe
     d: dict[str, str] = {}
+    el: str
+
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
@@ -65,32 +74,71 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         "message": re.compile(pattern=r"\"message\"\s*:\s*\".*\""),
     }
 
+    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
+
+    sub_regex_dict: dict[str, re.Pattern] = {
+        # remove "func":
+        "func": re.compile(pattern=r"\"func\"\s*:\s*"),
+        # remove "target":
+        "target": re.compile(pattern=r"\"target\"\s*:\s*"),
+        # remove "cwe":
+        "cwe": re.compile(pattern=r"\"cwe\"\s*:\s*\["),
+        # remove "project":
+        "project": re.compile(pattern=r"\"project\"\s*:\s*\""),
+        # remove "commit_id":
+        "commit_id": re.compile(pattern=r"\"commit_id\"\s*:\s*\""),
+        # remove "hash":
+        "hash": re.compile(pattern=r"\"hash\"\s*:\s*"),
+        # remove "size":
+        "size": re.compile(pattern=r"\"size\"\s*:"),
+        # remove "message":
+        "message": re.compile(pattern=r"\"message\"\s*:\s*\""),
+    }
+
     for key, reg in regex_dict.items():
         # extract block of metadata ("<field>" : "<body>")
         content = findall_regex(pattern=reg, target=lineContent)  # list[str]
-        content = content[0] if content else ""
+        if not content:
+            raise ValueError('Cannot find "func" field')
+
+        content = content[0]
+
+        el = re.sub(pattern=sub_regex_dict[key], repl="", string=content).strip()
+        # in case of "func" field, remove leading and trailing quotes
+        el = el[1:-1] if (el and key == "func") else el
 
         if key == "func":
-            if not match_regex(pattern=func_check_closing_bracket, target=lineContent):
-                # adding closing braket at the end of the function
-                content = content[:-1] + "}" + '"'
-
-            # comments_to_correct: list[str] = findall_regex(
-            #     pattern=func_check_syntax_block_comment, target=content
-            # )
+            # func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=el)[0]
             #
-            # if comments_to_correct:
-            #     for idx, el in enumerate(comments_to_correct):
-            #         if match_regex(pattern=r"/\*", target=el):
-            #             continue
-            #         else:
-            #             content = replace(
-            #                 target=content,
-            #                 old=comments_to_correct[idx],
-            #                 new="/*" + comments_to_correct[idx],
-            #             )
+            # if func_prototype:
+            #     # remove old proto
+            #     el = el.replace(func_prototype, "")
+            #
+            #     # mistakes emprically verified
+            #     func_prototype = remove_tabs(lineContent=func_prototype)
+            #     func_prototype = remove_comments(lineContent=func_prototype)
+            #     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+            #     func_prototype = re.sub(pattern=r"\*/", repl="", string=func_prototype)
+            #     func_prototype = re.sub(pattern=r"/\*", repl="", string=func_prototype)
+            #
+            #     # re-add corrected function signature
+            #     el = func_prototype + el
 
-        d[key] = content
+            # check for correctly matched curly braces
+            nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
+            nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
+            if (
+                not match_regex(pattern=func_check_closing_bracket, target=el)
+                or nb_open_curvy != nb_close_curvy
+            ):
+                # adding closing braket at the end of the function
+                el = el + "}"
+
+        if (key == "project") or (key == "commit_id"):
+            # remove final quotes
+            el = el[:-1]
+
+        d[key] = el
 
     return d
 
@@ -209,12 +257,14 @@ def remove_multiple_newlines(lineContent: str) -> str:
     if not (len(list_ifs) == len(list_endifs)):
         # manually check the error
         std_logger.critical(
-            msg=f"Mismatched pre-processor instruction\n # #if : {len(list_ifs)}, # #endif: {len(list_endifs)}"
+            msg=f"Mismatched pre-processor instruction\n #if : {len(list_ifs)}, #endif: {len(list_endifs)}"
         )
         std_logger.info(msg="Adding processed function to address problem")
-        populate_tmp_file(func_str_body=lineContent)
+        # remove "func" : and pop it into prefix
+        # func_body, prefix = pop_regex(pattern=r"\"func\"\s*:\s*", target=lineContent)
+        populate_tmp_file(func_str_body=lineContent)  # remove last "
         pause_exection()
-        # read fix line and proceed
+        # read fixed line and proceed
         lineContent = read_file_content_as_str(filepath="tmp.c")
 
     return lineContent
@@ -244,16 +294,39 @@ def remove_multiplespaces(lineContent: str) -> str:
 def remove_comments(lineContent: str) -> str:
     # extract commen)t encapsulated in /**/
     # it is important to use the greedy search to stop the matching at first match
-    commentAstRegEx: re.Pattern = re.compile(pattern=r"/\*.*?\*/")
-    # check for comments starting with // and match until the eol
-    commentRegEx = re.compile(
-        pattern=r"(?:(?<=\\n)|(?<=\{)|(?<=\})|(?<=;)|(?<=\()|(?<=\)))\s*//.*?(?=\\n)"
-    )
+    # at least a space is necessary to recognie a blk comment in a string line
+    # e.g. \"this is the string\"<necessary space>/*inline blk comment*/
+    # commentAstRegEx: re.Pattern = re.compile(pattern=r"(?<!\")/\*[^\"]*?\*/")
+    # # check for comments starting with // and match until the eol
+    # commentRegEx = re.compile(
+    #     pattern=r"(?:(?<=\\n)|(?<=\{)|(?<=\})|(?<=;)|(?<=\()|(?<=\)))?\s*//.*?(?=\\n)"
+    # )
+    #
+    # lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
+    # lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
 
-    lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
-    lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
+    ts.parse_input(code_snippet=lineContent)
+    comments: list[bytes] = ts.extract_comments()
+
+    if comments:
+        for comment in comments:
+            str_cmnt = comment.decode(encoding="utf-8").__repr__()[1:-1]
+            lineContent = lineContent.replace(str_cmnt, "")
 
     return lineContent
+
+
+def dif_two_strings(s1, s2):
+    import difflib
+
+    s = difflib.SequenceMatcher(None, s1, s2, autojunk=False)
+    for tag, i1, i2, j1, j2 in s.get_opcodes():
+        if tag != "equal":
+            print(
+                "{:7}   a[{}:{}] --> b[{}:{}] {!r:>8} --> {!r}".format(
+                    tag, i1, i2, j1, j2, s1[i1:i2], s2[j1:j2]
+                )
+            )
 
 
 def read_json() -> list[str]:
@@ -263,120 +336,48 @@ def read_json() -> list[str]:
     ):
         with open(PATH2JSON, "r") as json:
             fileContent = json.readlines()
-    return fileContent
+
+    return fileContent[argparser.args.start_idx :]
 
 
 def create_func_metadatablock(
-    content: list[dict[str, str]],
+    content: list[dict],  # list[dict[str, str]]
 ) -> dict[int, dict[str, str | list[str]]]:
 
     json_dict: dict[int, dict[str, str | list[str]]] = {}
-    local_d: dict[str, str | list[str]] = {}
-    el: str | list[str]
 
-    # extract "func": ".... }"
-    subFuncRegEx = re.compile(pattern=r"\"func\"\s*:\s*")
-    # extract " ... { "
-    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
-    # extract "target": \d* "
-    subTargetRegEx = re.compile(pattern=r"\"target\"\s*:\s*")
-    # extract "cwe": [whatever is inside] "
-    subCweRegEx = re.compile(pattern=r"\"cwe\"\s*:\s*\[")
-    # extract "project": "prjname"
-    subPrjRegEx = re.compile(pattern=r"\"project\"\s*:\s*\"")
-    # extract "commit_id": "alphanumeric"
-    subCommitRegEx = re.compile(pattern=r"\"commit_id\"\s*:\s*\"")
-    # extract "hash": "numeric"
-    subHashRegEx = re.compile(pattern=r"\"hash\"\s*:\s*")
-    # extract "size": "size"
-    subSizeRegEx = re.compile(pattern=r"\"size\"\s*:")
-    # extract "message": "commit_message"
-    subMsgRegEx = re.compile(pattern=r"\"message\"\s*:\s*\"")
-
-    sub_regex_dict = {
-        "func": subFuncRegEx,
-        "target": subTargetRegEx,
-        "cwe": subCweRegEx,
-        "project": subPrjRegEx,
-        "commit_id": subCommitRegEx,
-        "hash": subHashRegEx,
-        "size": subSizeRegEx,
-        "message": subMsgRegEx,
-    }
-
-    # merge blocks in between "{" and "}\n"
-    # iterate in the list and start merging to form blocks
     content_len: int = len(content)
     with alive_bar(
         total=content_len,
-        title="Creating valid datastructure (JSON)",
+        title="Creating valid JSON",
         length=60,
         bar="smooth",
     ) as bar:
         for lineIdx in range(content_len):
-            local_d = {}
-            for key in content[lineIdx].keys():
-                # remove field name
-                el = re.sub(
-                    pattern=sub_regex_dict[key], repl="", string=content[lineIdx][key]
-                )
-                el = el.strip()
-                # in case of "func" field, remove leading and trailing quotes
-                el = el[1:-1] if (el and key == "func") else el
+            # NOTE: this is done here to avoid changing too much things
 
-                if key == "func":
-                    # remove "func":
-                    el = re.sub(pattern=subFuncRegEx, repl="", string=el)
+            # WARN: Ik, Ik, I could have declare the initial dict as dic[int, dict[str, str \list[str]]]
+            # and avoid this
 
-                    func_prototype: str = findall_regex(
-                        pattern=subFuncNameRegEx, target=el
-                    )[0]
+            el: list[str] | str
+            # for "cwe" field, check if there are more codes
+            if "," in content[lineIdx]["cwe"]:
+                it: list[str] = content[lineIdx]["cwe"].split(sep=",")
+                el = [
+                    (
+                        # remove spaces and " from 1st up to (n-1)th elements
+                        # in case of last element, remove ] too
+                        re.sub(pattern=r"\s*", repl="", string=e)[1:-1]
+                        if idx != len(it)
+                        else re.sub(pattern=r"\s*", repl="", string=e)[1:-2]
+                    )
+                    for idx, e in enumerate(iterable=it, start=1)
+                ]
+            else:
+                el = content[lineIdx]["cwe"][1:-2]
 
-                    if func_prototype:
-                        # update el
-                        el = el.replace(func_prototype, "")
-
-                        # remove comments, \n, \t
-                        func_prototype = remove_tabs(lineContent=func_prototype)
-                        func_prototype = remove_comments(lineContent=func_prototype)
-                        func_prototype = re.sub(
-                            pattern=r"\\n", repl=" ", string=func_prototype
-                        )
-                        # in case some block comments were not originally correctly added
-                        # i.e. only */ or /* is present
-                        func_prototype = re.sub(
-                            pattern=r"\*/", repl="", string=func_prototype
-                        )
-                        func_prototype = re.sub(
-                            pattern=r"/\*", repl="", string=func_prototype
-                        )
-
-                        el = func_prototype + el
-
-                # in case of "cwe" field, check if there are more codes
-                if key == "cwe":
-                    # if multiple cwe
-                    if "," in el:
-                        it: list[str] = el.split(sep=",")
-                        el = [
-                            (
-                                # remove spaces and " from 1st up to (n-1)th elements
-                                # in case of last element, remove ] too
-                                re.sub(pattern=r"\s*", repl="", string=e)[1:-1]
-                                if idx != len(it)
-                                else re.sub(pattern=r"\s*", repl="", string=e)[1:-2]
-                            )
-                            for idx, e in enumerate(iterable=it, start=1)
-                        ]
-                    else:
-                        el = el[1:-2]
-                if (key == "project") or (key == "commit_id"):
-                    # remove final quotes
-                    el = el[:-1]
-
-                local_d[key] = el
-
-            json_dict[lineIdx] = local_d
+            content[lineIdx].update({"cwe": el})
+            json_dict[lineIdx] = content[lineIdx]
             bar()
 
     return json_dict
@@ -406,12 +407,13 @@ def remove_unused_fields(
     return shrinkedDict
 
 
-def write_json(dic: dict, output: str) -> None:
-    output, _ = os.path.splitext(p=output)
-    with open(f"{output}.json", "w") as outfile:
+def write_json(dic: dict) -> None:
+    # output, _ = os.path.splitext(p=argparser.args.file_name)
+    mode: str = "w" if argparser.args.clear_json else "a"
+    with open(file=argparser.args.file_name, mode=mode) as outfile:
         json.dump(obj=dic, fp=outfile, indent=2, sort_keys=True)
 
-    std_logger.debug(msg="Processed dictionary successfully saved as JSON file")
+    # std_logger.debug(msg="Processed dictionary successfully saved as JSON file")
 
 
 def create_empty_tmp_source(filename: str = "tmp.c") -> None:
@@ -436,7 +438,8 @@ def populate_tmp_file(func_str_body: str) -> None:
     if match_regex(pattern=r"^\\n", target=func_str_body):
         func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
 
-    std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
+    if argparser.args.debug:
+        std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
 
     # at this point, the char "\n" can only be found where pre-processor instructions are
     # split based on that character and enforce new line to avoid refactoring error
@@ -496,6 +499,7 @@ def build_refactored_json(
                 refactored_chunk = refactored_chunk
 
             dic[k].update({"func": refactored_chunk})
+            write_json(dic=dic[k])
             bar()
 
     return dic
@@ -505,7 +509,7 @@ def pause_exection():
     input("Press enter to continue ...")
 
 
-def rm_tmp_file(filepath: str) -> None:
+def rm_tmp_file(filepath: str = "tmp.c") -> None:
     try:
         subprocess.run(
             args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
