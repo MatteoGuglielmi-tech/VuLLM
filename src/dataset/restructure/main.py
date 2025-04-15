@@ -82,7 +82,7 @@ class Builder:
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
         # save processed dataset as json
-        utils.write_json(dic=dic, output="ReadyToUse_DiverseVul.json")
+        utils.write_json(dic=dic)
 
 
 if __name__ == "__main__":
