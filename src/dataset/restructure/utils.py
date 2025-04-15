@@ -108,21 +108,25 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         el = el[1:-1] if (el and key == "func") else el
 
         if key == "func":
-            # func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=el)[0]
-            #
-            # if func_prototype:
-            #     # remove old proto
-            #     el = el.replace(func_prototype, "")
-            #
-            #     # mistakes emprically verified
-            #     func_prototype = remove_tabs(lineContent=func_prototype)
-            #     func_prototype = remove_comments(lineContent=func_prototype)
-            #     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
-            #     func_prototype = re.sub(pattern=r"\*/", repl="", string=func_prototype)
-            #     func_prototype = re.sub(pattern=r"/\*", repl="", string=func_prototype)
-            #
-            #     # re-add corrected function signature
-            #     el = func_prototype + el
+            func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=el)[0]
+
+            if func_prototype:
+                # remove old proto
+                el = el.replace(func_prototype, "")
+
+                # mistakes emprically verified
+                func_prototype = remove_tabs(lineContent=func_prototype)
+                func_prototype = remove_comments(lineContent=func_prototype)
+                func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+                func_prototype = re.sub(
+                    pattern=r"\*/\s*", repl="", string=func_prototype
+                )
+                func_prototype = re.sub(
+                    pattern=r"/\*\s*", repl="", string=func_prototype
+                )
+
+                # re-add corrected function signature
+                el = func_prototype + el
 
             # check for correctly matched curly braces
             nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
@@ -307,11 +311,15 @@ def remove_comments(lineContent: str) -> str:
 
     ts.parse_input(code_snippet=lineContent)
     comments: list[bytes] = ts.extract_comments()
+    print(lineContent)
 
     if comments:
         for comment in comments:
             str_cmnt = comment.decode(encoding="utf-8").__repr__()[1:-1]
+            str_cmnt = re.sub(pattern=r"\\\\", repl=r"\\", string=str_cmnt)
+            print(str_cmnt)
             lineContent = lineContent.replace(str_cmnt, "")
+        # print(comments[14].decode().__repr__())
 
     return lineContent
 
@@ -354,11 +362,6 @@ def create_func_metadatablock(
         bar="smooth",
     ) as bar:
         for lineIdx in range(content_len):
-            # NOTE: this is done here to avoid changing too much things
-
-            # WARN: Ik, Ik, I could have declare the initial dict as dic[int, dict[str, str \list[str]]]
-            # and avoid this
-
             el: list[str] | str
             # for "cwe" field, check if there are more codes
             if "," in content[lineIdx]["cwe"]:
@@ -467,10 +470,10 @@ def spawn_refactor(filepath: str) -> int:
 
 
 def read_file_content_as_str(filepath: str) -> str:
-    with open(file=filepath, mode="r") as f:
-        file_content: str = f.read()
+    with open(file=filepath, mode="rb") as f:
+        file_content: bytes = f.read()
 
-    return file_content
+    return file_content.decode(encoding="utf-8")
 
 
 def build_refactored_json(
@@ -488,7 +491,13 @@ def build_refactored_json(
             if spawn_refactor(filepath=src_pth):
                 pause_exection()
 
-            refactored_chunk = read_file_content_as_str(filepath=src_pth)
+            refactored_chunk = re.sub(
+                pattern=r"\\\\",
+                repl=r"\\",
+                string=read_file_content_as_str(filepath=src_pth),
+            )
+
+            print(refactored_chunk)
             try:
                 refactored_chunk = (
                     refactored_chunk
