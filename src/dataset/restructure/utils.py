@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 import re
 import subprocess
 
@@ -10,8 +11,7 @@ import argparser
 from log import std_logger
 from treesitter import TreeSitter
 
-PATH2JSON: str = argparser.args.path
-FIELDS_IN_JSON = 9
+FIELDS_IN_JSON: int = 9
 
 ts: TreeSitter = TreeSitter()
 
@@ -46,14 +46,10 @@ def replace(target: str, old: str, new: str) -> str:
 
 
 def split_lineContent(lineContent: str) -> dict[str, str]:
-    func_check_closing_bracket: re.Pattern = re.compile(
-        pattern=r"\"func\".*\}\"(?=.*\"target\")"
-    )
-
-    # the only possible list is cwe
     d: dict[str, str] = {}
     el: str
 
+    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
@@ -73,8 +69,6 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         # extract "message": "commit_message"
         "message": re.compile(pattern=r"\"message\"\s*:\s*\".*\""),
     }
-
-    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
 
     sub_regex_dict: dict[str, re.Pattern] = {
         # remove "func":
@@ -133,7 +127,6 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
             nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
 
             if len(nb_open_curvy) != len(nb_close_curvy):
-                std_logger.critical(f"entered here -> {func_prototype}")
                 # adding closing braket at the end of the function
                 el = el + "}"
 
@@ -266,10 +259,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
             msg=f"Mismatched pre-processor instruction\n #if : {len(list_ifs)}, #endif: {len(list_endifs)}"
         )
         std_logger.info(msg="Adding processed function to address problem")
-        # remove "func" : and pop it into prefix
-        # func_body, prefix = pop_regex(pattern=r"\"func\"\s*:\s*", target=lineContent)
-        populate_tmp_file(func_str_body=lineContent)  # remove last "
-        pause_exection()
+        populate_tmp_file(func_str_body=lineContent)
+        pause_exection(msg="Correct function issue(s) and press enter to continue ...")
         # read fixed line and proceed
         lineContent = read_file_content_as_str(filepath="tmp.c")
 
@@ -338,13 +329,15 @@ def dif_two_strings(s1, s2):
 
 def read_json() -> list[str]:
     fileContent: list[str] = []
+
     with animate.Loader(
         desc="Reading original dataset malformed Json", end="List of lines obtained"
     ):
-        with open(PATH2JSON, "r") as json:
+        with open(file=argparser.args.path, mode="r") as json:
             fileContent = json.readlines()
 
-    return fileContent[argparser.args.start_idx :]
+    start_idx = (argparser.args.start_idx) if argparser.args.start_idx > 0 else 0
+    return fileContent[start_idx:]
 
 
 def create_func_metadatablock(
@@ -352,6 +345,11 @@ def create_func_metadatablock(
 ) -> dict[int, dict[str, str | list[str]]]:
 
     json_dict: dict[int, dict[str, str | list[str]]] = {}
+
+    if os.path.isfile(path=argparser.args.file_name) and not argparser.args.clear_json:
+        existing_content: dict[int, dict[str, str | list[str]]] = _load_backup()
+        json_dict = existing_content.copy()
+        del existing_content
 
     content_len: int = len(content)
     with alive_bar(
@@ -379,7 +377,7 @@ def create_func_metadatablock(
                 el = content[lineIdx]["cwe"][1:-2]
 
             content[lineIdx].update({"cwe": el})
-            json_dict[lineIdx] = content[lineIdx]
+            json_dict[(lineIdx + argparser.args.start_idx)] = content[lineIdx]
             bar()
 
     return json_dict
@@ -410,12 +408,12 @@ def remove_unused_fields(
 
 
 def write_json(dic: dict) -> None:
-    # output, _ = os.path.splitext(p=argparser.args.file_name)
-    mode: str = "w" if argparser.args.clear_json else "a"
-    with open(file=argparser.args.file_name, mode=mode) as outfile:
-        json.dump(obj=dic, fp=outfile, indent=2, sort_keys=True)
+    with open(file=argparser.args.file_name, mode="w", encoding="utf-8") as outfile:
+        json.dump(obj=dic, fp=outfile, indent=2, sort_keys=False)
 
-    # std_logger.debug(msg="Processed dictionary successfully saved as JSON file")
+
+def _clear_file_content(filename: str) -> None:
+    open(filename, mode="w").close()
 
 
 def create_empty_tmp_source(filename: str = "tmp.c") -> None:
@@ -477,18 +475,25 @@ def read_file_content_as_str(filepath: str) -> str:
 
 def build_refactored_json(
     dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
-) -> dict[int, dict[str, str | list[str]]]:
+) -> None:
     refactored_chunk: str = ""
     content_len: int = len(dic.keys())
+    running_d: dict = {}
+
+    if argparser.args.clear_json:
+        _clear_file_content(filename=argparser.args.file_name)
+        _delete_backup()
+
     with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
         for idx, k in enumerate(dic.keys()):
-            # str() casting to avoid linting error
-            # populate temporary file with current "func" field content
+            assert isinstance(
+                dic[idx]["func"], str
+            ), "For some reason, the `func` field is not a string"
+
             populate_tmp_file(func_str_body=str(dic[idx]["func"]))
 
             # spawn refactor on just added function body
             # if spawn_refactor(filepath=src_pth):
-            #     pause_exection()
             spawn_refactor(filepath=src_pth)
             pause_exection()
 
@@ -496,7 +501,6 @@ def build_refactored_json(
                 refactored_chunk=read_file_content_as_str(filepath=src_pth)
             )
 
-            print(refactored_chunk)
             try:
                 refactored_chunk = (
                     refactored_chunk
@@ -507,10 +511,11 @@ def build_refactored_json(
                 refactored_chunk = refactored_chunk
 
             dic[k].update({"func": refactored_chunk})
-            write_json(dic=dic[k])
+            running_d[k] = dic[k]
+            _save_backup(obj=running_d)
             bar()
 
-    return dic
+    write_json(dic)
 
 
 def _remove_spurious_escape(refactored_chunk: str) -> str:
@@ -519,8 +524,27 @@ def _remove_spurious_escape(refactored_chunk: str) -> str:
     return refactored_chunk
 
 
-def pause_exection():
-    input("Press enter to continue ...")
+def _save_backup(obj: dict) -> None:
+    with open(file="intrmd_bkup.pkl", mode="wb") as fp:
+        pickle.dump(obj=obj, file=fp)
+
+    if argparser.args.debug:
+        std_logger.info(msg="Pickling successful")
+
+
+def _load_backup() -> dict[int, dict[str, str | list[str]]]:
+    with open(file="intrmd_bkup.pkl", mode="rb") as fp:
+        obj = pickle.load(file=fp)
+    return obj
+
+
+def _delete_backup() -> None:
+    if os.path.exists(path="intrmd_bkup.pkl"):
+        os.remove(path="intrmd_bkup.pkl")
+
+
+def pause_exection(msg: str = "Press enter to continue ..."):
+    input(msg)
 
 
 def rm_tmp_file(filepath: str = "tmp.c") -> None:
