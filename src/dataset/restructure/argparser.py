@@ -21,7 +21,7 @@ parser.add_argument(
     "--file_name",
     "-n",
     required=False,
-    default="ReadyToUse_DiverseVul.json",
+    default="DiverseVul.json",
     help="Name of the JSON file to save processed dataset",
 )
 
