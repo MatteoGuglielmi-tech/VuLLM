@@ -4,7 +4,7 @@ IndentWidth: 2
 ContinuationIndentWidth: 2
 UseTab: Never
 ColumnLimit: 100
-Language: Cpp
+Language: C
 Standard: Cpp11
 Cpp11BracedListStyle: true
 AlignAfterOpenBracket: Align
@@ -24,15 +24,19 @@ BraceWrapping:
   SplitEmptyRecord: false
   AfterControlStatement: Never
 AllowShortLoopsOnASingleLine: true
-BreakAdjacentStringLiterals: false
-BreakAfterReturnType: All
+AllowShortBlocksOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+BreakAdjacentStringLiterals: true
+# BreakAfterReturnType: All
 BreakArrays: false
 BreakFunctionDefinitionParameters: false
-# BinPackParameters: BinPack
+# # BinPackParameters: BinPack
 BreakStringLiterals: true
 IndentCaseLabels: true
-# IndentExportBlock: true  # present from clangd 21
-# IndentExternalBlock: true  # present from clangd 21
+# # IndentExportBlock: true  # present from clangd 21
+# # IndentExternalBlock: true  # present from clangd 21
 IndentGotoLabels: true
 IndentPPDirectives: BeforeHash
 MacroBlockBegin: ^NS_MAP_BEGIN|NS_TABLE_HEAD$
@@ -42,7 +46,7 @@ QualifierAlignment: Custom
 QualifierOrder: [inline, static, volatile, const, type]
 ReferenceAlignment: Right
 RemoveBracesLLVM: false
-# RemoveEmptyLinesInUnwrappedLines: true  # present from clangd 21
+# # RemoveEmptyLinesInUnwrappedLines: true  # present from clangd 21
 RemoveParentheses: ReturnStatement
 RemoveSemicolon: true
 SeparateDefinitionBlocks: Leave
@@ -63,4 +67,4 @@ SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
 SpacesInAngles: false
 SpacesInParens: Never
-# SkipMacroDefinitionBody: true
+SkipMacroDefinitionBody: true
