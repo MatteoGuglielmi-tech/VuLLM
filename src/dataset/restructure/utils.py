@@ -131,10 +131,9 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
             # check for correctly matched curly braces
             nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
             nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
-            if (
-                not match_regex(pattern=func_check_closing_bracket, target=el)
-                or nb_open_curvy != nb_close_curvy
-            ):
+
+            if len(nb_open_curvy) != len(nb_close_curvy):
+                std_logger.critical(f"entered here -> {func_prototype}")
                 # adding closing braket at the end of the function
                 el = el + "}"
 
@@ -156,6 +155,7 @@ def remove_tabs(lineContent: str):
 
 
 def remove_multiple_newlines(lineContent: str) -> str:
+    # this can be achieved via tree-sitter as well
     hashIfRegex: re.Pattern = re.compile(pattern=r"#\s*if")
     hashElseRegex: re.Pattern = re.compile(pattern=r"#\s*else")
     hashElifRegex: re.Pattern = re.compile(pattern=r"#\s*elif")
@@ -191,6 +191,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
         or list_includes
     ):
         lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
+        # this pattern should be found only inside strings
+        lineContent = re.sub(pattern=r"\\\\n", repl="", string=lineContent)
 
         return lineContent
 
@@ -485,13 +487,13 @@ def build_refactored_json(
             populate_tmp_file(func_str_body=str(dic[idx]["func"]))
 
             # spawn refactor on just added function body
-            if spawn_refactor(filepath=src_pth):
-                pause_exection()
+            # if spawn_refactor(filepath=src_pth):
+            #     pause_exection()
+            spawn_refactor(filepath=src_pth)
+            pause_exection()
 
-            refactored_chunk = re.sub(
-                pattern=r"\\\\",
-                repl=r"\\",
-                string=read_file_content_as_str(filepath=src_pth),
+            refactored_chunk = _remove_spurious_escape(
+                refactored_chunk=read_file_content_as_str(filepath=src_pth)
             )
 
             print(refactored_chunk)
@@ -509,6 +511,12 @@ def build_refactored_json(
             bar()
 
     return dic
+
+
+def _remove_spurious_escape(refactored_chunk: str) -> str:
+    refactored_chunk = re.sub(pattern=r"\\(?!n)\s*", repl=r"", string=refactored_chunk)
+
+    return refactored_chunk
 
 
 def pause_exection():
