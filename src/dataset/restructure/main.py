@@ -76,13 +76,11 @@ class Builder:
         # create empty temporary file to call "gnu indent refactor" upon
         utils.create_empty_tmp_source()
         # substitute in "func" field refactored string version
-        dic = utils.build_refactored_json(dic=dic)
+        utils.build_refactored_json(dic=dic)
         # remove temp file and copy
         utils.rm_tmp_file(filepath="tmp.c")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
-        # save processed dataset as json
-        utils.write_json(dic=dic)
 
 
 if __name__ == "__main__":
