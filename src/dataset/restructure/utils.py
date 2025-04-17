@@ -125,7 +125,9 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
             # check for correctly matched curly braces
             nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
             nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
-
+            # WARNING: consider that if a `{` or `}` is under an #if directive,
+            # this comparison may not be valid
+            # altnough, in those cases a mismatched is very likely to be detected
             if len(nb_open_curvy) != len(nb_close_curvy):
                 # adding closing braket at the end of the function
                 el = el + "}"
@@ -253,12 +255,13 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
     # here I want to check if some pre-processor instructions
     # ain't properly matched
-    if not (len(list_ifs) == len(list_endifs)):
+    flag, msg = ts.check_missing_nodes()
+    if not (len(list_ifs) == len(list_endifs)) and flag:
         # manually check the error
         std_logger.critical(
-            msg=f"Mismatched pre-processor instruction\n #if : {len(list_ifs)}, #endif: {len(list_endifs)}"
+            msg=f"Mismatched pre-processor instruction: {msg}"
+            f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
         )
-        std_logger.info(msg="Adding processed function to address problem")
         populate_tmp_file(func_str_body=lineContent)
         pause_exection(msg="Correct function issue(s) and press enter to continue ...")
         # read fixed line and proceed
