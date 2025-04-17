@@ -1,0 +1,27 @@
+- fix function with id 2110 `ssize_t sys_recvfrom(int s, void *buf, size_t len, int flags, struct sockaddr *from, socklen_t *fromlen)` -> missing #endif and closing `}`
+- fix function with id 4898 `STATIC LONG WINAPI GC_write_fault_handler(  struct _EXCEPTION_POINTERS *exc_info)` -> removed #endif
+- fix function with id 4950 `addChar(char c, Lineprop mode)` -> removed #endif in excess
+- fix function with id 5437 `static int input(yyscan_% yyscanner)` -> remove #else and #endif without #if directive
+- fix function with id 8322  `static int do_seekable(__G__ lastchance)` -> here a lot of functions have been condensed into one. It would be impossible, even for the largest models, to get context on such immense functions. All dataset entries for this function have been **removed** from the original dataset
+- fix function with ids 11132 and 11133 `__attribute__((no_sanitize ("undefined")))` -> remove #endif
+- fix function with id 12674 `int main(int argc, char **argv)`  -> add missing #endif
+- fix function with id 13482,13485, 13486  `"func" : "int wolfSSH_SFTP_RecvOpen(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)` -> missing #endif. Removed initial #ifdef since it wraps all the function
+- id 15507, 15508 -> remove comments making the parse raising an error
+- id 16554 -> remove #endif
+- id 16985 -> remove #ifdef
+- 17508 -> remove two #endif
+- 17716, 17755 -> remove #endif not matching any #if
+- 17756 -> remove #endif not matching any #if
+- 18529 -> remove #endif
+- 23560 -> remove #ifdef
+- 28733 -> add closing #endif and closing } + remove spurious */
+- 28901 -> remove */, add #endif and closing }
+- 28934 -> remove `#ifdef DEBUG_STEP`
+- 28935 -> remove `#ifdef XP_OPTIMIZED_FILTER_FIRST`
+- 28960 -> add closing #endif and remove */ in func prototype name
+- 33011 -> remove unmatched `#ifdef HAVE_SETSID`
+- 35317 -> remove unmatched #endif
+- 36990, 36998 -> fix: remove #endif
+- 40909 -> remove `#ifdef ENABLE_ESMTP` and add double `}` at the end of the function body 
+- 41461, 47350 -> fix: remove #endif
+- 47794 -> fix: change closing `#else` with `#endif`
