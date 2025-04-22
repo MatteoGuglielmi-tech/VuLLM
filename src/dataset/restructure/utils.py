@@ -49,7 +49,7 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
     d: dict[str, str] = {}
     el: str
 
-    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
+    # subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
@@ -101,39 +101,34 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         # in case of "func" field, remove leading and trailing quotes
         el = el[1:-1] if (el and key == "func") else el
 
-        if key == "func":
-            func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=el)[0]
-
-            if func_prototype:
-                # remove old proto
-                el = el.replace(func_prototype, "")
-
-                # mistakes emprically verified
-                func_prototype = remove_tabs(lineContent=func_prototype)
-                func_prototype = remove_comments(lineContent=func_prototype)
-                func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
-                func_prototype = re.sub(
-                    pattern=r"\*/\s*", repl="", string=func_prototype
-                )
-                func_prototype = re.sub(
-                    pattern=r"/\*\s*", repl="", string=func_prototype
-                )
-
-                # re-add corrected function signature
-                el = func_prototype + el
-
-            # check for correctly matched curly braces
-            nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
-            nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
-            # WARNING: consider that if a `{` or `}` is under an #if directive,
-            # this comparison may not be valid
-            # altnough, in those cases a mismatched is very likely to be detected
-            if len(nb_open_curvy) != len(nb_close_curvy):
-                # adding closing braket at the end of the function
-                # el = el + "}"
-                pause_exection(
-                    msg="Correct parenthesis disposition and press enter to continue ..."
-                )
+        # if key == "func":
+        #     try:
+        #         func_prototype: str = findall_regex(
+        #             pattern=subFuncNameRegEx, target=el
+        #         )[0]
+        #
+        #         if func_prototype:
+        #             # remove old proto
+        #             el = el.replace(func_prototype, "")
+        #
+        #             # mistakes emprically verified
+        #             func_prototype = remove_tabs(lineContent=func_prototype)
+        #             func_prototype = remove_comments(lineContent=func_prototype)
+        #             func_prototype = re.sub(
+        #                 pattern=r"\\n", repl=" ", string=func_prototype
+        #             )
+        #             func_prototype = re.sub(
+        #                 pattern=r"\*/\s*", repl="", string=func_prototype
+        #             )
+        #             func_prototype = re.sub(
+        #                 pattern=r"/\*\s*", repl="", string=func_prototype
+        #             )
+        #
+        #             # re-add corrected function signature
+        #             el = func_prototype + el
+        #
+        #     except:
+        #         continue
 
         if (key == "project") or (key == "commit_id"):
             # remove final quotes
@@ -175,6 +170,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
     list_includes: list[str] = findall_regex(
         pattern=hashIncludeRegex, target=lineContent
     )
+    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
 
     # 1. parse if some pre-processor instructions are there
     if not (
@@ -256,6 +252,22 @@ def remove_multiple_newlines(lineContent: str) -> str:
     # 4. merge blocks together
     lineContent = " ".join(strBlocks)
 
+    func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=lineContent)[0]
+
+    if func_prototype:
+        # remove old proto
+        lineContent = lineContent.replace(func_prototype, "")
+
+        # mistakes emprically verified
+        func_prototype = remove_tabs(lineContent=func_prototype)
+        func_prototype = remove_comments(lineContent=func_prototype)
+        func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+        func_prototype = re.sub(pattern=r"\*/\s*", repl="", string=func_prototype)
+        func_prototype = re.sub(pattern=r"/\*\s*", repl="", string=func_prototype)
+
+        # re-add corrected function signature
+        lineContent = func_prototype + lineContent
+
     # here I want to check if some pre-processor instructions
     # ain't properly matched
     if len(list_ifs) != len(list_endifs):
@@ -268,6 +280,23 @@ def remove_multiple_newlines(lineContent: str) -> str:
         pause_exection(msg="Correct function issue(s) and press enter to continue ...")
         # read fixed line and proceed
         lineContent = read_file_content_as_str(filepath="tmp.c")
+
+    # check for correctly matched curly braces
+    nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=lineContent)
+    nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=lineContent)
+    # this comparison may not be valid
+    # although, in those cases a mismatched is very likely to be detected
+    if len(nb_open_curvy) != len(nb_close_curvy):
+        # adding closing braket at the end of the function
+        # el = el + "}"
+        std_logger.critical(
+            msg=f"Mismatched parenthesis:"
+            f"# opening : {len(nb_open_curvy)}, # closing: {len(nb_close_curvy)}"
+        )
+        populate_tmp_file(func_str_body=lineContent)
+        pause_exection(
+            msg="Correct parenthesis disposition and press enter to continue ..."
+        )
 
     return lineContent
 
