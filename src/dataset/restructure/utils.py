@@ -102,46 +102,38 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         el = el[1:-1] if (el and key == "func") else el
 
         if key == "func":
-            try:
-                func_prototype: str = findall_regex(
-                    pattern=subFuncNameRegEx, target=el
-                )[0]
+            func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=el)[0]
 
-                if func_prototype:
-                    # remove old proto
-                    el = el.replace(func_prototype, "")
+            if func_prototype:
+                # remove old proto
+                el = el.replace(func_prototype, "")
 
-                    # mistakes emprically verified
-                    func_prototype = remove_tabs(lineContent=func_prototype)
-                    func_prototype = remove_comments(lineContent=func_prototype)
-                    func_prototype = re.sub(
-                        pattern=r"\\n", repl=" ", string=func_prototype
-                    )
-                    func_prototype = re.sub(
-                        pattern=r"\*/\s*", repl="", string=func_prototype
-                    )
-                    func_prototype = re.sub(
-                        pattern=r"/\*\s*", repl="", string=func_prototype
-                    )
+                # mistakes emprically verified
+                func_prototype = remove_tabs(lineContent=func_prototype)
+                func_prototype = remove_comments(lineContent=func_prototype)
+                func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+                func_prototype = re.sub(
+                    pattern=r"\*/\s*", repl="", string=func_prototype
+                )
+                func_prototype = re.sub(
+                    pattern=r"/\*\s*", repl="", string=func_prototype
+                )
 
-                    # re-add corrected function signature
-                    el = func_prototype + el
+                # re-add corrected function signature
+                el = func_prototype + el
 
-                # check for correctly matched curly braces
-                nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
-                nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
-                # WARNING: consider that if a `{` or `}` is under an #if directive,
-                # this comparison may not be valid
-                # altnough, in those cases a mismatched is very likely to be detected
-                if len(nb_open_curvy) > len(nb_close_curvy):
-                    # adding closing braket at the end of the function
-                    el = el + "}"
-                else:
-                    pause_exection(
-                        msg="Correct parenthesis disposition and press enter to continue ..."
-                    )
-            except:
-                pause_exection()
+            # check for correctly matched curly braces
+            nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=el)
+            nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=el)
+            # WARNING: consider that if a `{` or `}` is under an #if directive,
+            # this comparison may not be valid
+            # altnough, in those cases a mismatched is very likely to be detected
+            if len(nb_open_curvy) != len(nb_close_curvy):
+                # adding closing braket at the end of the function
+                # el = el + "}"
+                pause_exection(
+                    msg="Correct parenthesis disposition and press enter to continue ..."
+                )
 
         if (key == "project") or (key == "commit_id"):
             # remove final quotes
@@ -266,10 +258,10 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
     # here I want to check if some pre-processor instructions
     # ain't properly matched
-    if not (len(list_ifs) == len(list_endifs)):
+    if len(list_ifs) != len(list_endifs):
         # manually check the error
         std_logger.critical(
-            msg=f"Mismatched pre-processor instruction: \t"
+            msg=f"Mismatched pre-processor instruction:"
             f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
         )
         populate_tmp_file(func_str_body=lineContent)
