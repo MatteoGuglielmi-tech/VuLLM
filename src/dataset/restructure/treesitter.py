@@ -27,6 +27,7 @@ class TreeSitter:
         src = re.sub(pattern=b"\\\\n", repl=b"\n", string=src)
 
         self.tree: Tree = self.parser.parse(src)
+        self.root_node = self.tree.root_node
 
     def extract_comments(self) -> list[bytes]:
         if not (self._is_parsed or self._is_encoded):
@@ -34,21 +35,37 @@ class TreeSitter:
 
         comments: list[bytes] = [
             self._assert_not_none(attribute=cmnt.text, attr_name="cmnt.text")
-            for cmnt in self.traverse_tree(tree=self.tree)
+            for cmnt in self.traverse_tree()
             if cmnt.type == "comment"
         ]
 
         return comments
 
-    def check_missing_nodes(self) -> tuple[bool, str]:
+    def get_missing_nodes(self) -> list[Node]:
+        lom = []
         if not (self._is_parsed or self._is_encoded):
             raise Exception("Missing call to parse function! Abort...")
 
-        for node in self.traverse_tree(tree=self.tree):
+        for node in self.traverse_tree():
             if node.is_missing:
-                return (True, f"{node}")
+                # technically speaking, this shouldn't be an option
+                assert node is not None
+                lom.append(node)
 
-        return (False, "")
+        return lom
+
+    def get_error_nodes(self) -> list[Node]:
+        loe = []
+        if not (self._is_parsed or self._is_encoded):
+            raise Exception("Missing call to parse function! Abort...")
+
+        for node in self.traverse_tree():
+            if node.is_error:
+                # technically speaking, this shouldn't be an option
+                assert node is not None
+                loe.append(node)
+
+        return loe
 
     def extract_directives(self) -> list[bytes]:
         if not (self._is_parsed or self._is_encoded):
@@ -56,7 +73,7 @@ class TreeSitter:
 
         directives: list[bytes] = [
             self._assert_not_none(attribute=drctv.text, attr_name="drctv.text")
-            for drctv in self.traverse_tree(tree=self.tree)
+            for drctv in self.traverse_tree()
             if (
                 drctv.type == "preproc_def"
                 or drctv.type == "preproc_function_def"
@@ -70,6 +87,27 @@ class TreeSitter:
 
         return directives
 
+    def query(self, query_str: str) -> dict[str, list[Node]]:
+        query = self.tree.language.query(query_str)
+        captures = query.captures(self.root_node)
+
+        return captures
+
+    def is_closing_curvy_needed(self) -> bool:
+        missing = self.get_missing_nodes()
+        function_node: Node = self.root_node.children[0]
+
+        if missing:
+            # check for missing "}" based on node position
+            if (
+                (function_node.end_point == missing[-1].end_point)
+                and (missing[-1].start_point == missing[-1].end_point)
+                and missing[-1].type == "}"
+            ):
+                return True
+
+        return False
+
     def reset_is_parsed(self) -> None:
         self._is_parsed = False
 
@@ -82,14 +120,15 @@ class TreeSitter:
     def set_is_encoded(self) -> None:
         self._is_encoded = True
 
-    def traverse_tree(self, tree: Tree) -> Generator[Node, None, None]:
-        cursor: TreeCursor = tree.walk()
+    def traverse_tree(
+        self,
+    ) -> Generator[Node, None, None]:
+        cursor: TreeCursor = self.tree.walk()
         visited_children = False
 
         while True:
             if not visited_children:
-                # This tells both the linter and type checker cusors.node
-                # will never be None
+                # This tells both the linter and type checker cusors.node will never be None
                 assert cursor.node is not None, "Node not found (Null)"
                 yield cursor.node
                 if not cursor.goto_first_child():
@@ -104,6 +143,53 @@ class TreeSitter:
 
         return attribute
 
+    def replace_error_nodes(self, src: str, target: str = "") -> str:
+
+        re_d: dict[int, re.Pattern] = {
+            1: re.compile(pattern=r"#\s*else"),
+            2: re.compile(pattern=r"#\s*elif"),
+            3: re.compile(pattern=r"#\s*endif"),
+        }
+
+        error_nodes: list[Node] = self.get_error_nodes()
+        # this excludes the "translation_unit" voice
+        func_node = self.root_node.child(0)
+        if func_node is None:
+            return src
+
+        first_node: Node | None = func_node.child(0)
+        second_node: Node | None = func_node.child(1)
+
+        if first_node is None:
+            return src
+
+        def __is_if():
+            return (
+                True
+                if (
+                    (first_node.text == b"#if")
+                    or (first_node.text == b"#ifndef")
+                    or (first_node.text == b"#ifdef")
+                )
+                else False
+            )
+
+        if error_nodes:
+            if __is_if() and first_node and second_node:
+                src = (
+                    src.replace(
+                        b" ".join([first_node.text, second_node.text]).decode("utf-8"),
+                        target,
+                    )
+                    if (first_node.text is not None and second_node.text is not None)
+                    else src
+                )
+            else:
+                for v in re_d.values():
+                    src = re.sub(pattern=v, repl="", string=src)
+
+        return src
+
 
 def read_file_content_as_str(filepath: str) -> str:
     with open(file=filepath, mode="rb") as f:
@@ -116,16 +202,18 @@ def test():
     ts: TreeSitter = TreeSitter()
 
     code = read_file_content_as_str(filepath="tmp.c")
-    print(code)
 
     ts.parse_input(code_snippet=code)
-    ts.check_missing_nodes()
+    print(ts.is_closing_curvy_needed())
+
+    error_nodes = ts.get_error_nodes()
+    print(error_nodes)
+    print(ts.replace_error_nodes(code))
+    print(ts.get_missing_nodes())
+
     comments: list[bytes] = ts.extract_comments()
     directives: list[bytes] = ts.extract_directives()
 
-    print(comments)
-
-    print("\n")
     print(directives)
 
     for comment in comments:
