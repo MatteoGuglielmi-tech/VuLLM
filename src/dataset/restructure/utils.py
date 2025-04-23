@@ -9,7 +9,7 @@ from alive_progress import alive_bar
 import animate
 import argparser
 from log import std_logger
-from treesitter import TreeSitter
+from treesitter import Node, TreeSitter
 
 FIELDS_IN_JSON: int = 9
 
@@ -49,7 +49,6 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
     d: dict[str, str] = {}
     el: str
 
-    # subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
     regex_dict = {
         # extract "func": "...{ ... }"
         # .*? is necessary since some functions have comments at the end
@@ -101,35 +100,6 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
         # in case of "func" field, remove leading and trailing quotes
         el = el[1:-1] if (el and key == "func") else el
 
-        # if key == "func":
-        #     try:
-        #         func_prototype: str = findall_regex(
-        #             pattern=subFuncNameRegEx, target=el
-        #         )[0]
-        #
-        #         if func_prototype:
-        #             # remove old proto
-        #             el = el.replace(func_prototype, "")
-        #
-        #             # mistakes emprically verified
-        #             func_prototype = remove_tabs(lineContent=func_prototype)
-        #             func_prototype = remove_comments(lineContent=func_prototype)
-        #             func_prototype = re.sub(
-        #                 pattern=r"\\n", repl=" ", string=func_prototype
-        #             )
-        #             func_prototype = re.sub(
-        #                 pattern=r"\*/\s*", repl="", string=func_prototype
-        #             )
-        #             func_prototype = re.sub(
-        #                 pattern=r"/\*\s*", repl="", string=func_prototype
-        #             )
-        #
-        #             # re-add corrected function signature
-        #             el = func_prototype + el
-        #
-        #     except:
-        #         continue
-
         if (key == "project") or (key == "commit_id"):
             # remove final quotes
             el = el[:-1]
@@ -147,8 +117,36 @@ def remove_tabs(lineContent: str):
     return lineContent
 
 
+def fix_func_proto(lineContent: str) -> str:
+    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
+    try:
+        func_prototype: str = findall_regex(
+            pattern=subFuncNameRegEx, target=lineContent
+        )[0]
+    except:
+        std_logger.critical(msg=f"Strange function prototype !!")
+        populate_tmp_file(func_str_body=lineContent)
+        pause_exection(msg="Correct function issue(s) and press enter to continue ...")
+        # read fixed line and proceed
+        lineContent = read_file_content_as_str(filepath="tmp.c")
+    else:
+
+        if func_prototype:
+            # remove old proto
+            lineContent = lineContent.replace(func_prototype, "")
+            # filter func_prototype
+            func_prototype = parse_func_proto(decl=func_prototype)
+            # re-add corrected function signature
+            lineContent = func_prototype + lineContent
+
+    return lineContent
+
+
 def remove_multiple_newlines(lineContent: str) -> str:
+    goto: bool = False
+
     # this can be achieved via tree-sitter as well
+    # ===================== PATTERN DEFINITTIONS ======================================
     hashIfRegex: re.Pattern = re.compile(pattern=r"#\s*if")
     hashElseRegex: re.Pattern = re.compile(pattern=r"#\s*else")
     hashElifRegex: re.Pattern = re.compile(pattern=r"#\s*elif")
@@ -160,7 +158,12 @@ def remove_multiple_newlines(lineContent: str) -> str:
     dowhileMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?do\{.*?while\(0\)")
     # 345 steps required
     multilineMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?\{.*?\\\\n\}")
+    # =================================================================================
 
+    # fix prototype immediately
+    lineContent = fix_func_proto(lineContent=lineContent)
+
+    # ===================== PATTERNS APPLICATION ======================================
     list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
     list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
     list_elses: list[str] = findall_regex(pattern=hashElseRegex, target=lineContent)
@@ -170,12 +173,10 @@ def remove_multiple_newlines(lineContent: str) -> str:
     list_includes: list[str] = findall_regex(
         pattern=hashIncludeRegex, target=lineContent
     )
-    subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
+    # =================================================================================
 
     # 1. parse if some pre-processor instructions are there
     if not (
-        # match_regex(pattern=hashDefineRegex, target=lineContent)
-        # or match_regex(pattern=hashIfRegex, target=lineContent)
         list_defines
         or list_ifs
         or list_elses
@@ -188,117 +189,109 @@ def remove_multiple_newlines(lineContent: str) -> str:
         # this pattern should be found only inside strings
         lineContent = re.sub(pattern=r"\\\\n", repl="", string=lineContent)
 
-        return lineContent
+        # return lineContent
+        goto = True
 
-    multilineMacros: list[str] = findall_regex(
-        pattern=multilineMacroRegex, target=lineContent
-    )
-    dowhileMacros: list[str] = findall_regex(
-        pattern=dowhileMacroRegex, target=lineContent
-    )
-
-    # If the pattern isn’t found, string is returned unchanged.
-    lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
-
-    # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
-    if multilineMacros or dowhileMacros:
-        tmp: str = ""
-
-        # hashDefineRegex matches, also multilineMacroRegex and dowhileMacroRegex do
-        for i, multiline in enumerate(multilineMacros):
-            if match_regex(pattern=r"do\{", target=multiline):
-                continue
-            # remove every \ to go to the next line an let the refactor
-            # do all the work
-            # tmp = re.sub(pattern=r"\\\\n", repl="", string=multiline)
-            tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=multiline)
-
-            lineContent = lineContent.replace(multilineMacros[i], tmp)
-
-        for i, dowhile in enumerate(dowhileMacros):
-            # tmp = re.sub(pattern=r"\\\\n", repl="", string=dowhile)
-            tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=dowhile)
-
-            lineContent = lineContent.replace(dowhileMacros[i], tmp)
-
-    # 2. split line based on "\n" if pre-processor macros are present
-    strBlocks: list[str] = lineContent.split(sep="\\n")
-    # print(strBlocks)
-
-    # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
-    strBlocks = [
-        (
-            s
-            if not (
-                match_regex(pattern=hashDefineRegex, target=s)
-                or match_regex(pattern=hashIfRegex, target=s)
-                or match_regex(pattern=hashElseRegex, target=s)
-                or match_regex(pattern=hashElifRegex, target=s)
-                or match_regex(pattern=hashEndIfRegex, target=s)
-                or match_regex(pattern=hashUndefRegex, target=s)
-                or match_regex(pattern=hashIncludeRegex, target=s)
-            )
-            # in #include instructions, the quotes are not matched by precvious regex
-            # idx = 0 will always contain "func and the name of it"
-            else (
-                (re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
-                if idx == 0
-                else ("\\n" + re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
-            )
+    if not goto:
+        multilineMacros: list[str] = findall_regex(
+            pattern=multilineMacroRegex, target=lineContent
         )
-        for idx, s in enumerate(strBlocks)
-    ]
-
-    # 4. merge blocks together
-    lineContent = " ".join(strBlocks)
-
-    func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=lineContent)[0]
-
-    if func_prototype:
-        # remove old proto
-        lineContent = lineContent.replace(func_prototype, "")
-
-        # mistakes emprically verified
-        func_prototype = remove_tabs(lineContent=func_prototype)
-        func_prototype = remove_comments(lineContent=func_prototype)
-        func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
-        func_prototype = re.sub(pattern=r"\*/\s*", repl="", string=func_prototype)
-        func_prototype = re.sub(pattern=r"/\*\s*", repl="", string=func_prototype)
-
-        # re-add corrected function signature
-        lineContent = func_prototype + lineContent
-
-    # here I want to check if some pre-processor instructions
-    # ain't properly matched
-    if len(list_ifs) != len(list_endifs):
-        # manually check the error
-        std_logger.critical(
-            msg=f"Mismatched pre-processor instruction:"
-            f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
+        dowhileMacros: list[str] = findall_regex(
+            pattern=dowhileMacroRegex, target=lineContent
         )
-        populate_tmp_file(func_str_body=lineContent)
-        pause_exection(msg="Correct function issue(s) and press enter to continue ...")
-        # read fixed line and proceed
-        lineContent = read_file_content_as_str(filepath="tmp.c")
 
-    # check for correctly matched curly braces
-    nb_open_curvy: list[str] = findall_regex(pattern=r"\{", target=lineContent)
-    nb_close_curvy: list[str] = findall_regex(pattern=r"\}", target=lineContent)
-    # this comparison may not be valid
+        # If the pattern isn’t found, string is returned unchanged.
+        lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
+
+        # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
+        if multilineMacros or dowhileMacros:
+            tmp: str = ""
+
+            # hashDefineRegex matches, also multilineMacroRegex and dowhileMacroRegex do
+            for i, multiline in enumerate(multilineMacros):
+                if match_regex(pattern=r"do\{", target=multiline):
+                    continue
+                # remove every \ to go to the next line an let the refactor
+                # do all the work
+                # tmp = re.sub(pattern=r"\\\\n", repl="", string=multiline)
+                tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=multiline)
+
+                lineContent = lineContent.replace(multilineMacros[i], tmp)
+
+            for i, dowhile in enumerate(dowhileMacros):
+                # tmp = re.sub(pattern=r"\\\\n", repl="", string=dowhile)
+                tmp = re.sub(pattern=r"(?:\\|\\\\)", repl="", string=dowhile)
+
+                lineContent = lineContent.replace(dowhileMacros[i], tmp)
+
+        # 2. split line based on "\n" if pre-processor macros are present
+        strBlocks: list[str] = lineContent.split(sep="\\n")
+        # print(strBlocks)
+
+        # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
+        strBlocks = [
+            (
+                s
+                if not (
+                    match_regex(pattern=hashDefineRegex, target=s)
+                    or match_regex(pattern=hashIfRegex, target=s)
+                    or match_regex(pattern=hashElseRegex, target=s)
+                    or match_regex(pattern=hashElifRegex, target=s)
+                    or match_regex(pattern=hashEndIfRegex, target=s)
+                    or match_regex(pattern=hashUndefRegex, target=s)
+                    or match_regex(pattern=hashIncludeRegex, target=s)
+                )
+                # in #include instructions, the quotes are not matched by precvious regex
+                # idx = 0 will always contain "func and the name of it"
+                else (
+                    (re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
+                    if idx == 0
+                    else ("\\n" + re.sub(pattern=r"\\\"", repl='"', string=s) + "\\n")
+                )
+            )
+            for idx, s in enumerate(strBlocks)
+        ]
+
+        # 4. merge blocks together
+        lineContent = " ".join(strBlocks)
+
+        # here I want to check if some pre-processor instructions
+        # ain't properly matched
+        if len(list_ifs) != len(list_endifs):
+            # manually check the error
+            std_logger.critical(
+                msg=f"Mismatched pre-processor instruction:"
+                f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
+            )
+            populate_tmp_file(func_str_body=lineContent)
+            pause_exection(
+                msg="Correct function issue(s) and press enter to continue ..."
+            )
+            # read fixed line and proceed
+            lineContent = read_file_content_as_str(filepath="tmp.c")
+
+    # check for correctly matched curly braces this comparison may not be valid
     # although, in those cases a mismatched is very likely to be detected
-    if len(nb_open_curvy) != len(nb_close_curvy):
+    ts.parse_input(code_snippet=lineContent)  # update internal tree
+    if ts.is_closing_curvy_needed() or lineContent[-1] != "}":
         # adding closing braket at the end of the function
-        # el = el + "}"
-        std_logger.critical(
-            msg=f"Mismatched parenthesis:"
-            f"# opening : {len(nb_open_curvy)}, # closing: {len(nb_close_curvy)}"
-        )
-        populate_tmp_file(func_str_body=lineContent)
-        pause_exection(
-            msg="Correct parenthesis disposition and press enter to continue ..."
-        )
+        lineContent = lineContent + "}"
 
     return lineContent
+
+
+def parse_func_proto(decl: str) -> str:
+    # mistakes emprically verified
+    func_prototype = remove_tabs(lineContent=decl)
+    func_prototype = remove_comments(lineContent=func_prototype)
+    func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+    func_prototype = re.sub(pattern=r"\*/\s*", repl="", string=func_prototype)
+    func_prototype = re.sub(pattern=r"/\*\s*", repl="", string=func_prototype)
+
+    ts.parse_input(code_snippet=func_prototype)
+    func_prototype = ts.replace_error_nodes(src=func_prototype)
+
+    return func_prototype
 
 
 def remove_escaping_quotes(lineContent: str) -> str:
@@ -323,19 +316,6 @@ def remove_multiplespaces(lineContent: str) -> str:
 
 
 def remove_comments(lineContent: str) -> str:
-    # extract commen)t encapsulated in /**/
-    # it is important to use the greedy search to stop the matching at first match
-    # at least a space is necessary to recognie a blk comment in a string line
-    # e.g. \"this is the string\"<necessary space>/*inline blk comment*/
-    # commentAstRegEx: re.Pattern = re.compile(pattern=r"(?<!\")/\*[^\"]*?\*/")
-    # # check for comments starting with // and match until the eol
-    # commentRegEx = re.compile(
-    #     pattern=r"(?:(?<=\\n)|(?<=\{)|(?<=\})|(?<=;)|(?<=\()|(?<=\)))?\s*//.*?(?=\\n)"
-    # )
-    #
-    # lineContent = re.sub(pattern=commentAstRegEx, repl="", string=lineContent)
-    # lineContent = re.sub(pattern=commentRegEx, repl="", string=lineContent)
-
     ts.parse_input(code_snippet=lineContent)
     comments: list[bytes] = ts.extract_comments()
 
@@ -526,10 +506,8 @@ def build_refactored_json(
 
             populate_tmp_file(func_str_body=str(dic[idx]["func"]))
 
-            # spawn refactor on just added function body
-            # if spawn_refactor(filepath=src_pth):
-            spawn_refactor(filepath=src_pth)
-            pause_exection()
+            if spawn_refactor(filepath=src_pth):
+                pause_exection()
 
             refactored_chunk = _remove_spurious_escape(
                 refactored_chunk=read_file_content_as_str(filepath=src_pth)
