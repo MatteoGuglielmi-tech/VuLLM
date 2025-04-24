@@ -163,6 +163,13 @@ def remove_multiple_newlines(lineContent: str) -> str:
     # fix prototype immediately
     lineContent = fix_func_proto(lineContent=lineContent)
 
+    # check for correctly matched curly braces this comparison may not be valid
+    # although, in those cases a mismatched is very likely to be detected
+    ts.parse_input(code_snippet=lineContent)  # update internal tree
+    if ts.is_closing_curvy_needed() or lineContent[-1] != "}":
+        # adding closing braket at the end of the function
+        lineContent = lineContent + "}"
+
     # ===================== PATTERNS APPLICATION ======================================
     list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
     list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
@@ -269,13 +276,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
             )
             # read fixed line and proceed
             lineContent = read_file_content_as_str(filepath="tmp.c")
-
-    # check for correctly matched curly braces this comparison may not be valid
-    # although, in those cases a mismatched is very likely to be detected
-    ts.parse_input(code_snippet=lineContent)  # update internal tree
-    if ts.is_closing_curvy_needed() or lineContent[-1] != "}":
-        # adding closing braket at the end of the function
-        lineContent = lineContent + "}"
 
     return lineContent
 
