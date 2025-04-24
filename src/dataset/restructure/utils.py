@@ -9,7 +9,7 @@ from alive_progress import alive_bar
 import animate
 import argparser
 from log import std_logger
-from treesitter import Node, TreeSitter
+from treesitter import TreeSitter
 
 FIELDS_IN_JSON: int = 9
 
@@ -130,7 +130,6 @@ def fix_func_proto(lineContent: str) -> str:
         # read fixed line and proceed
         lineContent = read_file_content_as_str(filepath="tmp.c")
     else:
-
         if func_prototype:
             # remove old proto
             lineContent = lineContent.replace(func_prototype, "")

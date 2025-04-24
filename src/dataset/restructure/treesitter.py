@@ -147,10 +147,11 @@ class TreeSitter:
     def replace_error_nodes(self, src: str) -> str:
         to_rm: str = ""
 
-        print(src)
-
         is_at_beginning: re.Match[str] | None = re.match(pattern=r"\s*#if", string=src)
         if_dir: list[str] = re.findall(pattern=r"#if", string=src)
+
+        else_dir_re: re.Pattern = re.compile(pattern=r"#else")
+        else_dir: list[str] = re.findall(pattern=else_dir_re, string=src)
 
         end_dir_re: re.Pattern = re.compile(pattern=r"#\s*(?:end|el)if")
         end_dir = re.findall(pattern=end_dir_re, string=src)
@@ -158,15 +159,13 @@ class TreeSitter:
         # check if there is something to do
         # if there are no conditional directives or
         # if there is a properly formed condition
-        if not (if_dir or end_dir) or (if_dir and end_dir):
+        if not (if_dir or end_dir or else_dir) or (if_dir and end_dir):
             return src
 
         error_nodes: list[Node] = self.get_error_nodes()
 
-        if not error_nodes:
-            return src
-
-        if if_dir:
+        if if_dir and error_nodes:
+            # ==== #if at the beginning of the line ====
             if is_at_beginning:
                 err = error_nodes[0]
                 assert err is not None
@@ -183,24 +182,28 @@ class TreeSitter:
                     ]
                 )
 
-            for err in error_nodes:
-                assert err is not None
-                assert err.text is not None
-                if (
-                    (err.text == b"#if")
-                    or (err.text == b"#ifndef")
-                    or (err.text == b"#ifdef")
-                ):
-                    assert err.next_sibling is not None
-                    assert err.next_sibling.text is not None
+            # ==== #if in the middle ===================
+            else:
+                for err in error_nodes:
+                    assert err is not None
+                    assert err.text is not None
+                    if (
+                        (err.text == b"#if")
+                        or (err.text == b"#ifndef")
+                        or (err.text == b"#ifdef")
+                    ):
+                        assert err.next_sibling is not None
+                        assert err.next_sibling.text is not None
 
-                    to_rm = " ".join(
-                        [err.text.decode(), err.next_sibling.text.decode()]
-                    )
+                        to_rm = " ".join(
+                            [err.text.decode(), err.next_sibling.text.decode()]
+                        )
+
             src = src.replace(to_rm, "")
 
-        elif end_dir:
+        else:
             src = re.sub(pattern=end_dir_re, repl="", string=src)
+            src = re.sub(pattern=else_dir_re, repl="", string=src)
 
         return src
 
@@ -217,22 +220,23 @@ def test():
 
     code = read_file_content_as_str(filepath="tmp.c")
 
+    code = "#else static int input(yyscan_t yyscanner) #endif"
     ts.parse_input(code_snippet=code)
-    print(ts.is_closing_curvy_needed())
+    # print(ts.is_closing_curvy_needed())
 
-    print(ts.replace_error_nodes(code))
-    print(ts.get_missing_nodes())
+    # print(ts.replace_error_nodes(code))
+    # print(ts.get_missing_nodes())
 
-    comments: list[bytes] = ts.extract_comments()
-    directives: list[bytes] = ts.extract_directives()
-
-    print(directives)
-
-    for comment in comments:
-        str_cmnt = comment.decode(encoding="utf-8")
-        code = code.replace(str_cmnt, "")
-
-    print(code)
+    # comments: list[bytes] = ts.extract_comments()
+    # directives: list[bytes] = ts.extract_directives()
+    #
+    # print(directives)
+    #
+    # for comment in comments:
+    #     str_cmnt = comment.decode(encoding="utf-8")
+    #     code = code.replace(str_cmnt, "")
+    #
+    # print(code)
 
 
 if __name__ == "__main__":
