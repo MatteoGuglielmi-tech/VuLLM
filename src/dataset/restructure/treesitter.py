@@ -1,5 +1,6 @@
 import re
 from collections.abc import Generator
+from os import error
 
 from tree_sitter import Language, Node, Parser, Tree, TreeCursor
 from tree_sitter_language_pack import (SupportedLanguage, get_language,
@@ -143,50 +144,61 @@ class TreeSitter:
 
         return attribute
 
-    def replace_error_nodes(self, src: str, target: str = "") -> str:
+    def replace_error_nodes(self, src: str) -> str:
+        to_rm: str = ""
 
-        re_d: dict[int, re.Pattern] = {
-            1: re.compile(pattern=r"#\s*else"),
-            2: re.compile(pattern=r"#\s*elif"),
-            3: re.compile(pattern=r"#\s*endif"),
-        }
+        is_at_beginning: re.Match[str] | None = re.match(pattern=r"\s*#if", string=src)
+        if_dir: list[str] = re.findall(pattern=r"#if", string=src)
+
+        end_dir_re: re.Pattern = re.compile(pattern=r"(#end|#else|#el)if")
+        end_dir = re.findall(pattern=end_dir_re, string=src)
+
+        # check if there is something to do
+        # if there are no conditional directives or
+        # if there is a properly formed condition
+        if not (if_dir or end_dir) or (if_dir and end_dir):
+            return src
 
         error_nodes: list[Node] = self.get_error_nodes()
-        # this excludes the "translation_unit" voice
-        func_node = self.root_node.child(0)
-        if func_node is None:
+
+        if not error_nodes:
             return src
 
-        first_node: Node | None = func_node.child(0)
-        second_node: Node | None = func_node.child(1)
+        if if_dir:
+            if is_at_beginning:
+                err = error_nodes[0]
+                assert err is not None
+                assert err.text is not None
+                assert err.children is not None
+                assert err.children[0].text is not None
+                assert err.children[0].next_sibling is not None
+                assert err.children[0].next_sibling.text is not None
 
-        if first_node is None:
-            return src
+                to_rm = " ".join(
+                    [
+                        err.children[0].text.decode(),
+                        err.children[0].next_sibling.text.decode(),
+                    ]
+                )
 
-        def __is_if():
-            return (
-                True
+            for err in error_nodes:
+                assert err is not None
+                assert err.text is not None
                 if (
-                    (first_node.text == b"#if")
-                    or (first_node.text == b"#ifndef")
-                    or (first_node.text == b"#ifdef")
-                )
-                else False
-            )
+                    (err.text == b"#if")
+                    or (err.text == b"#ifndef")
+                    or (err.text == b"#ifdef")
+                ):
+                    assert err.next_sibling is not None
+                    assert err.next_sibling.text is not None
 
-        if error_nodes:
-            if __is_if() and first_node and second_node:
-                src = (
-                    src.replace(
-                        b" ".join([first_node.text, second_node.text]).decode("utf-8"),
-                        target,
+                    to_rm = " ".join(
+                        [err.text.decode(), err.next_sibling.text.decode()]
                     )
-                    if (first_node.text is not None and second_node.text is not None)
-                    else src
-                )
-            else:
-                for v in re_d.values():
-                    src = re.sub(pattern=v, repl="", string=src)
+            src = src.replace(to_rm, "")
+
+        elif end_dir:
+            src = re.sub(pattern=end_dir_re, repl="", string=src)
 
         return src
 
@@ -204,23 +216,27 @@ def test():
     code = read_file_content_as_str(filepath="tmp.c")
 
     ts.parse_input(code_snippet=code)
-    print(ts.is_closing_curvy_needed())
+    # print(ts.is_closing_curvy_needed())
 
     error_nodes = ts.get_error_nodes()
-    print(error_nodes)
+    for err in error_nodes:
+        if (err.text == b"#if") or (err.text == b"#ifndef") or (err.text == b"#ifdef"):
+            assert err.text is not None
+            assert err.next_sibling is not None and err.next_sibling.text
+            print(" ".join([err.text.decode(), err.next_sibling.text.decode()]))
     print(ts.replace_error_nodes(code))
-    print(ts.get_missing_nodes())
+    # print(ts.get_missing_nodes())
 
-    comments: list[bytes] = ts.extract_comments()
-    directives: list[bytes] = ts.extract_directives()
+    # comments: list[bytes] = ts.extract_comments()
+    # directives: list[bytes] = ts.extract_directives()
 
-    print(directives)
+    # print(directives)
 
-    for comment in comments:
-        str_cmnt = comment.decode(encoding="utf-8")
-        code = code.replace(str_cmnt, "")
-
-    print(code)
+    # for comment in comments:
+    #     str_cmnt = comment.decode(encoding="utf-8")
+    #     code = code.replace(str_cmnt, "")
+    #
+    # print(code)
 
 
 if __name__ == "__main__":
