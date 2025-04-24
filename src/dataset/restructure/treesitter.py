@@ -147,10 +147,12 @@ class TreeSitter:
     def replace_error_nodes(self, src: str) -> str:
         to_rm: str = ""
 
+        print(src)
+
         is_at_beginning: re.Match[str] | None = re.match(pattern=r"\s*#if", string=src)
         if_dir: list[str] = re.findall(pattern=r"#if", string=src)
 
-        end_dir_re: re.Pattern = re.compile(pattern=r"(#end|#else|#el)if")
+        end_dir_re: re.Pattern = re.compile(pattern=r"#\s*(?:end|el)if")
         end_dir = re.findall(pattern=end_dir_re, string=src)
 
         # check if there is something to do
@@ -216,27 +218,21 @@ def test():
     code = read_file_content_as_str(filepath="tmp.c")
 
     ts.parse_input(code_snippet=code)
-    # print(ts.is_closing_curvy_needed())
+    print(ts.is_closing_curvy_needed())
 
-    error_nodes = ts.get_error_nodes()
-    for err in error_nodes:
-        if (err.text == b"#if") or (err.text == b"#ifndef") or (err.text == b"#ifdef"):
-            assert err.text is not None
-            assert err.next_sibling is not None and err.next_sibling.text
-            print(" ".join([err.text.decode(), err.next_sibling.text.decode()]))
     print(ts.replace_error_nodes(code))
-    # print(ts.get_missing_nodes())
+    print(ts.get_missing_nodes())
 
-    # comments: list[bytes] = ts.extract_comments()
-    # directives: list[bytes] = ts.extract_directives()
+    comments: list[bytes] = ts.extract_comments()
+    directives: list[bytes] = ts.extract_directives()
 
-    # print(directives)
+    print(directives)
 
-    # for comment in comments:
-    #     str_cmnt = comment.decode(encoding="utf-8")
-    #     code = code.replace(str_cmnt, "")
-    #
-    # print(code)
+    for comment in comments:
+        str_cmnt = comment.decode(encoding="utf-8")
+        code = code.replace(str_cmnt, "")
+
+    print(code)
 
 
 if __name__ == "__main__":
