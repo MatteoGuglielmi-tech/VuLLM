@@ -19,8 +19,8 @@ class CustomFormatter(logging.Formatter):
     bold_red = "\u001b[1m\u001b[38;5;1m"
     reset = "\u001b[0m"
 
-    # fmt = '| %(asctime)s | %(levelname)4s | %(filename)s -> %(funcName)s(): line %(lineno)s | %(message)s'
-    fmt = "| %(levelname)4s | %(filename)s -> %(funcName)s(): line %(lineno)s | %(message)s"
+    fmt = '| %(levelname)s | %(asctime)s | %(filename)s, lnb = %(lineno)d -> "%(message)s"'
+
     FORMATS = {
         logging.DEBUG: blue + fmt + reset,
         logging.INFO: purple + fmt + reset,
@@ -35,13 +35,25 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-std_logger = logging.getLogger(__name__)
-alive_logger = logging.getLogger("alive_progress")
-std_logger.setLevel(logging.DEBUG)
+# ==== EXPORTER GLOBAL VARIABLES ====
+# File handler config
+fh = logging.FileHandler(filename="app.log", mode="a", encoding="utf-8")
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(
+    fmt=logging.Formatter(
+        fmt='| %(levelname)s | %(asctime)s | %(filename)s, lnb = %(lineno)d -> "%(message)s"'
+    )
+)
+# --------------------------------------
 
-stdout_handler = logging.StreamHandler()
-stdout_handler.setLevel(logging.DEBUG)
-stdout_handler.setFormatter(CustomFormatter())
+# Stream handler config
+sh = logging.StreamHandler()
+sh.setLevel(logging.DEBUG)
+sh.setFormatter(CustomFormatter())
+# --------------------------------------
 
-
-std_logger.addHandler(stdout_handler)
+# Logger config
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(sh)
+logger.addHandler(fh)
