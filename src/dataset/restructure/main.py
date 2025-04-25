@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from alive_progress import alive_bar
 
 import utils
-from log import std_logger
+from log import logger
 
 # from gemini import Gemini
 
@@ -19,6 +19,10 @@ class Builder:
         # line content is a string representing a line in the Diversevul.json file with all metadata information
         # dictionary of "field_name" : "corpus" pairs
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
+        # fix prototype immediately
+        dof.update({"func": utils.fix_func_proto(lineContent=dof["func"])})
+        if dof["func"] == "error":
+            return dof
         # remove tabs from func body only: removing tabs should be pretty safe
         dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
         # remove '\"' chars
@@ -31,7 +35,7 @@ class Builder:
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
         # dof.update(
-        #     {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
+        # {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
         # )
 
         return dof
@@ -45,16 +49,26 @@ class Builder:
             bar="smooth",
         ) as bar:
             for line in self.__fileContent:
-                contentCpy.append(self.__filter_metadata_line(lineContent=line))
+                content = self.__filter_metadata_line(lineContent=line)
+                if content["func"] != "error":
+                    contentCpy.append(content)
+                # else:
+                #     continue
+
                 bar()
 
         return contentCpy
 
     def __assemble_metadata(self) -> dict[int, dict[str, str | list[str]]]:
-        std_logger.debug(msg="Assembling metadata")
+        meta_d: dict[int, dict[str, str | list[str]]] = {}
+        logger.debug(msg="Assembling metadata")
         lol: list[dict[str, str]] = self.__filter_file()  # list of lines
+
+        if not lol:
+            exit(-1)
+
         # string organized as dictionary
-        std_logger.debug(msg="Creating dictionary dataset")
+        logger.debug(msg="Creating dictionary dataset")
         meta_d: dict[int, dict[str, str | list[str]]] = utils.create_func_metadatablock(
             content=lol
         )
@@ -78,7 +92,7 @@ class Builder:
         # substitute in "func" field refactored string version
         utils.build_refactored_json(dic=dic)
         # remove temp file and copy
-        utils.rm_tmp_file(filepath="tmp.c")
+        # utils.rm_tmp_file(filepath="tmp.c")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
 

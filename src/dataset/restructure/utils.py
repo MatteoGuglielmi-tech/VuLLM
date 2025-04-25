@@ -8,7 +8,7 @@ from alive_progress import alive_bar
 
 import animate
 import argparser
-from log import std_logger
+from log import logger
 from treesitter import TreeSitter
 
 FIELDS_IN_JSON: int = 9
@@ -95,7 +95,7 @@ def split_lineContent(lineContent: str) -> dict[str, str]:
             raise ValueError('Cannot find "func" field')
 
         content = content[0]
-
+        # remove <field> name
         el = re.sub(pattern=sub_regex_dict[key], repl="", string=content).strip()
         # in case of "func" field, remove leading and trailing quotes
         el = el[1:-1] if (el and key == "func") else el
@@ -119,16 +119,14 @@ def remove_tabs(lineContent: str):
 
 def fix_func_proto(lineContent: str) -> str:
     subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
+
     try:
         func_prototype: str = findall_regex(
             pattern=subFuncNameRegEx, target=lineContent
         )[0]
-    except:
-        std_logger.critical(msg=f"Strange function prototype !!")
-        populate_tmp_file(func_str_body=lineContent)
-        pause_exection(msg="Correct function issue(s) and press enter to continue ...")
-        # read fixed line and proceed
-        lineContent = read_file_content_as_str(filepath="tmp.c")
+    except IndexError:
+        logger.critical(msg=f"Atypical function prototype : `{lineContent}` -> Skipped")
+        return "error"
     else:
         if func_prototype:
             # remove old proto
@@ -158,9 +156,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
     # 345 steps required
     multilineMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?\{.*?\\\\n\}")
     # =================================================================================
-
-    # fix prototype immediately
-    lineContent = fix_func_proto(lineContent=lineContent)
 
     # check for correctly matched curly braces this comparison may not be valid
     # although, in those cases a mismatched is very likely to be detected
@@ -265,8 +260,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
         # ain't properly matched
         if len(list_ifs) != len(list_endifs):
             # manually check the error
-            std_logger.critical(
-                msg=f"Mismatched pre-processor instruction:"
+            logger.critical(
+                msg=f"Mismatched pre-processor instruction -> "
                 f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
             )
             populate_tmp_file(func_str_body=lineContent)
@@ -281,11 +276,19 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
 def parse_func_proto(decl: str) -> str:
     # mistakes emprically verified
-    func_prototype = remove_tabs(lineContent=decl)
+    # 1. repl multi-space with single space
+    # 2. remove `\t` chars
+    # 3. remove comments from prototype
+    # 4. remove `\n` chars
+    # 5. & 6. remove spurious opening/closing block comments chars
+    # 7. remove opening `}` from the beginning of the line
+    func_prototype = remove_multiplespaces(lineContent=decl)
+    func_prototype = remove_tabs(lineContent=func_prototype)
     func_prototype = remove_comments(lineContent=func_prototype)
     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
-    func_prototype = re.sub(pattern=r"\*/\s*", repl="", string=func_prototype)
-    func_prototype = re.sub(pattern=r"/\*\s*", repl="", string=func_prototype)
+    func_prototype = re.sub(pattern=r"\**?\*/\s*", repl="", string=func_prototype)
+    func_prototype = re.sub(pattern=r"/\*\**\s*", repl="", string=func_prototype)
+    func_prototype = re.sub(pattern=r"^\s*}", repl="", string=func_prototype)
 
     ts.parse_input(code_snippet=func_prototype)
     func_prototype = ts.replace_error_nodes(src=func_prototype)
@@ -433,7 +436,7 @@ def create_empty_tmp_source(filename: str = "tmp.c") -> None:
     with open(file=filename, mode="w") as _:
         pass
 
-    std_logger.debug("Tmp empty file created successfully")
+    logger.debug("Tmp empty file created successfully")
 
 
 def populate_tmp_file(func_str_body: str) -> None:
@@ -452,7 +455,7 @@ def populate_tmp_file(func_str_body: str) -> None:
         func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
 
     if argparser.args.debug:
-        std_logger.debug(msg=f"Adding {function_name} to tmp.c file")
+        logger.debug(msg=f"Adding {function_name} to tmp.c file")
 
     # at this point, the char "\n" can only be found where pre-processor instructions are
     # split based on that character and enforce new line to avoid refactoring error
@@ -474,7 +477,7 @@ def spawn_refactor(filepath: str) -> int:
     )
 
     if exit_code != 0:
-        std_logger.error(msg="Some error has occured")
+        logger.error(msg="Some error has occured")
 
     return exit_code
 
@@ -540,7 +543,7 @@ def _save_backup(obj: dict) -> None:
         pickle.dump(obj=obj, file=fp)
 
     if argparser.args.debug:
-        std_logger.info(msg="Pickling successful")
+        logger.info(msg="Pickling successful")
 
 
 def _load_backup() -> dict[int, dict[str, str | list[str]]]:
