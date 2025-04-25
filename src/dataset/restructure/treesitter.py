@@ -1,6 +1,5 @@
 import re
 from collections.abc import Generator
-from os import error
 
 from tree_sitter import Language, Node, Parser, Tree, TreeCursor
 from tree_sitter_language_pack import (SupportedLanguage, get_language,
@@ -9,6 +8,7 @@ from tree_sitter_language_pack import (SupportedLanguage, get_language,
 
 class TreeSitter:
     def __init__(self, language_name: SupportedLanguage = "c") -> None:
+        self.language_name: SupportedLanguage = language_name
         self.language: Language = get_language(language_name=language_name)
         self.parser: Parser = get_parser(language_name=language_name)
 
@@ -30,9 +30,20 @@ class TreeSitter:
         self.tree: Tree = self.parser.parse(src)
         self.root_node = self.tree.root_node
 
-    def extract_comments(self) -> list[bytes]:
+    def _check_is_parsed(self) -> None:
+        if not self._is_parsed:
+            raise Exception("Missing call to parse function! Abort...")
+
+    def _check_is_encoded(self) -> None:
+        if not self._is_encoded:
+            raise Exception("Missing call to parse function! Abort...")
+
+    def _check_is_encoded_and_parsed(self) -> None:
         if not (self._is_parsed or self._is_encoded):
             raise Exception("Missing call to parse function! Abort...")
+
+    def extract_comments(self) -> list[bytes]:
+        self._check_is_encoded_and_parsed()
 
         comments: list[bytes] = [
             self._assert_not_none(attribute=cmnt.text, attr_name="cmnt.text")
@@ -44,8 +55,7 @@ class TreeSitter:
 
     def get_missing_nodes(self) -> list[Node]:
         lom = []
-        if not (self._is_parsed or self._is_encoded):
-            raise Exception("Missing call to parse function! Abort...")
+        self._check_is_encoded_and_parsed()
 
         for node in self.traverse_tree():
             if node.is_missing:
@@ -57,8 +67,7 @@ class TreeSitter:
 
     def get_error_nodes(self) -> list[Node]:
         loe = []
-        if not (self._is_parsed or self._is_encoded):
-            raise Exception("Missing call to parse function! Abort...")
+        self._check_is_encoded_and_parsed()
 
         for node in self.traverse_tree():
             if node.is_error:
@@ -69,8 +78,7 @@ class TreeSitter:
         return loe
 
     def extract_directives(self) -> list[bytes]:
-        if not (self._is_parsed or self._is_encoded):
-            raise Exception("Missing call to parse function! Abort...")
+        self._check_is_encoded_and_parsed()
 
         directives: list[bytes] = [
             self._assert_not_none(attribute=drctv.text, attr_name="drctv.text")
@@ -89,12 +97,16 @@ class TreeSitter:
         return directives
 
     def query(self, query_str: str) -> dict[str, list[Node]]:
+        self._check_is_encoded_and_parsed()
+
         query = self.tree.language.query(query_str)
         captures = query.captures(self.root_node)
 
         return captures
 
     def is_closing_curvy_needed(self) -> bool:
+        self._check_is_encoded_and_parsed()
+
         missing = self.get_missing_nodes()
         function_node: Node = self.root_node.children[0]
 
@@ -145,6 +157,8 @@ class TreeSitter:
         return attribute
 
     def replace_error_nodes(self, src: str) -> str:
+        self._check_is_encoded_and_parsed()
+
         to_rm: str = ""
 
         is_at_beginning: re.Match[str] | None = re.match(pattern=r"\s*#if", string=src)
@@ -157,55 +171,149 @@ class TreeSitter:
         end_dir = re.findall(pattern=end_dir_re, string=src)
 
         # check if there is something to do
-        # if there are no conditional directives or
-        # if there is a properly formed condition
-        if not (if_dir or end_dir or else_dir) or (if_dir and end_dir):
+        if not (if_dir or end_dir or else_dir) or (len(if_dir) == len(end_dir)):
             return src
 
-        error_nodes: list[Node] = self.get_error_nodes()
+        # here if everything else is correct, a missing node would be "created"
+        # and not an error one
 
-        if if_dir and error_nodes:
-            # ==== #if at the beginning of the line ====
-            if is_at_beginning:
-                err = error_nodes[0]
-                assert err is not None
-                assert err.text is not None
-                assert err.children is not None
-                assert err.children[0].text is not None
-                assert err.children[0].next_sibling is not None
-                assert err.children[0].next_sibling.text is not None
+        idx: int = 0
 
-                to_rm = " ".join(
-                    [
-                        err.children[0].text.decode(),
-                        err.children[0].next_sibling.text.decode(),
-                    ]
-                )
+        condition = (
+            (len(if_dir) > 1 and src[-2] == "}")
+            if self.language_name == "cpp"
+            else (len(if_dir) >= 1 and src[-2] == "}")
+        )
 
-            # ==== #if in the middle ===================
-            else:
-                for err in error_nodes:
-                    assert err is not None
-                    assert err.text is not None
-                    if (
-                        (err.text == b"#if")
-                        or (err.text == b"#ifndef")
-                        or (err.text == b"#ifdef")
-                    ):
-                        assert err.next_sibling is not None
-                        assert err.next_sibling.text is not None
+        # if the braces are correcly close,
+        # a missing node is created rather than an error one
+        if src[-2] != "}" or condition:
+            error_nodes: list[Node] = self.get_error_nodes()
+            if if_dir and error_nodes:
+                while True:
+                    assert error_nodes[idx] is not None
+                    assert error_nodes[idx].text is not None
+                    if is_at_beginning:
+                        err = error_nodes[0]
+                        assert err.children is not None
+                        assert err.children[0].text is not None
+                        assert err.children[0].next_sibling is not None
+                        assert err.children[0].next_sibling.text is not None
 
                         to_rm = " ".join(
-                            [err.text.decode(), err.next_sibling.text.decode()]
+                            [
+                                err.children[0].text.decode(),
+                                err.children[0].next_sibling.text.decode(),
+                            ]
                         )
 
-            src = src.replace(to_rm, "")
+                        src = src.replace(to_rm, "")
+                        is_at_beginning = re.match(pattern=r"\s*#if", string=src)
 
+                        self.parse_input(code_snippet=src)
+                        error_nodes = self.get_error_nodes()
+                        if not error_nodes:
+                            break
+                    else:
+                        if self.language_name == "cpp":
+                            if (
+                                (error_nodes[idx].children[0].text == b"#if")
+                                or (error_nodes[idx].children[0].text == b"#ifndef")
+                                or (error_nodes[idx].children[0].text == b"#ifdef")
+                            ):
+
+                                assert error_nodes[idx].children[0].text is not None
+                                assert error_nodes[idx].children[1].text is not None
+
+                                to_rm = " ".join(
+                                    [
+                                        error_nodes[idx].children[0].text.decode(),
+                                        error_nodes[idx].children[1].text.decode(),
+                                    ]
+                                )
+                        else:
+                            if (
+                                (error_nodes[idx].text == b"#if")
+                                or (error_nodes[idx].text == b"#ifndef")
+                                or (error_nodes[idx].text == b"#ifdef")
+                            ):
+                                assert error_nodes[idx].next_sibling is not None
+                                assert error_nodes[idx].next_sibling.text is not None
+
+                                to_rm = " ".join(
+                                    [
+                                        error_nodes[idx].text.decode(),
+                                        error_nodes[idx].next_sibling.text.decode(),
+                                    ]
+                                )
+                        src = src.replace(to_rm, "")
+
+                        if idx == len(error_nodes) - 1:
+                            break
+
+                        idx += 1
+            else:
+                src = re.sub(pattern=end_dir_re, repl="", string=src)
+                src = re.sub(pattern=else_dir_re, repl="", string=src)
         else:
-            src = re.sub(pattern=end_dir_re, repl="", string=src)
-            src = re.sub(pattern=else_dir_re, repl="", string=src)
+            if if_dir and self.is_endif_missing():
+                # while True:
+                if is_at_beginning:
+                    err = self.root_node.children[0]
+                    assert err.children[0].text is not None
+                    assert err.child_by_field_name("name") is not None
+
+                    to_rm = " ".join(
+                        [
+                            err.children[0].text.decode(),
+                            err.child_by_field_name("name").text.decode(),
+                        ]
+                    )
+                    src = src.replace(to_rm, "")
+
+                else:
+                    if self.language_name == "cpp":
+                        err = self.root_node.children[1]
+
+                        assert err.children[0].text is not None
+                        assert err.child_by_field_name("name") is not None
+                        to_rm = " ".join(
+                            [
+                                err.children[0].text.decode(),
+                                err.child_by_field_name("name").text.decode(),
+                            ]
+                        )
+
+                    src = src.replace(to_rm, "")
 
         return src
+
+    def is_valid_function(self) -> bool:
+        self._check_is_encoded_and_parsed()
+        nodes: list[Node] = self.root_node.children
+        first_node: Node = nodes[0]
+        if first_node.type == "function_definition":
+            return True
+
+        return False
+
+    def is_valid_template(self) -> bool:
+        self._check_is_encoded_and_parsed()
+        nodes: list[Node] = self.root_node.children
+        first_node: Node = nodes[0]  # very likely an error
+        if first_node.type == "template_declaration":
+            return True
+
+        return False
+
+    def is_endif_missing(self) -> bool:
+        missing_nodes: list[Node] = self.get_missing_nodes()
+        for mn in missing_nodes:
+            assert mn is not None
+            if mn.type == "#endif":
+                return True
+
+        return False
 
 
 def read_file_content_as_str(filepath: str) -> str:
@@ -216,15 +324,24 @@ def read_file_content_as_str(filepath: str) -> str:
 
 
 def test():
-    ts: TreeSitter = TreeSitter()
+    c_ts: TreeSitter = TreeSitter()
+    cpp_ts: TreeSitter = TreeSitter(language_name="cpp")
 
-    code = read_file_content_as_str(filepath="tmp.c")
+    c_code = read_file_content_as_str(filepath="tmp.c")
+    cpp_code = read_file_content_as_str(filepath="tmp.cpp")
+    c_ts.parse_input(code_snippet=c_code)
+    cpp_ts.parse_input(code_snippet=cpp_code)
 
-    code = "#else static int input(yyscan_t yyscanner) #endif"
-    ts.parse_input(code_snippet=code)
+    # print(cpp_ts.is_valid_template())
+
+    # print(cpp_ts.root_node)
+    # print("yes") if ts.is_valid_function() else print("false")
+    # ts.is_valid_template()
+
     # print(ts.is_closing_curvy_needed())
 
-    # print(ts.replace_error_nodes(code))
+    print(c_ts.replace_error_nodes(c_code))
+    print(cpp_ts.replace_error_nodes(cpp_code))
     # print(ts.get_missing_nodes())
 
     # comments: list[bytes] = ts.extract_comments()

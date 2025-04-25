@@ -133,6 +133,8 @@ def fix_func_proto(lineContent: str) -> str:
             lineContent = lineContent.replace(func_prototype, "")
             # filter func_prototype
             func_prototype = parse_func_proto(decl=func_prototype)
+            if func_prototype == "error":
+                return "error"
             # re-add corrected function signature
             lineContent = func_prototype + lineContent
 
@@ -291,7 +293,10 @@ def parse_func_proto(decl: str) -> str:
     func_prototype = re.sub(pattern=r"^\s*}", repl="", string=func_prototype)
 
     ts.parse_input(code_snippet=func_prototype)
-    func_prototype = ts.replace_error_nodes(src=func_prototype)
+    if ts.is_valid_function() or ts.is_valid_template():
+        func_prototype = ts.replace_error_nodes(src=func_prototype)
+    else:
+        return "error"
 
     return func_prototype
 
