@@ -88,11 +88,13 @@ class Builder:
         # translate string into valid json structure
         dic: dict[int, dict[str, str | list[str]]] = self.__assemble_metadata()
         # create empty temporary file to call "gnu indent refactor" upon
-        utils.create_empty_tmp_source()
+        utils.create_empty_tmp_source(filename="./misc/tmp.c")
+        utils.create_empty_tmp_source(filename="./misc/tmp.cpp")
         # substitute in "func" field refactored string version
         utils.build_refactored_json(dic=dic)
         # remove temp file and copy
-        # utils.rm_tmp_file(filepath="tmp.c")
+        # utils.rm_tmp_file(filepath="./misc/tmp.c")
+        # utils.rm_tmp_file(filepath="./misc/tmp.cpp")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
 

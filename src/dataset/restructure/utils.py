@@ -3,17 +3,19 @@ import os
 import pickle
 import re
 import subprocess
+from ast import arg
 
 from alive_progress import alive_bar
 
 import animate
 import argparser
 from log import logger
-from treesitter import TreeSitter
+from treesitter import TreeSitter, c_ts, cpp_ts
 
 FIELDS_IN_JSON: int = 9
 
 ts: TreeSitter = TreeSitter()
+filename: str
 
 
 def findall_regex(pattern: str | re.Pattern, target: str) -> list[str]:
@@ -159,11 +161,16 @@ def remove_multiple_newlines(lineContent: str) -> str:
     multilineMacroRegex: re.Pattern = re.compile(pattern=r"#define.*?\{.*?\\\\n\}")
     # =================================================================================
 
-    # check for correctly matched curly braces this comparison may not be valid
-    # although, in those cases a mismatched is very likely to be detected
-    ts.parse_input(code_snippet=lineContent)  # update internal tree
-    if ts.is_closing_curvy_needed() or lineContent[-1] != "}":
+    # if last character is not a curvy braces, for shure I need
+    # to add one. This also allows treesitter to better catch if a `{`
+    # is needed
+    if lineContent[-1] != "}":
         # adding closing braket at the end of the function
+        lineContent = lineContent + "}"
+
+    # update internal tree
+    ts.parse_input(code_snippet=lineContent)
+    if ts.is_closing_curvy_needed():
         lineContent = lineContent + "}"
 
     # ===================== PATTERNS APPLICATION ======================================
@@ -271,7 +278,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
                 msg="Correct function issue(s) and press enter to continue ..."
             )
             # read fixed line and proceed
-            lineContent = read_file_content_as_str(filepath="tmp.c")
+            lineContent = read_file_content_as_str(filepath=filename)
 
     return lineContent
 
@@ -279,23 +286,36 @@ def remove_multiple_newlines(lineContent: str) -> str:
 def parse_func_proto(decl: str) -> str:
     # mistakes emprically verified
     # 1. repl multi-space with single space
-    # 2. remove `\t` chars
-    # 3. remove comments from prototype
-    # 4. remove `\n` chars
-    # 5. & 6. remove spurious opening/closing block comments chars
-    # 7. remove opening `}` from the beginning of the line
     func_prototype = remove_multiplespaces(lineContent=decl)
+    # 2. remove `\t` chars
     func_prototype = remove_tabs(lineContent=func_prototype)
+    # 3. remove comments from prototype
     func_prototype = remove_comments(lineContent=func_prototype)
+    # 4. remove `\n` chars
     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
+    # 5. & 6. remove spurious opening/closing block comments chars
     func_prototype = re.sub(pattern=r"\**?\*/\s*", repl="", string=func_prototype)
     func_prototype = re.sub(pattern=r"/\*\**\s*", repl="", string=func_prototype)
+    # 7. remove opening `}` from the beginning of the line
     func_prototype = re.sub(pattern=r"^\s*}", repl="", string=func_prototype)
 
-    ts.parse_input(code_snippet=func_prototype)
-    if ts.is_valid_function() or ts.is_valid_template():
-        func_prototype = ts.replace_error_nodes(src=func_prototype)
-    else:
+    global ts
+    global filename
+    ts = (
+        set_parser(language_name="cpp")
+        if _is_cpp(func_prototype)
+        else set_parser(language_name="c")
+    )
+
+    filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
+
+    func_prototype = ts.replace_error_nodes(src=func_prototype)
+
+    # double checking
+    if not (
+        ts.is_valid_function(proto=func_prototype)
+        or ts.is_valid_template(proto=func_prototype)
+    ):
         return "error"
 
     return func_prototype
@@ -460,12 +480,12 @@ def populate_tmp_file(func_str_body: str) -> None:
         func_str_body = re.sub(pattern=r"^\\n", repl="", string=func_str_body)
 
     if argparser.args.debug:
-        logger.debug(msg=f"Adding {function_name} to tmp.c file")
+        logger.debug(msg=f"Adding {function_name} to {filename} file")
 
     # at this point, the char "\n" can only be found where pre-processor instructions are
     # split based on that character and enforce new line to avoid refactoring error
     # override content with current function
-    with open(file="tmp.c", mode="w") as f:
+    with open(file=filename, mode="w") as f:
         try:
             f.writelines("\n".join(func_str_body.split(sep="\\n")))
         except:
@@ -473,10 +493,12 @@ def populate_tmp_file(func_str_body: str) -> None:
 
 
 def spawn_refactor(filepath: str) -> int:
-    # std_logger.debug("GNU Indent spawned")
     # clang-format provided by clangd.
-    # Using nvim as editor, I've installed it via Mason
-    # for some reason, subprocess cannot run clang-format
+    # update .clang-format file with proper language
+    exit_code: int = os.system(
+        f'sed -i -E "s/Language:.*/Language: {ts.language_name.capitalize()}/g" {argparser.args.format_config_file}'
+    )
+
     exit_code = os.system(
         command=f"~/.local/share/nvim/mason/bin/clang-format -style=file -i {filepath}"
     )
@@ -494,9 +516,7 @@ def read_file_content_as_str(filepath: str) -> str:
     return file_content.decode(encoding="utf-8")
 
 
-def build_refactored_json(
-    dic: dict[int, dict[str, str | list[str]]], src_pth: str = "tmp.c"
-) -> None:
+def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
     refactored_chunk: str = ""
     content_len: int = len(dic.keys())
     running_d: dict = {}
@@ -513,11 +533,11 @@ def build_refactored_json(
 
             populate_tmp_file(func_str_body=str(dic[idx]["func"]))
 
-            if spawn_refactor(filepath=src_pth):
+            if spawn_refactor(filepath=filename):
                 pause_exection()
 
             refactored_chunk = _remove_spurious_escape(
-                refactored_chunk=read_file_content_as_str(filepath=src_pth)
+                refactored_chunk=read_file_content_as_str(filepath=filename)
             )
 
             try:
@@ -529,6 +549,7 @@ def build_refactored_json(
             except:
                 refactored_chunk = refactored_chunk
 
+            populate_tmp_file(func_str_body=refactored_chunk)
             dic[k].update({"func": refactored_chunk})
             running_d[k] = dic[k]
             _save_backup(obj=running_d)
@@ -544,7 +565,7 @@ def _remove_spurious_escape(refactored_chunk: str) -> str:
 
 
 def _save_backup(obj: dict) -> None:
-    with open(file="intrmd_bkup.pkl", mode="wb") as fp:
+    with open(file="misc/intrmd_bkup.pkl", mode="wb") as fp:
         pickle.dump(obj=obj, file=fp)
 
     if argparser.args.debug:
@@ -585,3 +606,25 @@ def add_desc_to_metadata(
     dic.update({"fdesc": desc[1:-1]})
 
     return dic
+
+
+def set_parser(language_name: str) -> TreeSitter:
+    return c_ts if language_name == "c" else cpp_ts
+
+
+def _is_cpp(src: str) -> bool:
+    lore: list[re.Pattern] = [
+        re.compile(pattern=r"(?<=[\w>-])\bauto\s*"),
+        re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
+        re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
+        re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
+        re.compile(pattern=r"^.*?\s*<.*?>"),
+        re.compile(pattern=r"\w*::"),
+        re.compile(pattern=r"(?<=\))\s*:.*?,"),
+    ]
+
+    for regex in lore:
+        if re.search(pattern=regex, string=src):
+            return True
+
+    return False

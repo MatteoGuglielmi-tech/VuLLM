@@ -21,7 +21,7 @@ parser.add_argument(
     "--file_name",
     "-n",
     required=False,
-    default="DiverseVul.json",
+    default="../../../DiverseVul/DiverseVul.json",
     help="Name of the JSON file to save processed dataset",
 )
 
@@ -48,6 +48,15 @@ parser.add_argument(
     type=bool,
     action=argparse.BooleanOptionalAction,
     help="Activate debug CLI logs",
+)
+
+parser.add_argument(
+    "--format_config_file",
+    "-f",
+    type=str,
+    required=False,
+    default="../../../.clang-format",
+    help="Location of clang-format config file",
 )
 
 args = parser.parse_args()

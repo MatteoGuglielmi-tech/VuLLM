@@ -1,4 +1,5 @@
 import logging
+import os
 
 
 class CustomFormatter(logging.Formatter):
@@ -37,7 +38,12 @@ class CustomFormatter(logging.Formatter):
 
 # ==== EXPORTER GLOBAL VARIABLES ====
 # File handler config
-fh = logging.FileHandler(filename="app.log", mode="a", encoding="utf-8")
+try:
+    os.mkdir("./misc")
+except FileExistsError:
+    pass
+
+fh = logging.FileHandler(filename="./misc/app.log", mode="a", encoding="utf-8")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(
     fmt=logging.Formatter(
