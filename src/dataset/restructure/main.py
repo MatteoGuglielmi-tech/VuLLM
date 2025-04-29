@@ -85,11 +85,11 @@ class Builder:
     #     return dic
 
     def run(self):
-        # translate string into valid json structure
-        dic: dict[int, dict[str, str | list[str]]] = self.__assemble_metadata()
         # create empty temporary file to call "gnu indent refactor" upon
         utils.create_empty_tmp_source(filename="./misc/tmp.c")
         utils.create_empty_tmp_source(filename="./misc/tmp.cpp")
+        # translate string into valid json structure
+        dic: dict[int, dict[str, str | list[str]]] = self.__assemble_metadata()
         # substitute in "func" field refactored string version
         utils.build_refactored_json(dic=dic)
         # remove temp file and copy
