@@ -280,6 +280,13 @@ def remove_multiple_newlines(lineContent: str) -> str:
             # read fixed line and proceed
             lineContent = read_file_content_as_str(filepath=filename)
 
+    # update internal tree
+    # check if missing closing brace. This check has been moved here since
+    # a missing #endif may raise some erroneous "MISSING" `}` node
+    ts.parse_input(code_snippet=lineContent)
+    if ts.is_closing_curvy_needed():
+        lineContent = lineContent + "}"
+
     return lineContent
 
 
