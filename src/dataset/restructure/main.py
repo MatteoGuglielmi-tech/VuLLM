@@ -93,8 +93,8 @@ class Builder:
         # substitute in "func" field refactored string version
         utils.build_refactored_json(dic=dic)
         # remove temp file and copy
-        # utils.rm_tmp_file(filepath="./misc/tmp.c")
-        # utils.rm_tmp_file(filepath="./misc/tmp.cpp")
+        utils.rm_tmp_file(filepath="./misc/tmp.c")
+        utils.rm_tmp_file(filepath="./misc/tmp.cpp")
         # add description information to metadata
         # dic = self.__update_json_with_funcdesc(dic=dic)
 

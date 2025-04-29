@@ -3,7 +3,6 @@ import os
 import pickle
 import re
 import subprocess
-from ast import arg
 
 from alive_progress import alive_bar
 
@@ -168,11 +167,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
         # adding closing braket at the end of the function
         lineContent = lineContent + "}"
 
-    # update internal tree
-    ts.parse_input(code_snippet=lineContent)
-    if ts.is_closing_curvy_needed():
-        lineContent = lineContent + "}"
-
     # ===================== PATTERNS APPLICATION ======================================
     list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
     list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
@@ -186,18 +180,13 @@ def remove_multiple_newlines(lineContent: str) -> str:
     # =================================================================================
 
     # 1. parse if some pre-processor instructions are there
-    if not (
-        list_defines
-        or list_ifs
-        or list_elses
-        or list_elifs
-        or list_endifs
-        or list_undefs
-        or list_includes
-    ):
+    ts.parse_input(code_snippet=lineContent)
+
+    # this pattern should be found only inside strings
+    lineContent = re.sub(pattern=r"(\\)?\\\\n", repl="", string=lineContent)
+    lod: list[bytes] = ts.extract_directives()
+    if not lod:
         lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
-        # this pattern should be found only inside strings
-        lineContent = re.sub(pattern=r"\\\\n", repl="", string=lineContent)
 
         # return lineContent
         goto = True
@@ -209,9 +198,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
         dowhileMacros: list[str] = findall_regex(
             pattern=dowhileMacroRegex, target=lineContent
         )
-
-        # If the pattern isn’t found, string is returned unchanged.
-        lineContent = re.sub(pattern=r"\\\\n", repl=" ", string=lineContent)
 
         # careful here, cannot simply get rid of \\\\n otherwise spurious \ remain
         if multilineMacros or dowhileMacros:
@@ -357,7 +343,7 @@ def remove_comments(lineContent: str) -> str:
         for comment in comments:
             str_cmnt = comment.decode(encoding="utf-8").__repr__()[1:-1]
             str_cmnt = re.sub(pattern=r"\\\\", repl=r"\\", string=str_cmnt)
-            str_cmnt = re.sub(pattern=r"\\\'", repl=r"'", string=str_cmnt)
+            str_cmnt = re.sub(pattern=r"\\(?!n)", repl=r"", string=str_cmnt)
 
             lineContent = lineContent.replace(str_cmnt, "")
 
@@ -558,7 +544,6 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
             except:
                 refactored_chunk = refactored_chunk
 
-            populate_tmp_file(func_str_body=refactored_chunk)
             dic[k].update({"func": refactored_chunk})
             running_d[k] = dic[k]
             _save_backup(obj=running_d)
