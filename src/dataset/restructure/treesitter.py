@@ -88,8 +88,8 @@ class TreeSitter:
                 or drctv.type == "preproc_if"
                 or drctv.type == "preproc_ifdef"
                 or drctv.type == "preproc_directive"
-                # or drctv.type == "preproc_else"
-                # or drctv.type == "preproc_elif"
+                or drctv.type == "preproc_else"
+                or drctv.type == "preproc_elif"
             )
         ]
 
