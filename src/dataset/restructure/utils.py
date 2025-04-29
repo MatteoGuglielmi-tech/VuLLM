@@ -273,7 +273,7 @@ def parse_func_proto(decl: str) -> str:
     # 2. remove `\t` chars
     func_prototype = remove_tabs(lineContent=func_prototype)
     # 3. remove comments from prototype
-    func_prototype = remove_comments(lineContent=func_prototype)
+    # func_prototype = remove_comments(lineContent=func_prototype)
     # 4. remove `\n` chars
     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
     # 5. & 6. remove spurious opening/closing block comments chars
@@ -328,14 +328,13 @@ def remove_multiplespaces(lineContent: str) -> str:
 def remove_comments(lineContent: str) -> str:
     ts.parse_input(code_snippet=lineContent)
     comments: list[bytes] = ts.extract_comments()
+    lineContentBytes: bytes = lineContent.encode(encoding="unicode_escape")
 
     if comments:
         for comment in comments:
-            str_cmnt = comment.decode(encoding="utf-8").__repr__()[1:-1]
-            str_cmnt = re.sub(pattern=r"\\\\", repl=r"\\", string=str_cmnt)
-            str_cmnt = re.sub(pattern=r"\\(?!n)", repl=r"", string=str_cmnt)
+            lineContentBytes = lineContentBytes.replace(comment, b"")
 
-            lineContent = lineContent.replace(str_cmnt, "")
+        lineContent = lineContentBytes.decode(encoding="unicode_escape")
 
     return lineContent
 
