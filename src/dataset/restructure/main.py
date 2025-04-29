@@ -19,6 +19,7 @@ class Builder:
         # line content is a string representing a line in the Diversevul.json file with all metadata information
         # dictionary of "field_name" : "corpus" pairs
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
+        dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # fix prototype immediately
         dof.update({"func": utils.fix_func_proto(lineContent=dof["func"])})
         if dof["func"] == "error":
@@ -30,8 +31,6 @@ class Builder:
         # substitute mutliple spaces with single space
         dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
         # remove block and inline comments
-        # WARNING: order is important, first clear comments and then newline chars
-        dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
         # dof.update(
