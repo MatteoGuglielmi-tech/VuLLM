@@ -43,6 +43,9 @@ try:
 except FileExistsError:
     pass
 
+if os.path.isfile(path="./misc/app.log"):
+    os.remove("./misc/app.log")
+
 fh = logging.FileHandler(filename="./misc/app.log", mode="a", encoding="utf-8")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(
