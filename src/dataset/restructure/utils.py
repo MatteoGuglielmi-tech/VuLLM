@@ -357,6 +357,8 @@ def remove_comments(lineContent: str) -> str:
         for comment in comments:
             str_cmnt = comment.decode(encoding="utf-8").__repr__()[1:-1]
             str_cmnt = re.sub(pattern=r"\\\\", repl=r"\\", string=str_cmnt)
+            str_cmnt = re.sub(pattern=r"\\\'", repl=r"'", string=str_cmnt)
+
             lineContent = lineContent.replace(str_cmnt, "")
 
     return lineContent
