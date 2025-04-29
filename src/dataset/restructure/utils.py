@@ -147,7 +147,7 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
     # this can be achieved via tree-sitter as well
     # ===================== PATTERN DEFINITTIONS ======================================
-    hashIfRegex: re.Pattern = re.compile(pattern=r"#\s*if")
+    hashIfRegex: re.Pattern = re.compile(pattern=r"#\s*if(\s*0)?")
     hashElseRegex: re.Pattern = re.compile(pattern=r"#\s*else")
     hashElifRegex: re.Pattern = re.compile(pattern=r"#\s*elif")
     hashEndIfRegex: re.Pattern = re.compile(pattern=r"#\s*endif")
@@ -168,15 +168,8 @@ def remove_multiple_newlines(lineContent: str) -> str:
         lineContent = lineContent + "}"
 
     # ===================== PATTERNS APPLICATION ======================================
-    list_defines: list[str] = findall_regex(pattern=hashDefineRegex, target=lineContent)
     list_ifs: list[str] = findall_regex(pattern=hashIfRegex, target=lineContent)
-    list_elses: list[str] = findall_regex(pattern=hashElseRegex, target=lineContent)
-    list_elifs: list[str] = findall_regex(pattern=hashElifRegex, target=lineContent)
     list_endifs: list[str] = findall_regex(pattern=hashEndIfRegex, target=lineContent)
-    list_undefs: list[str] = findall_regex(pattern=hashUndefRegex, target=lineContent)
-    list_includes: list[str] = findall_regex(
-        pattern=hashIncludeRegex, target=lineContent
-    )
     # =================================================================================
 
     # 1. parse if some pre-processor instructions are there
@@ -187,8 +180,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
     lod: list[bytes] = ts.extract_directives()
     if not lod:
         lineContent = re.sub(pattern=r"\\n", repl=" ", string=lineContent)
-
-        # return lineContent
         goto = True
 
     if not goto:
@@ -222,7 +213,6 @@ def remove_multiple_newlines(lineContent: str) -> str:
 
         # 2. split line based on "\n" if pre-processor macros are present
         strBlocks: list[str] = lineContent.split(sep="\\n")
-        # print(strBlocks)
 
         # 3. parse block of strings and remove "\n" if no pre-processor instruction is present
         strBlocks = [
@@ -456,7 +446,7 @@ def create_empty_tmp_source(filename: str = "tmp.c") -> None:
     with open(file=filename, mode="w") as _:
         pass
 
-    logger.debug("Tmp empty file created successfully")
+    logger.debug(f"{filename} empty file created successfully")
 
 
 def populate_tmp_file(func_str_body: str) -> None:
@@ -567,21 +557,21 @@ def _save_backup(obj: dict) -> None:
 
 
 def _load_backup() -> dict[int, dict[str, str | list[str]]]:
-    with open(file="intrmd_bkup.pkl", mode="rb") as fp:
+    with open(file="misc/intrmd_bkup.pkl", mode="rb") as fp:
         obj = pickle.load(file=fp)
     return obj
 
 
 def _delete_backup() -> None:
-    if os.path.exists(path="intrmd_bkup.pkl"):
-        os.remove(path="intrmd_bkup.pkl")
+    if os.path.exists(path="misc/intrmd_bkup.pkl"):
+        os.remove(path="misc/intrmd_bkup.pkl")
 
 
 def pause_exection(msg: str = "Press enter to continue ..."):
     input(msg)
 
 
-def rm_tmp_file(filepath: str = "tmp.c") -> None:
+def rm_tmp_file(filepath: str = "misc/tmp.c") -> None:
     try:
         subprocess.run(
             args=["rm", f"{filepath}", f"{filepath}~"], capture_output=True, text=True
