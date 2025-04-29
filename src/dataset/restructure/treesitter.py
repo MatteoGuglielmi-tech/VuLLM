@@ -19,12 +19,10 @@ class TreeSitter:
         self._is_encoded = True
         self._is_parsed = True
         src = (
-            code_snippet.encode(encoding="utf-8")
+            code_snippet.encode(encoding="unicode_escape")
             if isinstance(code_snippet, str)
             else code_snippet
         )
-
-        src = re.sub(pattern=b"\\\\n", repl=b"\n", string=src)
 
         self.tree: Tree = self.parser.parse(src)
         self.root_node = self.tree.root_node
