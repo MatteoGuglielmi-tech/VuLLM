@@ -328,14 +328,16 @@ def remove_multiplespaces(lineContent: str) -> str:
 def remove_comments(lineContent: str) -> str:
     ts.parse_input(code_snippet=lineContent)
     comments: list[bytes] = ts.extract_comments()
-    lineContentBytes: bytes = lineContent.encode(encoding="unicode_escape")
+
+    lineContentBytes: bytes = lineContent.encode(encoding="utf-8")
 
     if comments:
         for comment in comments:
+            comment = re.sub(pattern=b"\\n", repl=b"\\\\n", string=comment)
+
             lineContentBytes = lineContentBytes.replace(comment, b"")
 
-        lineContent = lineContentBytes.decode(encoding="unicode_escape")
-
+    lineContent = lineContentBytes.decode(encoding="utf-8")
     return lineContent
 
 
@@ -358,6 +360,7 @@ def read_json() -> list[str]:
     with animate.Loader(
         desc="Reading original dataset malformed Json", end="List of lines obtained"
     ):
+        # it would have been better to read bytes (raw string) instead of unicode strings
         with open(file=argparser.args.path, mode="r") as json:
             fileContent = json.readlines()
 

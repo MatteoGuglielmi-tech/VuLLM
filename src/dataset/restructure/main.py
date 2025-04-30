@@ -19,23 +19,20 @@ class Builder:
         # line content is a string representing a line in the Diversevul.json file with all metadata information
         # dictionary of "field_name" : "corpus" pairs
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
+        # remove tabs from func body only: removing tabs should be pretty safe
+        dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
+        # remove block and inline comments
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
-        # fix prototype immediately
+        # fix function prototype
         dof.update({"func": utils.fix_func_proto(lineContent=dof["func"])})
         if dof["func"] == "error":
             return dof
-        # remove tabs from func body only: removing tabs should be pretty safe
-        dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
-        # remove '\"' chars
-        dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
         # substitute mutliple spaces with single space
         dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
-        # remove block and inline comments
+        # remove '\"' chars
+        dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
-        # dof.update(
-        # {"message": utils.remove_multiple_newlines(lineContent=dof["message"])}
-        # )
 
         return dof
 
@@ -51,8 +48,6 @@ class Builder:
                 content = self.__filter_metadata_line(lineContent=line)
                 if content["func"] != "error":
                     contentCpy.append(content)
-                # else:
-                #     continue
 
                 bar()
 

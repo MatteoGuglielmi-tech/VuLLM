@@ -1,6 +1,5 @@
 import re
 from collections.abc import Generator
-from difflib import IS_CHARACTER_JUNK
 
 from tree_sitter import Language, Node, Parser, Tree, TreeCursor
 from tree_sitter_language_pack import (SupportedLanguage, get_language,
@@ -18,11 +17,14 @@ class TreeSitter:
     def parse_input(self, code_snippet: str | bytes) -> None:
         self._is_encoded = True
         self._is_parsed = True
+
         src = (
-            code_snippet.encode(encoding="unicode_escape")
+            code_snippet.encode(encoding="utf-8")
             if isinstance(code_snippet, str)
             else code_snippet
         )
+
+        src = re.sub(pattern=b"\\\\n", repl=b"\n", string=src)
 
         self.tree: Tree = self.parser.parse(src)
         self.root_node = self.tree.root_node
