@@ -155,17 +155,120 @@ class TreeSitter:
 
         return attribute
 
-    def replace_error_nodes(self, src: str) -> str:
-        # self._check_is_encoded_and_parsed()
+    def _setBit(self, int_type: int, offset: int):
+        mask = 1 << offset
+        return int_type | mask
+
+    def _clearBit(self, int_type: int, offset: int):
+        mask = ~(offset)
+        return int_type & mask
+
+    def remove_if_condition(self, src: str) -> str:
+        is_at_beginning: re.Match[str] | None = re.match(
+            pattern=r"\s*#\s*if", string=src
+        )
+        if_dir: list[str] = re.findall(pattern=r"\s*#\s*if", string=src)
+
         self.parse_input(code_snippet=src)
 
+        if not if_dir:
+            return src
+
+        flags: int = 0
+        count: int = 1
+        entry_to_rm: list[str] = []
+
+        if_comp_str: str = ""
+        bin_exp: str = ""
+
+        if if_dir:
+            for n in self.traverse_tree():
+                assert n.text is not None
+                match n.type:
+                    case "#if":
+                        if_comp_str = ""
+                        flags |= self._setBit(int_type=flags, offset=0)
+                        if_comp_str = n.text.decode() + " "
+
+                    case "binary_expression":
+                        condition = (
+                            (flags & 0x01) or ((flags == 0x03) or (flags == 0x07))
+                            if is_at_beginning
+                            else (flags & 0x01)
+                        )
+                        if condition:
+                            bin_exp = n.text.decode(encoding="utf-8")
+                            flags |= self._setBit(int_type=flags, offset=count)
+                            count += 1
+                        else:
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
+
+                    case "identifier":
+                        condition = (
+                            (flags == 0xF) if is_at_beginning else (flags == 0x3)
+                        )
+                        if condition:
+                            if_comp_str += re.findall(
+                                pattern=rf"{n.text.decode()}\s*", string=src
+                            )[0]
+                            flags |= self._setBit(int_type=flags, offset=count)
+                            count += 1
+                        else:
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
+
+                    case "<" | ">" | "==" | ">=" | "<=":
+                        condition = (
+                            (flags == 0x1F) if is_at_beginning else (flags == 0x7)
+                        )
+                        if condition:
+                            if_comp_str += re.findall(
+                                pattern=rf"{n.text.decode()}\s*", string=bin_exp
+                            )[0]
+                            flags |= self._setBit(int_type=flags, offset=count)
+                            count += 1
+                        else:
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
+
+                    # when in the middle, there's an ERROR node to
+                    # consider in the sequence
+                    case "ERROR":
+                        if flags == 0x3F:
+                            flags |= self._setBit(int_type=flags, offset=count)
+                            count += 1
+                            continue
+
+                    case "number_literal":
+                        condition = (
+                            (flags == 0x7F) if is_at_beginning else (flags == 0xF)
+                        )
+                        if condition:
+                            if_comp_str += re.findall(
+                                pattern=rf"{n.text.decode()}\s*", string=src
+                            )[0]
+
+                            entry_to_rm.append(if_comp_str)
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
+                        else:
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
+
+                    case _:
+                        if_comp_str = ""
+                        flags = self._clearBit(int_type=flags, offset=0xFF)
+
+        for s in entry_to_rm:
+            src = src.replace(s, "")
+
+        return src
+
+    def replace_error_nodes(self, src: str) -> str:
         to_rm: str = ""
         idx: int = 0
 
-        is_at_beginning: re.Match[str] | None = re.match(pattern=r"\s*#if", string=src)
-        if_dir: list[str] = re.findall(pattern=r"#if", string=src)
-
-        else_dir_re: re.Pattern = re.compile(pattern=r"#else")
+        is_at_beginning: re.Match[str] | None = re.match(
+            pattern=r"\s*#\s*if", string=src
+        )
+        if_dir: list[str] = re.findall(pattern=r"\s*#\s*if", string=src)
+        else_dir_re: re.Pattern = re.compile(pattern=r"\s*#\s*else")
         else_dir: list[str] = re.findall(pattern=else_dir_re, string=src)
 
         end_dir_re: re.Pattern = re.compile(pattern=r"#\s*(?:end|el)if")
@@ -175,11 +278,7 @@ class TreeSitter:
         if not (if_dir or end_dir or else_dir) or (len(if_dir) == len(end_dir)):
             return src
 
-        # condition = (
-        #     (len(if_dir) > 1) if self.language_name == "cpp" else (len(if_dir) >= 1)
-        # )
-
-        # if condition:
+        self.parse_input(code_snippet=src)
         error_nodes: list[Node] = self.get_error_nodes()
 
         if if_dir and error_nodes:
