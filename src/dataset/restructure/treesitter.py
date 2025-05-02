@@ -439,31 +439,6 @@ class TreeSitter:
         return False
 
 
-def read_file_content_as_str(filepath: str) -> str:
-    with open(file=filepath, mode="rb") as f:
-        file_content: bytes = f.read()
-
-    return file_content.decode(encoding="utf-8")
-
-
-def _is_cpp(src: str) -> bool:
-    lore: list[re.Pattern] = [
-        re.compile(pattern=r"(?<=[\w>-])\bauto\s*"),
-        re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
-        re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
-        re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
-        re.compile(pattern=r"^.*?\s*<.*?>"),
-        re.compile(pattern=r"\w*::"),
-        re.compile(pattern=r"(?<=\))\s*:.*?,"),
-    ]
-
-    for regex in lore:
-        if re.search(pattern=regex, string=src):
-            return True
-
-    return False
-
-
 # exported vars
 c_ts: TreeSitter = TreeSitter(language_name="c")
 cpp_ts: TreeSitter = TreeSitter(language_name="cpp")
