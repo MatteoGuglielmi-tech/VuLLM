@@ -464,62 +464,6 @@ def _is_cpp(src: str) -> bool:
     return False
 
 
-def test():
-    c_ts: TreeSitter = TreeSitter()
-    cpp_ts: TreeSitter = TreeSitter(language_name="cpp")
-
-    c_code = read_file_content_as_str(filepath="./misc/tmp.c")
-    # cpp_code = read_file_content_as_str(filepath="./misc/tmp.cpp")
-    c_ts.parse_input(code_snippet=c_code)
-    # cpp_ts.parse_input(code_snippet=cpp_code)
-
-    # print("Is C++?", _is_cpp(cpp_code))
-
-    (
-        print("valid C function")
-        if c_ts.is_valid_function(proto=c_code)
-        else print("invalid C function")
-    )
-    # (
-    #     print("valid C++ function")
-    #     if cpp_ts.is_valid_function(proto=cpp_code)
-    #     else print("invalid C++ function")
-    # )
-    # (
-    #     print("valid C++ template")
-    #     if cpp_ts.is_valid_template(proto=cpp_code)
-    #     else print("invalid C++ template")
-    # )
-
-    # print(ts.is_closing_curvy_needed())
-
-    print("src: ", c_ts.replace_error_nodes(c_code))
-    c_code = c_ts.replace_error_nodes(c_code)
-
-    (
-        print("valid C function")
-        if c_ts.is_valid_function(proto=c_code)
-        else print("invalid C function")
-    )
-
-    # print(cpp_ts.replace_error_nodes(cpp_code))
-    # print(ts.get_missing_nodes())
-
-    # comments: list[bytes] = ts.extract_comments()
-    # directives: list[bytes] = ts.extract_directives()
-    #
-    # print(directives)
-    #
-    # for comment in comments:
-    #     str_cmnt = comment.decode(encoding="utf-8")
-    #     code = code.replace(str_cmnt, "")
-    #
-    # print(code)
-
-
 # exported vars
 c_ts: TreeSitter = TreeSitter(language_name="c")
 cpp_ts: TreeSitter = TreeSitter(language_name="cpp")
-
-if __name__ == "__main__":
-    test()
