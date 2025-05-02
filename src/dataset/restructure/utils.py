@@ -291,7 +291,7 @@ def parse_func_proto(decl: str) -> str:
     )
 
     filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
-
+    func_prototype = ts.remove_if_condition(src=func_prototype)
     func_prototype = ts.replace_error_nodes(src=func_prototype)
 
     # double checking
@@ -485,6 +485,8 @@ def spawn_refactor(filepath: str) -> int:
     exit_code: int = os.system(
         f'sed -i -E "s/Language:.*/Language: {ts.language_name.capitalize()}/g" {argparser.args.format_config_file}'
     )
+
+    logger.info(msg=f"Changed Language to {ts.language_name.capitalize()}")
 
     exit_code = os.system(
         command=f"~/.local/share/nvim/mason/bin/clang-format -style=file -i {filepath}"
