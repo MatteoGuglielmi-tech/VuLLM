@@ -33,6 +33,7 @@ class Builder:
         dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
         # substitute multiple newlines with single newline
         dof.update({"func": utils.remove_multiple_newlines(lineContent=dof["func"])})
+        # dof.update({"func": utils.remove_if0(lineContent=dof["func"])})
 
         return dof
 

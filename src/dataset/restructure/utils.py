@@ -602,12 +602,14 @@ def set_parser(language_name: str) -> TreeSitter:
 
 def _is_cpp(src: str) -> bool:
     lore: list[re.Pattern] = [
+        re.compile(pattern=r"namespace\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bauto\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
         re.compile(pattern=r"^.*?\s*<.*?>"),
         re.compile(pattern=r"\w*::"),
+        re.compile(pattern=r"(?<=\))\s*:.*?,"),
         re.compile(pattern=r"(?<=\))\s*:.*?,"),
     ]
 
