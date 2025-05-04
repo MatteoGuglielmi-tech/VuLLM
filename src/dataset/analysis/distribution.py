@@ -1,18 +1,18 @@
+import os
 import re
 from collections import Counter
-from typing import Text
+from contextlib import suppress
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import font_manager as fm
-from matplotlib import legend
-from matplotlib.patches import Patch, Wedge
 from matplotlib.ticker import MultipleLocator
 
 import utils
 from animate import Loader
+from log import logger
 
 fpath_italic = "/usr/share/fonts/TTF/CascadiaCodeNFItalic.ttf"
 fpath = "/usr/share/fonts/TTF/CascadiaCodeNF.ttf"
@@ -20,40 +20,9 @@ prop_title = fm.FontProperties(fname=fpath, size=20)
 prop = fm.FontProperties(fname=fpath, size=14)
 prop_it = fm.FontProperties(fname=fpath, size=20)
 
-
-# sns.set_theme(
-#     style="darkgrid",
-#     rc={
-#         "figure.facecolor": "white",
-#         "axes.facecolor": "#c4d8e2",
-#         "grid.linestyle": "--",
-#         "grid.color": "white",
-#         "axes.edgecolor": "grey",
-#         "xtick.bottom": True,
-#         "ytick.left": True,
-#     },
-# )
-
 sns.axes_style(style="darkgrid")
 sns.set_style(style="ticks")
 sns.set_theme(style="ticks", rc={"axes.spines.right": False, "axes.spines.top": False})
-
-# plt.rcParams.update({"font.size": 20})
-# plt.style.use(["fivethirtyeight"])
-
-# plt.rcParams.update(
-#     {
-#         "lines.color": "white",
-#         "patch.edgecolor": "white",
-#         "text.color": "black",
-#         "axes.facecolor": "white",
-#         "axes.edgecolor": "lightgray",
-#         "figure.facecolor": "lightgray",
-#         "figure.edgecolor": "black",
-#         "savefig.facecolor": "lightgray",
-#         "savefig.edgecolor": "black",
-#     }
-# )
 
 
 class DataDistribution:
@@ -108,7 +77,9 @@ class DataDistribution:
 
         plt.tight_layout()
         plt.show()
-        fig.savefig("pie_target.png", dpi=300, bbox_inches="tight", pad_inches=0.1)
+        fig.savefig(
+            "./assets/pie_target.png", dpi=300, bbox_inches="tight", pad_inches=0.1
+        )
 
     def __func(self, pct, allvals):
         absolute = int(pct / 100.0 * np.sum(allvals))
@@ -196,17 +167,28 @@ class DataDistribution:
         plt.tight_layout()
         plt.show()
         ax.figure.figure.savefig(
-            "cwe_distr.png", dpi=300, bbox_inches="tight", pad_inches=0.1
+            "./assets/cwe_distr.png", dpi=300, bbox_inches="tight", pad_inches=0.1
         )
 
     def __debug(self):
-        with open("debug.txt", "a") as f:
+        with open("./misc/debug.txt", "a") as f:
             for i, item in enumerate(self.data_df["cwe"].tolist()):
                 print(f"{i} : {item}", file=f)
 
 
+def create_dirs():
+    dirs = ["./misc", "./assets"]
+    for d in dirs:
+        with suppress(FileExistsError):
+            os.mkdir(path=d)
+            continue
+        logger.info(msg=f"Created {d} directory")
+
+
 if __name__ == "__main__":
+    create_dirs()
+
     with Loader(desc="Plotting distribution "):
-        data = DataDistribution(pth2json="../restructure/ReadyToUse_DiverseVul.json")
+        data = DataDistribution(pth2json="../../../DiverseVul/DiverseVul.json")
         data.pie_chart_target()
         data.pie_chart_vulnerability()
