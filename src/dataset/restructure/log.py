@@ -44,7 +44,10 @@ except FileExistsError:
     pass
 
 if os.path.isfile(path="./misc/app.log"):
-    os.remove("./misc/app.log")
+    path = "./misc/app.log"
+    filename, _ = os.path.splitext(p=path)
+    os.rename(src=path, dst=filename + ".bak")
+    # os.remove(path="./misc/app.log")
 
 fh = logging.FileHandler(filename="./misc/app.log", mode="a", encoding="utf-8")
 fh.setLevel(logging.DEBUG)
