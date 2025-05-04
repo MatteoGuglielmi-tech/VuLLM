@@ -130,6 +130,15 @@ def fix_func_proto(lineContent: str) -> str:
         return "error"
     else:
         if func_prototype:
+            global ts, filename
+            ts = (
+                set_parser(language_name="cpp")
+                if _is_cpp(lineContent)
+                else set_parser(language_name="c")
+            )
+
+            filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
+
             # remove old proto
             lineContent = lineContent.replace(func_prototype, "")
             # filter func_prototype
@@ -272,25 +281,16 @@ def parse_func_proto(decl: str) -> str:
     func_prototype = remove_multiplespaces(lineContent=decl)
     # 2. remove `\t` chars
     func_prototype = remove_tabs(lineContent=func_prototype)
-    # 3. remove comments from prototype
-    # func_prototype = remove_comments(lineContent=func_prototype)
-    # 4. remove `\n` chars
+    # 2. remove comments from prototype
+    # 3. remove `\n` chars
     func_prototype = re.sub(pattern=r"\\n", repl=" ", string=func_prototype)
-    # 5. & 6. remove spurious opening/closing block comments chars
+    # 4. & 5. remove spurious opening/closing block comments chars
     func_prototype = re.sub(pattern=r"\**?\*/\s*", repl="", string=func_prototype)
     func_prototype = re.sub(pattern=r"/\*\**\s*", repl="", string=func_prototype)
-    # 7. remove opening `}` from the beginning of the line
+    # 6. remove opening `}` from the beginning of the line
     func_prototype = re.sub(pattern=r"^\s*}", repl="", string=func_prototype)
 
-    global ts
-    global filename
-    ts = (
-        set_parser(language_name="cpp")
-        if _is_cpp(func_prototype)
-        else set_parser(language_name="c")
-    )
-
-    filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
+    # clean-up proto
     func_prototype = ts.remove_if_condition(src=func_prototype)
     func_prototype = ts.replace_error_nodes(src=func_prototype)
 
@@ -610,7 +610,6 @@ def _is_cpp(src: str) -> bool:
         re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
         re.compile(pattern=r"^.*?\s*<.*?>"),
         re.compile(pattern=r"\w*::"),
-        re.compile(pattern=r"(?<=\))\s*:.*?,"),
         re.compile(pattern=r"(?<=\))\s*:.*?,"),
     ]
 
