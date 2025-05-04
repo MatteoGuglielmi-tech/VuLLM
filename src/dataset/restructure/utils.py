@@ -298,6 +298,7 @@ def parse_func_proto(decl: str) -> str:
     if not (
         ts.is_valid_function(proto=func_prototype)
         or ts.is_valid_template(proto=func_prototype)
+        or ts.is_valid_namespace(proto=func_prototype)
     ):
         return "error"
 
@@ -602,7 +603,7 @@ def set_parser(language_name: str) -> TreeSitter:
 
 def _is_cpp(src: str) -> bool:
     lore: list[re.Pattern] = [
-        re.compile(pattern=r"namespace\s*"),
+        re.compile(pattern=r"namespace\s*\w*"),
         re.compile(pattern=r"(?<=[\w>-])\bauto\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),

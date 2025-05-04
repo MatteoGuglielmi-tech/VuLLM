@@ -380,6 +380,19 @@ class TreeSitter:
 
         return src
 
+    def is_valid_namespace(self, proto: str) -> bool:
+        # append dummy parenthesis for proper parsing
+        if self.language_name == "cpp":
+            proto = proto[:-1] + "{}"
+            self.parse_input(code_snippet=proto)
+            nodes: list[Node] = self.root_node.children
+            first_node: Node = nodes[0]
+
+            if first_node.type == "namespace_definition":
+                return True
+
+        return False
+
     def is_valid_function(self, proto: str) -> bool:
         # append dummy parenthesis for proper parsing
         proto = proto[:-1] + "{}"
