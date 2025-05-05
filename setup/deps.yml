@@ -1,5 +1,5 @@
 ---
-name: VuLLM
+name: vullm
 channels: [nvidia, pytorch, conda-forge, defaults, anaconda]
 dependencies:
   - python=3.12
@@ -12,4 +12,5 @@ dependencies:
   - conda-forge::grpcio
   - conda-forge::grpcio-status
   - conda-forge::alive-progress
+  - conda-forge::tree_sitter
   - anaconda::absl-py
