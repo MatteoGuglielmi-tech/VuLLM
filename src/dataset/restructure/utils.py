@@ -131,9 +131,10 @@ def fix_func_proto(lineContent: str) -> str:
     else:
         if func_prototype:
             global ts, filename
+
             ts = (
                 set_parser(language_name="cpp")
-                if _is_cpp(lineContent)
+                if _is_cpp(src=lineContent, proto=func_prototype)
                 else set_parser(language_name="c")
             )
 
@@ -601,20 +602,25 @@ def set_parser(language_name: str) -> TreeSitter:
     return c_ts if language_name == "c" else cpp_ts
 
 
-def _is_cpp(src: str) -> bool:
+def _is_cpp(src: str, proto: str) -> bool:
     lore: list[re.Pattern] = [
         re.compile(pattern=r"namespace\s*\w*"),
         re.compile(pattern=r"(?<=[\w>-])\bauto\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
-        re.compile(pattern=r"^.*?\s*<.*?>"),
         re.compile(pattern=r"\w*::"),
-        re.compile(pattern=r"(?<=\))\s*:.*?,"),
     ]
 
     for regex in lore:
         if re.search(pattern=regex, string=src):
+            return True
+
+
+    lore = [ re.compile(pattern=r"^.*?\s*<.*?>"), re.compile(pattern=r"(?<=\))\s*:.*?,") ]
+
+    for regex in lore:
+        if re.search(pattern=regex, string=proto):
             return True
 
     return False
