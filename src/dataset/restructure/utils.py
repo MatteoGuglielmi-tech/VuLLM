@@ -623,4 +623,11 @@ def _is_cpp(src: str, proto: str) -> bool:
         if re.search(pattern=regex, string=proto):
             return True
 
+    # default parameters are valid only in case of cpp functions
+    parameters: list[str] = findall_regex(pattern=r"(?<=\().*?(?=\))", target=proto)
+    default_values: list[str] = findall_regex(pattern=r"\w*\s*\w+=\w+", target=parameters[0]) if parameters else []
+
+    if default_values:
+        return True
+ 
     return False
