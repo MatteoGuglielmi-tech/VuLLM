@@ -169,8 +169,6 @@ class TreeSitter:
         )
         if_dir: list[str] = re.findall(pattern=r"\s*#\s*if", string=src)
 
-        self.parse_input(code_snippet=src)
-
         if not if_dir:
             return src
 
@@ -180,6 +178,9 @@ class TreeSitter:
 
         if_comp_str: str = ""
         bin_exp: str = ""
+
+        self.parse_input(code_snippet=src)
+        print(f"Language used for parsing: {self.language_name}")
 
         if if_dir:
             for n in self.traverse_tree():
@@ -191,12 +192,7 @@ class TreeSitter:
                         if_comp_str = n.text.decode() + " "
 
                     case "binary_expression":
-                        condition = (
-                            (flags & 0x01) or ((flags == 0x03) or (flags == 0x07))
-                            if is_at_beginning
-                            else (flags & 0x01)
-                        )
-                        if condition:
+                        if (flags & 0x1):
                             bin_exp = n.text.decode(encoding="utf-8")
                             flags |= self._setBit(int_type=flags, offset=count)
                             count += 1
@@ -204,10 +200,7 @@ class TreeSitter:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "identifier":
-                        condition = (
-                            (flags == 0xF) if is_at_beginning else (flags == 0x3)
-                        )
-                        if condition:
+                        if flags == 0x3:
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=src
                             )[0]
@@ -217,10 +210,7 @@ class TreeSitter:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "<" | ">" | "==" | ">=" | "<=":
-                        condition = (
-                            (flags == 0x1F) if is_at_beginning else (flags == 0x7)
-                        )
-                        if condition:
+                        if flags == 0x7:
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=bin_exp
                             )[0]
@@ -229,19 +219,18 @@ class TreeSitter:
                         else:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
-                    # when in the middle, there's an ERROR node to
-                    # consider in the sequence
+                    # an ERROR node is create when #if condition is
+                    # at the beginning and only in case of cpp parser
                     case "ERROR":
-                        if flags == 0x3F:
+                        if is_at_beginning and self.language_name == "cpp"  and flags == 0xF:
                             flags |= self._setBit(int_type=flags, offset=count)
                             count += 1
                             continue
+                        else:
+                            flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "number_literal":
-                        condition = (
-                            (flags == 0x7F) if is_at_beginning else (flags == 0xF)
-                        )
-                        if condition:
+                        if (flags == 0xF) or (flags== 0x1F):
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=src
                             )[0]
