@@ -488,7 +488,8 @@ def spawn_refactor(filepath: str) -> int:
         f'sed -i -E "s/Language:.*/Language: {ts.language_name.capitalize()}/g" {argparser.args.format_config_file}'
     )
 
-    logger.info(msg=f"Changed Language to {ts.language_name.capitalize()}")
+    if argparser.args.debug:
+        logger.info(msg=f"Changed Language to {ts.language_name.capitalize()}")
 
     exit_code = os.system(
         command=f"~/.local/share/nvim/mason/bin/clang-format -style=file -i {filepath}"
@@ -496,6 +497,10 @@ def spawn_refactor(filepath: str) -> int:
 
     if exit_code != 0:
         logger.error(msg="Some error has occured")
+    else:
+        if argparser.args.debug:
+            logger.info(msg=f"Refactoring done!")
+
 
     return exit_code
 
