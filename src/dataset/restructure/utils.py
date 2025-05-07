@@ -2,6 +2,7 @@ import json
 import os
 import pickle
 import re
+import string
 import subprocess
 
 from alive_progress import alive_bar
@@ -152,7 +153,19 @@ def fix_func_proto(lineContent: str) -> str:
     return lineContent
 
 
-def remove_multiple_newlines(lineContent: str) -> str:
+def remove_if0(lineContent: str):
+    ignored_blocks: list[str] = findall_regex(
+        pattern=r"#\s*if\s+.*?#\s*endif", target=lineContent
+    )
+
+    if ignored_blocks:
+        for i in ignored_blocks:
+            lineContent = lineContent.replace(i, "")
+
+    return lineContent
+
+
+def remove_newlines(lineContent: str) -> str:
     goto: bool = False
 
     # this can be achieved via tree-sitter as well
