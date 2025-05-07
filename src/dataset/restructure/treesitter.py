@@ -179,7 +179,7 @@ class TreeSitter:
         bin_exp: str = ""
 
         self.parse_input(code_snippet=src)
-        print(f"Language used for parsing: {self.language_name}")
+        # print(f"Language used for parsing: {self.language_name}")
 
         if if_dir:
             for n in self.traverse_tree():
