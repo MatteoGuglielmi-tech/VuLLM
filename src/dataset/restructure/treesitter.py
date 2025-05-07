@@ -2,8 +2,7 @@ import re
 from collections.abc import Generator
 
 from tree_sitter import Language, Node, Parser, Tree, TreeCursor
-from tree_sitter_language_pack import (SupportedLanguage, get_language,
-                                       get_parser)
+from tree_sitter_language_pack import SupportedLanguage, get_language, get_parser
 
 
 class TreeSitter:
@@ -192,7 +191,7 @@ class TreeSitter:
                         if_comp_str = n.text.decode() + " "
 
                     case "binary_expression":
-                        if (flags & 0x1):
+                        if (flags & 0x1) or (flags == 0x3 or flags == 0x7):
                             bin_exp = n.text.decode(encoding="utf-8")
                             flags |= self._setBit(int_type=flags, offset=count)
                             count += 1
@@ -200,7 +199,7 @@ class TreeSitter:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "identifier":
-                        if flags == 0x3:
+                        if (flags == 0x3) or (flags == 0xF):
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=src
                             )[0]
@@ -210,7 +209,7 @@ class TreeSitter:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "<" | ">" | "==" | ">=" | "<=":
-                        if flags == 0x7:
+                        if (flags == 0x7) or (flags == 0x1F):
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=bin_exp
                             )[0]
@@ -222,7 +221,11 @@ class TreeSitter:
                     # an ERROR node is create when #if condition is
                     # at the beginning and only in case of cpp parser
                     case "ERROR":
-                        if is_at_beginning and self.language_name == "cpp"  and flags == 0xF:
+                        if (
+                            is_at_beginning
+                            and self.language_name == "cpp"
+                            and (flags == 0xF or flags == 0x3F)
+                        ):
                             flags |= self._setBit(int_type=flags, offset=count)
                             count += 1
                             continue
@@ -230,7 +233,7 @@ class TreeSitter:
                             flags = self._clearBit(int_type=flags, offset=0xFF)
 
                     case "number_literal":
-                        if (flags == 0xF) or (flags== 0x1F):
+                        if (flags == 0xF) or (flags == 0x1F) or (flags == 0x7F):
                             if_comp_str += re.findall(
                                 pattern=rf"{n.text.decode()}\s*", string=src
                             )[0]
@@ -247,7 +250,7 @@ class TreeSitter:
         for s in entry_to_rm:
             src = src.replace(s, "")
 
-        return src
+        return src.strip()
 
     def replace_error_nodes(self, src: str) -> str:
         to_rm: str = ""
