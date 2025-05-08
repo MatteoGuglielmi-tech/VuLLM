@@ -152,14 +152,34 @@ def fix_func_proto(lineContent: str) -> str:
     return lineContent
 
 
-def remove_if0(lineContent: str):
+def remove_if0(lineContent: str) -> str:
+    ignored_blocks_re: re.Pattern = re.compile(pattern=r"#\s*if\s+0.*?#\s*endif")
     ignored_blocks: list[str] = findall_regex(
-        pattern=r"#\s*if\s+0.*?#\s*endif", target=lineContent
+        pattern=ignored_blocks_re, target=lineContent
     )
 
+    def _is_nested(blk: str) -> bool:
+        """Enstablish whether an #if 0 block is nested or not"""
+        return len(findall_regex(pattern=r"#\s*if\s+", target=blk)) > 1
+
+    def _count_deepness(blk: str) -> int:
+        """Count level of nesting of #if 0 block"""
+        return len(findall_regex(pattern=r"#\s*if\s+", target=blk))
+
+    cumulative_nesting_lvl: int = 0
+
     if ignored_blocks:
-        for i in ignored_blocks:
-            lineContent = lineContent.replace(i, "")
+        for ib in ignored_blocks:
+            if _is_nested(blk=ib):
+                # replace block with dummy #if 0
+                lineContent = lineContent.replace(ib, "#if 0")
+                # upating total nesting lvl with current one
+                cumulative_nesting_lvl += _count_deepness(blk=ib) - 1
+            else:
+                lineContent = lineContent.replace(ib, "")
+
+        for _ in range(cumulative_nesting_lvl):
+            lineContent = re.sub(pattern=ignored_blocks_re, repl="", string=lineContent)
 
     return lineContent
 
@@ -556,6 +576,7 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
             except:
                 refactored_chunk = refactored_chunk
 
+            populate_tmp_file(func_str_body=refactored_chunk)
             dic[k].update({"func": refactored_chunk})
             running_d[k] = dic[k]
             _save_backup(obj=running_d)
