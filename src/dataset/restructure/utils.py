@@ -160,11 +160,11 @@ def remove_if0(lineContent: str) -> str:
 
     def _is_nested(blk: str) -> bool:
         """Enstablish whether an #if 0 block is nested or not"""
-        return len(findall_regex(pattern=r"#\s*if\s+", target=blk)) > 1
+        return len(findall_regex(pattern=r"#\s*if\s*", target=blk)) > 1
 
     def _count_deepness(blk: str) -> int:
         """Count level of nesting of #if 0 block"""
-        return len(findall_regex(pattern=r"#\s*if\s+", target=blk))
+        return len(findall_regex(pattern=r"#\s*if\s*", target=blk))
 
     nesting_lvls: list[int] = []
 
