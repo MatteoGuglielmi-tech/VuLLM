@@ -166,26 +166,33 @@ def remove_if0(lineContent: str) -> str:
         """Count level of nesting of #if 0 block"""
         return len(findall_regex(pattern=r"#\s*if\s*", target=blk))
 
-    nesting_lvls: list[int] = []
+    nesting_lvls: dict[int, int] = {}
+    # running index for current nested #ifs inside #if 0
+    nested_blk_idx: int = 0
 
     if ignored_blocks:
         for ib in ignored_blocks:
             if _is_nested(blk=ib):
-                # replace block with dummy #if 0
-                lineContent = lineContent.replace(ib, "#if 0")
-                # upating total nesting lvl with current one
-                nesting_lvls.append(_count_deepness(blk=ib) - 1)
+                # replace block with dummy #if {idx}
+                # not #if 0 to avoid erroneous subsitution
+                # (having idx allows me to know the indentention degree of each block separately )
+                lineContent = lineContent.replace(ib, f"#if {nested_blk_idx}")
+                # add nesting level for current block
+                nesting_lvls[nested_blk_idx] = _count_deepness(blk=ib) - 1
+                # upating nesting lvl idx for next block
+                nested_blk_idx += 1
             else:
                 lineContent = lineContent.replace(ib, "")
 
-        for depth in nesting_lvls:
-            # depth is the nesting lvl of nesting_lvls.index(depth) nested #if
-            for d in range(depth):
-                lineContent = re.sub(
-                    pattern=ignored_blocks_re,
-                    repl="#if 0" if d < depth - 1 else "",
-                    string=lineContent,
-                )
+        if nesting_lvls:
+            for idx, depth in nesting_lvls.items():
+                # depth is the nesting lvl of nesting_lvls.index(depth) nested #if
+                for d in range(depth):
+                    lineContent = re.sub(
+                        pattern=rf"#\s*if\s+{idx}.*?#\s*endif",
+                        repl=f"#if {idx}" if d < depth - 1 else "",
+                        string=lineContent,
+                    )
 
     return lineContent
 
