@@ -2,7 +2,6 @@ import json
 import os
 import pickle
 import re
-import string
 import subprocess
 
 from alive_progress import alive_bar
@@ -155,7 +154,7 @@ def fix_func_proto(lineContent: str) -> str:
 
 def remove_if0(lineContent: str):
     ignored_blocks: list[str] = findall_regex(
-        pattern=r"#\s*if\s+.*?#\s*endif", target=lineContent
+        pattern=r"#\s*if\s+0.*?#\s*endif", target=lineContent
     )
 
     if ignored_blocks:
