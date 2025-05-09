@@ -8,6 +8,17 @@ parser = argparse.ArgumentParser(
     allow_abbrev=True,
 )
 
+# this is important for setting the parser for first
+# function dynamically
+parser.add_argument(
+    "--lang_first_func",
+    "-l",
+    type=str,
+    required=False,
+    default="c",
+    help="Lang of first entry of the dataset",
+)
+
 parser.add_argument(
     "--path",
     "-p",
