@@ -13,8 +13,10 @@ from treesitter import TreeSitter, c_ts, cpp_ts
 
 FIELDS_IN_JSON: int = 9
 
-ts: TreeSitter = TreeSitter()
-filename: str
+ts: TreeSitter = TreeSitter(language_name=argparser.args.lang_first_func)
+filename: str = f"tmp.{argparser.args.lang_first_func}"
+prev_parsing_language: str = ""
+func_prototype: str = ""
 
 
 def findall_regex(pattern: str | re.Pattern, target: str) -> list[str]:
@@ -118,36 +120,30 @@ def remove_tabs(lineContent: str):
     return lineContent
 
 
-def fix_func_proto(lineContent: str) -> str:
+def _extract_func_prototype(src: str) -> str:
     subFuncNameRegEx: re.Pattern = re.compile(pattern=r".*?(?=\{)")
 
     try:
-        func_prototype: str = findall_regex(
-            pattern=subFuncNameRegEx, target=lineContent
-        )[0]
+        func_prototype: str = findall_regex(pattern=subFuncNameRegEx, target=src)[0]
     except IndexError:
-        logger.critical(msg=f"Atypical function prototype : `{lineContent}` -> Skipped")
+        logger.critical(msg=f"Atypical function prototype : `{src}` -> Skipped")
         return "error"
     else:
-        if func_prototype:
-            global ts, filename
+        return func_prototype
 
-            ts = (
-                set_parser(language_name="cpp")
-                if _is_cpp(src=lineContent, proto=func_prototype)
-                else set_parser(language_name="c")
-            )
 
-            filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
+def fix_func_proto(lineContent: str) -> str:
+    global func_prototype
 
-            # remove old proto
-            lineContent = lineContent.replace(func_prototype, "")
-            # filter func_prototype
-            func_prototype = parse_func_proto(decl=func_prototype)
-            if func_prototype == "error":
-                return "error"
-            # re-add corrected function signature
-            lineContent = func_prototype + lineContent
+    if lineContent == "error":
+        return "error"
+
+    # remove old proto
+    lineContent = lineContent.replace(func_prototype, "")
+    # filter func_prototype
+    func_prototype = parse_func_proto(decl=func_prototype)
+    # re-add corrected function signature
+    lineContent = func_prototype + lineContent
 
     return lineContent
 
@@ -373,6 +369,46 @@ def remove_multiplespaces(lineContent: str) -> str:
 
 
 def remove_comments(lineContent: str) -> str:
+    global ts, filename, func_prototype, prev_parsing_language
+
+    def _remove_comments_from_proto() -> str:
+        """Extract function signature without comments"""
+        # comments in c and c++ are parsed in the same way
+        ts.parse_input(code_snippet=lineContent)
+        comments: list[bytes] = ts.extract_comments()
+
+        src: bytes = lineContent.encode(encoding="utf-8")
+        if comments:
+            for comment in comments:
+                comment = re.sub(pattern=b"\\n", repl=b"\\\\n", string=comment)
+                src = src.replace(comment, b"")
+
+        func_prototype = _extract_func_prototype(src.decode(encoding="utf-8"))
+
+        return func_prototype
+
+    # new "func_prototype" allows to recognize c and cpp functions properly
+    # comments regex may fail in extract both comments and func proto
+    func_prototype = _remove_comments_from_proto()
+
+    if func_prototype == "error":
+        return "error"
+
+    if not prev_parsing_language:
+        # first function -> prev_parsing_language not set yet
+        # no need to set the parser since language is given via cli args
+        prev_parsing_language = argparser.args.lang_first_func
+    else:
+        # iter_nb > 1st
+        ts = (
+            set_parser(language_name="cpp")
+            if _is_cpp(src=lineContent, proto=func_prototype)
+            else set_parser(language_name="c")
+        )
+
+    filename = "./misc/tmp1.c" if ts.language_name == "c" else "./misc/tmp1.cpp"
+
+    # parse function with correct parser
     ts.parse_input(code_snippet=lineContent)
     comments: list[bytes] = ts.extract_comments()
 
@@ -381,10 +417,12 @@ def remove_comments(lineContent: str) -> str:
     if comments:
         for comment in comments:
             comment = re.sub(pattern=b"\\n", repl=b"\\\\n", string=comment)
+            # count = 1 here is essential
+            # in case of b'//' comment, it caps the number of substitution to a maximum of one,
+            # which is the current comment itself
+            lineContentBytes = lineContentBytes.replace(comment, b"", 1)
+            lineContent = lineContentBytes.decode(encoding="utf-8")
 
-            lineContentBytes = lineContentBytes.replace(comment, b"")
-
-    lineContent = lineContentBytes.decode(encoding="utf-8")
     return lineContent
 
 
