@@ -412,6 +412,7 @@ def read_json() -> list[str]:
             fileContent = json.readlines()
 
     start_idx = (argparser.args.start_idx) if argparser.args.start_idx > 0 else 0
+
     return fileContent[start_idx:]
 
 
@@ -668,6 +669,7 @@ def _is_cpp(src: str, proto: str) -> bool:
         re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
         re.compile(pattern=r"\w*::"),
+        re.compile(pattern=r"\s+throw\s+"),
     ]
 
     for regex in lore:
