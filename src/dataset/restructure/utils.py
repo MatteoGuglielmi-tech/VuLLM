@@ -531,14 +531,19 @@ def populate_tmp_file(func_str_body: str) -> None:
 
 
 def spawn_refactor(filepath: str) -> int:
-    # clang-format provided by clangd.
-    # update .clang-format file with proper language
-    exit_code: int = os.system(
-        f'sed -i -E "s/Language:.*/Language: {ts.language_name.capitalize()}/g" {argparser.args.format_config_file}'
-    )
+    global prev_parsing_language
+    if prev_parsing_language != ts.language_name:
+        # clang-format provided by clangd.
+        # update .clang-format file with proper language
+        exit_code: int = os.system(
+            f'sed -i -E "s/Language:.*/Language: {ts.language_name.capitalize()}/g" {argparser.args.format_config_file}'
+        )
 
-    if argparser.args.debug:
-        logger.info(msg=f"Changed Language to {ts.language_name.capitalize()}")
+        if argparser.args.debug:
+            logger.info(msg=f"Changed Language to {ts.language_name.capitalize()}")
+
+        # update language in use
+        prev_parsing_language = ts.language_name
 
     exit_code = os.system(
         command=f"~/.local/share/nvim/mason/bin/clang-format -style=file -i {filepath}"
