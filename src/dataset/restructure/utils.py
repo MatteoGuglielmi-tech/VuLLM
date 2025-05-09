@@ -518,10 +518,14 @@ def populate_tmp_file(func_str_body: str) -> None:
 
     # at this point, the char "\n" can only be found where pre-processor instructions are
     # split based on that character and enforce new line to avoid refactoring error
+    def _remove_empty_lines() -> list[str]:
+        return list(filter(lambda l: l.strip(), func_str_body.split(sep="\\n")))
+
+    func_str_body_split: list[str] = _remove_empty_lines()
     # override content with current function
     with open(file=filename, mode="w") as f:
         try:
-            f.writelines("\n".join(func_str_body.split(sep="\\n")))
+            f.writelines("\n".join(func_str_body_split))
         except:
             f.write(func_str_body)
 
