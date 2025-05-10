@@ -615,6 +615,23 @@ def read_file_content_as_str(filepath: str) -> str:
     return file_content.decode(encoding="utf-8")
 
 
+def remove_unzip_project(
+    dic: dict[int, dict[str, str | list[str]]],
+) -> dict[int, dict[str, str | list[str]]]:
+
+    dic_cp = dic.copy()
+
+    with alive_bar(
+        total=len(dic.keys()), title="Removing UnZip project", length=60, bar="smooth"
+    ) as bar:
+        for idx, (_, v) in enumerate(dic.items()):
+            if v["project"] == "unzip":
+                del dic_cp[idx]
+            bar()
+
+    return dic_cp
+
+
 def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
     global ts
 
@@ -655,10 +672,14 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
 
             dic[k].update({"func": refactored_chunk})
             running_d[k] = dic[k]
-            if not bool(idx % 1000):
+            if (not bool(idx % 1000)) or (idx == (content_len - 1)):
                 _save_backup(obj=running_d)
+
             bar()
 
+    # remove noisy entries
+    dic = remove_unzip_project(dic=dic)
+    # serializing object
     write_json(dic)
 
 
