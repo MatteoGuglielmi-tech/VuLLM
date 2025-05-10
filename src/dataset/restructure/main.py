@@ -23,8 +23,8 @@ class Builder:
         dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
         # remove block and inline comments
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
-        # fix function prototype
-        dof.update({"func": utils.fix_func_proto(lineContent=dof["func"])})
+        # check if valid function prototype and perform first soft parsing
+        dof.update({"func": utils.fix_func_proto(lineContent=dof["func"], full=False)})
         if dof["func"] == "error":
             return dof
         # substitute mutliple spaces with single space
