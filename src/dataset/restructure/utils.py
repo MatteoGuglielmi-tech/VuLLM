@@ -406,7 +406,7 @@ def remove_comments(lineContent: str) -> str:
             else set_parser(language_name="c")
         )
 
-    filename = "./misc/tmp1.c" if ts.language_name == "c" else "./misc/tmp1.cpp"
+    filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
 
     # parse function with correct parser
     ts.parse_input(code_snippet=lineContent)
@@ -662,6 +662,7 @@ def _save_backup(obj: dict) -> None:
 def _load_backup() -> dict[int, dict[str, str | list[str]]]:
     with open(file="misc/intrmd_bkup.pkl", mode="rb") as fp:
         obj = pickle.load(file=fp)
+
     return obj
 
 
