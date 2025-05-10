@@ -1,1 +1,3 @@
-/misc
+/misc/app.*
+/misc/*.c
+/misc/*.cpp
