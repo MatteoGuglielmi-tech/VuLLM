@@ -135,22 +135,6 @@ def _extract_func_prototype(src: str) -> str:
         return func_prototype
 
 
-def fix_func_proto(lineContent: str) -> str:
-    global func_prototype
-
-    if lineContent == "error":
-        return "error"
-
-    # remove old proto
-    lineContent = lineContent.replace(func_prototype, "")
-    # filter func_prototype
-    func_prototype = parse_func_proto(decl=func_prototype)
-    # re-add corrected function signature
-    lineContent = func_prototype + lineContent
-
-    return lineContent
-
-
 def remove_if0(lineContent: str) -> str:
     ignored_blocks_re: re.Pattern = re.compile(pattern=r"#\s*if\s+0.*?#\s*endif")
     ignored_blocks: list[str] = findall_regex(
@@ -320,7 +304,23 @@ def remove_newlines(lineContent: str) -> str:
     return lineContent
 
 
-def parse_func_proto(decl: str) -> str:
+def fix_func_proto(lineContent: str, full: bool) -> str:
+    global func_prototype
+
+    if lineContent == "error":
+        return "error"
+
+    # remove old proto
+    lineContent = lineContent.replace(func_prototype, "")
+    # filter func_prototype
+    func_prototype = parse_func_proto(decl=func_prototype, full=full)
+    # re-add corrected function signature
+    lineContent = func_prototype + lineContent
+
+    return lineContent
+
+
+def parse_func_proto(decl: str, full: bool) -> str:
     # mistakes emprically verified
     # 1. repl multi-space with single space
     func_prototype = remove_multiplespaces(lineContent=decl)
