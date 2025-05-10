@@ -745,7 +745,7 @@ def _is_cpp(src: str, proto: str) -> bool:
         re.compile(pattern=r"(?<=[\w>-])\bprotected\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bpublic\s*"),
         re.compile(pattern=r"(?<=[\w>-])\bprivate\s*"),
-        re.compile(pattern=r"\w*::"),
+        re.compile(pattern=r"[\w+>]::"),
         re.compile(pattern=r"\s+throw\s+"),
     ]
 
