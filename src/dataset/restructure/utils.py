@@ -3,14 +3,14 @@ import os
 import pickle
 import re
 import subprocess
-import animate
-import argparser
 
 from alive_progress import alive_bar
+from tree_sitter_language_pack import SupportedLanguage
 
+import animate
+import argparser
 from log import logger
 from treesitter import TreeSitter, c_ts, cpp_ts
-from tree_sitter_language_pack import SupportedLanguage
 
 FIELDS_IN_JSON: int = 9
 
