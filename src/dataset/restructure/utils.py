@@ -532,6 +532,9 @@ def write_json(dic: dict) -> None:
     with open(file=argparser.args.file_name, mode="w", encoding="utf-8") as outfile:
         json.dump(obj=dic, fp=outfile, indent=2, sort_keys=False)
 
+    if argparser.args.file_name:
+        logger.info(msg="Serialization of JSON object done!")
+
 
 def _clear_file_content(filename: str) -> None:
     open(filename, mode="w").close()
