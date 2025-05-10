@@ -181,6 +181,7 @@ def remove_if0(lineContent: str) -> str:
 
 
 def remove_newlines(lineContent: str) -> str:
+    global func_prototype
     goto: bool = False
 
     # this can be achieved via tree-sitter as well
@@ -282,17 +283,23 @@ def remove_newlines(lineContent: str) -> str:
         # here I want to check if some pre-processor instructions
         # ain't properly matched
         if len(list_ifs) != len(list_endifs):
-            # manually check the error
-            logger.critical(
-                msg=f"Mismatched pre-processor instruction -> "
-                f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}"
-            )
-            populate_tmp_file(func_str_body=lineContent)
-            pause_exection(
-                msg="Correct function issue(s) and press enter to continue ..."
-            )
-            # read fixed line and proceed
-            lineContent = read_file_content_as_str(filepath=filename)
+            # try to check if full parsing of proto may help removing the error
+            lc: str = fix_func_proto(lineContent=func_prototype, full=True)
+            list_ifs = findall_regex(pattern=hashIfRegex, target=lc)
+            list_endifs = findall_regex(pattern=hashEndIfRegex, target=lc)
+            if len(list_ifs) != len(list_endifs):
+                # manually check the error
+                logger.critical(msg=f"Mismatched pre-processor instruction")
+                logger.critical(msg=f"#if: {len(list_ifs)}, #endif: {len(list_endifs)}")
+                populate_tmp_file(func_str_body=lineContent)
+                pause_exection(
+                    msg="Correct function issue(s) and press enter to continue ..."
+                )
+                # read lines after intervention and proceed
+                lineContent = read_file_content_as_str(filepath=filename)
+            else:
+                # matching after proto processing is fine
+                lineContent = lc
 
     # update internal tree
     # check if missing closing brace. This check has been moved here since
@@ -335,17 +342,18 @@ def parse_func_proto(decl: str, full: bool) -> str:
     # 6. remove opening `}` from the beginning of the line
     func_prototype = re.sub(pattern=r"^\s*}", repl="", string=func_prototype)
 
-    # clean-up proto
-    func_prototype = ts.remove_if_condition(src=func_prototype)
-    func_prototype = ts.replace_error_nodes(src=func_prototype)
+    if full:
+        # clean-up proto
+        func_prototype = ts.remove_if_condition(src=func_prototype)
+        func_prototype = ts.replace_error_nodes(src=func_prototype)
 
-    # double checking
-    if not (
-        ts.is_valid_function(proto=func_prototype)
-        or ts.is_valid_template(proto=func_prototype)
-        or ts.is_valid_namespace(proto=func_prototype)
-    ):
-        return "error"
+        # double checking
+        if not (
+            ts.is_valid_function(proto=func_prototype)
+            or ts.is_valid_template(proto=func_prototype)
+            or ts.is_valid_namespace(proto=func_prototype)
+        ):
+            return "error"
 
     return func_prototype
 
