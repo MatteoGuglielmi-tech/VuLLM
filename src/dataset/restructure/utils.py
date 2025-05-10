@@ -3,19 +3,22 @@ import os
 import pickle
 import re
 import subprocess
+import animate
+import argparser
 
 from alive_progress import alive_bar
 
-import animate
-import argparser
 from log import logger
 from treesitter import TreeSitter, c_ts, cpp_ts
+from tree_sitter_language_pack import SupportedLanguage
 
 FIELDS_IN_JSON: int = 9
 
 ts: TreeSitter = TreeSitter(language_name=argparser.args.lang_first_func)
 filename: str = f"tmp.{argparser.args.lang_first_func}"
 prev_parsing_language: str = ""
+# `lang_map` is used to avoid redoing _is_cpp() when building refactored json
+lang_map: list[SupportedLanguage] = []
 func_prototype: str = ""
 
 
@@ -398,6 +401,8 @@ def remove_comments(lineContent: str) -> str:
         # first function -> prev_parsing_language not set yet
         # no need to set the parser since language is given via cli args
         prev_parsing_language = argparser.args.lang_first_func
+        # add first function lang to list of langs
+        lang_map.append(prev_parsing_language)
     else:
         # iter_nb > 1st
         ts = (
@@ -405,6 +410,8 @@ def remove_comments(lineContent: str) -> str:
             if _is_cpp(src=lineContent, proto=func_prototype)
             else set_parser(language_name="c")
         )
+        # add new lang to list for current snippet of code
+        lang_map.append(ts.language_name)
 
     filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
 
@@ -571,6 +578,7 @@ def populate_tmp_file(func_str_body: str) -> None:
 
 def spawn_refactor(filepath: str) -> int:
     global prev_parsing_language
+
     if prev_parsing_language != ts.language_name:
         # clang-format provided by clangd.
         # update .clang-format file with proper language
@@ -605,6 +613,8 @@ def read_file_content_as_str(filepath: str) -> str:
 
 
 def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
+    global ts
+
     refactored_chunk: str = ""
     content_len: int = len(dic.keys())
     running_d: dict = {}
@@ -620,6 +630,9 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
             ), "For some reason, the `func` field is not a string"
 
             populate_tmp_file(func_str_body=str(dic[idx]["func"]))
+
+            # set parser languge for current code
+            ts.language_name = lang_map[idx]
 
             if spawn_refactor(filepath=filename):
                 pause_exection()
