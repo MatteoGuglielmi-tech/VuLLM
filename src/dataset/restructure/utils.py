@@ -639,7 +639,8 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
 
             dic[k].update({"func": refactored_chunk})
             running_d[k] = dic[k]
-            _save_backup(obj=running_d)
+            if not bool(idx % 1000):
+                _save_backup(obj=running_d)
             bar()
 
     write_json(dic)
