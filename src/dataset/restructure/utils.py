@@ -284,7 +284,7 @@ def remove_newlines(lineContent: str) -> str:
         # ain't properly matched
         if len(list_ifs) != len(list_endifs):
             # try to check if full parsing of proto may help removing the error
-            lc: str = fix_func_proto(lineContent=func_prototype, full=True)
+            lc: str = fix_func_proto(lineContent=lineContent, full=True)
             list_ifs = findall_regex(pattern=hashIfRegex, target=lc)
             list_endifs = findall_regex(pattern=hashEndIfRegex, target=lc)
             if len(list_ifs) != len(list_endifs):
@@ -641,14 +641,14 @@ def remove_unzip_project(
 
 
 def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
-    global ts
+    global ts, filename
 
     refactored_chunk: str = ""
     content_len: int = len(dic.keys())
     running_d: dict = {}
 
     if argparser.args.clear_json:
-        _clear_file_content(filename=argparser.args.file_name)
+        # _clear_file_content(filename=argparser.args.file_name)
         _delete_backup()
 
     with alive_bar(total=content_len, title="", length=60, bar="smooth") as bar:
@@ -657,10 +657,12 @@ def build_refactored_json(dic: dict[int, dict[str, str | list[str]]]) -> None:
                 dic[idx]["func"], str
             ), "For some reason, the `func` field is not a string"
 
-            populate_tmp_file(func_str_body=str(dic[idx]["func"]))
-
             # set parser languge for current code
             ts.language_name = lang_map[idx]
+            # update filename
+            filename = "./misc/tmp.c" if ts.language_name == "c" else "./misc/tmp.cpp"
+
+            populate_tmp_file(func_str_body=str(dic[idx]["func"]))
 
             if spawn_refactor(filepath=filename):
                 pause_exection()
