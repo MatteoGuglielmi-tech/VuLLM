@@ -21,14 +21,14 @@ class Builder:
         dof: dict[str, str] = utils.split_lineContent(lineContent=lineContent)
         # remove tabs from func body only: removing tabs should be pretty safe
         dof.update({"func": utils.remove_tabs(lineContent=dof["func"])})
+        # substitute mutliple spaces with single space
+        dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
         # remove block and inline comments
         dof.update({"func": utils.remove_comments(lineContent=dof["func"])})
         # check if valid function prototype and perform first soft parsing
         dof.update({"func": utils.fix_func_proto(lineContent=dof["func"], full=False)})
         if dof["func"] == "error":
             return dof
-        # substitute mutliple spaces with single space
-        dof.update({"func": utils.remove_multiplespaces(lineContent=dof["func"])})
         # remove '\"' chars
         dof.update({"func": utils.remove_escaping_quotes(lineContent=dof["func"])})
         # remove ignored blocks
