@@ -1,11 +1,8 @@
 ---
 name: vullm
-channels: [nvidia, pytorch, conda-forge, defaults, anaconda]
+channels: [nvidia, pytorch, conda-forge, anaconda]
 dependencies:
   - python=3.12
-  - nvidia::cudatoolkit
-  - pytorch::pytorch
-  - pytorch::torchvision
   - conda-forge::torchinfo
   - conda-forge::transformers
   - conda-forge::google-generativeai
@@ -13,5 +10,16 @@ dependencies:
   - conda-forge::grpcio-status
   - conda-forge::alive-progress
   - conda-forge::tree_sitter
+  - conda-forge::accelerate
+  - conda-forge::peft
+  - conda-forge::bitsandbytes
+  - conda-forge::huggingface-hub
+  - conda-forge::datasets
+  - conda-forge::typing_extensions
+  - conda-forge::tensorboard-data-server
+  - conda-forge::accelerate
+  - conda-forge::deepspeed 
+  - anaconda::pandas
+  - anaconda::numpy
   - anaconda::absl-py
   - anaconda::pytest
