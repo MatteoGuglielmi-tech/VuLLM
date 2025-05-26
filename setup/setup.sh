@@ -35,6 +35,29 @@ looking_for_pip() {
 	fi
 }
 
+accelerate_handler() {
+	echo "Checking for accelerate"
+	status=$(
+		conda list | grep -q "accelerate "
+		echo $?
+	)
+
+	if [ "$status" -eq 0 ]; then
+		echo "accelerate packet is present in the environment"
+		if [ -e /home/matteo/.cache/huggingface/accelerate/default_config.yaml ]; then
+			read -r -t 5 -p "Configuration for accelerate is present. Do you want to re-run it? [y/N]" answer
+			answer=${answer:-N}
+			if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+				echo " -> Runnig 'accelerate config'"
+				accelerate config
+			else
+				echo " -> Keeping existing default configuration"
+			fi
+		fi
+	fi
+
+}
+
 main() {
 	set -e
 	if (looking_for_conda && looking_for_deps); then
@@ -51,6 +74,12 @@ main() {
 			eval "$__pip_install"
 		fi
 	fi
+
+	accelerate_handler
 }
 
 main "$1"
+
+# echo "to download deeplearning related tools (e.g. pytorch), refer to the following url"
+# echo "https://pytorch.org/get-started/locally/"
+
