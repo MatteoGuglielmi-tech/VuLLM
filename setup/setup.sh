@@ -23,7 +23,7 @@ looking_for_conda() {
 	fi
 }
 
-pip_path="$CONDA_PREFIX/envs/prova/bin/pip3"
+pip_path="$CONDA_PREFIX/envs/vullm/bin/pip3"
 looking_for_pip() {
 	builtin echo "Running checks for pip3 instance"
 	if command -V "$pip_path" >&2; then
@@ -45,7 +45,7 @@ accelerate_handler() {
 	if [ "$status" -eq 0 ]; then
 		echo "accelerate packet is present in the environment"
 		if [ -e /home/matteo/.cache/huggingface/accelerate/default_config.yaml ]; then
-			read -r -t 5 -p "Configuration for accelerate is present. Do you want to re-run it? [y/N]" answer
+			read -r -t 10 -p "Configuration for accelerate is present. Do you want to re-run it? [y/N]" answer
 			answer=${answer:-N}
 			if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
 				echo " -> Runnig 'accelerate config'"
@@ -61,8 +61,9 @@ accelerate_handler() {
 main() {
 	set -e
 	if (looking_for_conda && looking_for_deps); then
-		builtin echo "$1 environment"
-		if [ "$1" = "Creating" ]; then
+		read -r -t 5 -p "Do you want to [U]pdate or [C]reate environment specified in deps.yml? [u/C]" answer
+		answer=${answer:-C}
+		if [ "$answer" = "C" ]; then
 			conda env create --file deps.yml
 		else
 			conda env update --file deps.yml --prune
@@ -80,6 +81,8 @@ main() {
 
 main "$1"
 
+# conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
+
+# dont do this to install pytorch
 # echo "to download deeplearning related tools (e.g. pytorch), refer to the following url"
 # echo "https://pytorch.org/get-started/locally/"
-
