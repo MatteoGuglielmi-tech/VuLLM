@@ -1,12 +1,13 @@
 import os
 from dataclasses import dataclass
+from datetime import datetime
 
 import bitsandbytes as bnb
 import numpy as np
 import pandas as pd
 import torch
 from datasets import Dataset
-from peft import LoraConfig, PeftModel, TaskType
+from peft import AutoPeftModelForCausalLM, LoraConfig, PeftModel, TaskType
 from sklearn.metrics import (accuracy_score, classification_report,
                              confusion_matrix)
 from tqdm import tqdm
@@ -27,7 +28,14 @@ class ModelHandler:
     # base_model: str = "meta-llama/Llama-3.2-1B-Instruct"
     # base_model: str = "meta-llama/Llama-3.2-3B-Instruct"
     base_model: str = "meta-llama/Llama-3.1-8B-Instruct"
-    output_dir: str = f"{os.path.split(base_model)[-1]}-ft"
+
+    def __post_init__(self):
+        provider, model_id = self.base_model.split("/")
+        date: str = datetime.today().strftime(format="%Y-%m-%d")
+        time: str = datetime.now().strftime(format="%H-%M-%S")
+        common_suffix: str = os.path.join(provider, model_id, date, time)
+        self.checkpoint_dir: str = os.path.join("./checkpoints/", common_suffix)
+        self.trainer_dir: str = os.path.join("./trainer", common_suffix)
 
     def WB_init(self) -> None:
         wandb.login()
@@ -113,7 +121,7 @@ class ModelHandler:
         return peft_config
 
     # text generation pipeline to predict labels from the “text” column
-    def MODEL_predict(self, test_df: pd.DataFrame, model, tokenizer):
+    def MODEL_predict(self, test_df: pd.DataFrame, model, tokenizer) -> list[str]:
         y_pred: list[str] = []
         labels: list[str] = ["0", "1"]
 
@@ -143,7 +151,7 @@ class ModelHandler:
 
     # y_pred = predict(X_test, model, tokenizer)
 
-    def evaluate(self, y_true, y_pred):
+    def MODEL_evaluate(self, y_true: list[str], y_pred: list[str]) -> None:
         labels: list[str] = ["0", "1"]
         mapping: dict[str, int] = {label: idx for idx, label in enumerate(labels)}
 
@@ -196,10 +204,10 @@ class ModelHandler:
 
     def HF_SFTConfig(self) -> SFTConfig:
         training_arguments = SFTConfig(
-            output_dir=self.output_dir,  # directory to save and repository id
+            output_dir=self.checkpoint_dir,  # directory to save and repository id
             run_name=self.base_model,
-            num_train_epochs=5,  # number of training epochs
-            per_device_train_batch_size=1,  # batch size per device during training
+            num_train_epochs=1,  # number of training epochs
+            per_device_train_batch_size=4,  # batch size per device during training
             gradient_accumulation_steps=8,  # number of steps before performing a backward/update pass, virtually enlarges minibatch
             gradient_checkpointing=True,  # use gradient checkpointing to save memory
             optim="paged_adamw_32bit",  # using paged optimizer to memory efficiency
@@ -252,32 +260,47 @@ class ModelHandler:
         self.model.config.use_cache = True
         # Save trained model and tokenizer
         logger.info(msg="Saving fine-tuned models")
-        trainer.save_model(self.output_dir)
-        self.tokenizer.save_pretrained(self.output_dir)
+        # trainer.model.save_pretrained(trainer_filepath)
+        self.model.save_pretrained(
+            save_directory=os.path.join(self.trainer_dir, "model")
+        )
+        self.tokenizer.save_pretrained(
+            save_directory=os.path.join(self.trainer_dir, "tokenzier")
+        )
 
     def MODEL_load_ft_model(self):
-        # Reload tokenizer and model
+        # reload tokenizer and model
         self.ft_tokenizer = AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path=self.output_dir
+            pretrained_model_name_or_path=os.path.join(self.trainer_dir, "tokenzier")
         )
-        # self.ft_tokenizer.pad_token_id = ft_tokenizer.eos_token_id
-        # self.ft_tokenizer.padding_side = "right"
+        self.ft_tokenizer.pad_token_id = self.ft_tokenizer.eos_token_id
+        self.ft_tokenizer.padding_side = "right"
 
-        # load base model from hub
-        base_model_reload = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            return_dict=True,
-            low_cpu_mem_usage=True,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=True,
+        # load base model
+        peft_model = AutoPeftModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=os.path.join(self.trainer_dir, "model")
         )
+        # merge adapters
+        self.merged_model = peft_model.merge_and_unload()
 
-        # Merge adapter with base model
-        self.merged_model: PeftModel = PeftModel.from_pretrained(
-            base_model_reload, self.output_dir
-        )
-        self.merged_model = self.merged_model.merge_and_unload()
+        # method 2
+        # # reload base model
+        # base_model = AutoModelForCausalLM.from_pretrained(model_name)
+        #
+        # # merge base model and fine-tuned model
+        # merged_model = PeftModel.from_pretrained(base_model, trainer_filepath)
+        # merged_model = merged_model.merge_and_unload()
+        #
+        # # save merged model
+        # merged_model.save_pretrained(merged_model_path)
+
+        # method 3
+        # Load the base model
+        # base_model = AutoModelForCausalLM.from_pretrained("base_model_name")
+        # # Load the LoRA adapter
+        # lora_adapter = PeftModel.from_pretrained(base_model, "lora_adapter_path")
+        # # Merge the LoRA weights into the base model
+        # merged_model = lora_adapter.merge_and_unload()
 
     def PEFT_MODEL_infer(self, input_prompts: str):
         self.merged_model.eval()
@@ -294,7 +317,3 @@ class ModelHandler:
         )
 
         return outputs
-
-
-# y_pred = predict(X_test, model, tokenizer)
-# evaluate(y_true, y_pred)
