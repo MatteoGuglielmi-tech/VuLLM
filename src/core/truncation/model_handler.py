@@ -6,18 +6,17 @@ import bitsandbytes as bnb
 import numpy as np
 import pandas as pd
 import torch
+import wandb
 from datasets import Dataset
-from peft import AutoPeftModelForCausalLM, LoraConfig, PeftModel, TaskType
+# from dataset_handler import DatasetHandler
+from log import logger
+from peft import AutoPeftModelForCausalLM, LoraConfig, TaskType
 from sklearn.metrics import (accuracy_score, classification_report,
                              confusion_matrix)
 from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           BitsAndBytesConfig, pipeline)
 from trl import SFTConfig, SFTTrainer
-
-import wandb
-# from dataset_handler import DatasetHandler
-from log import logger
 
 
 @dataclass

@@ -11,8 +11,8 @@ from log import logger
 
 @dataclass
 class DatasetHandler:
-    JSON_source_dataset: str = "../../Dataset/prepro_diversvul.json"
-    CSV_output_dataset: str = "../../Dataset/preproc_diversvul.csv"
+    JSON_source_dataset: str = "../../../Dataset/prepro_diversvul.json"
+    CSV_output_dataset: str = "../../../Dataset/preproc_diversvul.csv"
 
     def JSON_read_file_content(self) -> dict[str, dict[str, str | list[str]]]:
         with open(file=self.JSON_source_dataset, mode="r") as jf:
