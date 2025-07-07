@@ -21,7 +21,7 @@ src/dataset/todo.md
 
 # chunking and streaming
 src/core/chunking_and_streaming/data/
-./src/core/chunking_and_streaming/guidelines.md
-./src/core/chunking_and_streaming/visualize_chunks.py
-./src/core/chunking_and_streaming/chunks.py
-./src/core/chunking_and_streaming/datacollator.py
+src/core/chunking_and_streaming/guidelines.md
+src/core/chunking_and_streaming/visualize_chunks.py
+src/core/chunking_and_streaming/chunks.py
+src/core/chunking_and_streaming/datacollator.py
