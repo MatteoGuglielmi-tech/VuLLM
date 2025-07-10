@@ -11,10 +11,10 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 
-import utils
-from chunking import extract_structured_chunks_with_context
-from stdout import logger
-from typedef import StreamedSplit, StreamingDataset, Windows
+from . import utils
+from .chunking import extract_structured_chunks_with_context
+from .stdout import logger
+from .typedef import StreamedSplit, StreamingDataset, Windows
 
 
 @dataclass
@@ -46,7 +46,8 @@ class DatasetHandler:
             + "Note: input chunk may not be a valid C code. This is intended, the merge of them (removing the overlap due to contex) is valid.\n"
             + "Function signature:\n{signature}\n\n"
             + "Code Fragment:\n{subchunk}\n\n"
-            + "Answer 'YES' if vulnerable, 'NO' otherwise.\n"
+            + "Answer with 'YES' if vulnerable, 'NO' otherwise.\n"
+            + "**IMPORTANT**: Strictly respond with only 'YES' or 'NO'.\n\n"
             + "Correct answer:\n{ground_truth}"
         ).strip()
 

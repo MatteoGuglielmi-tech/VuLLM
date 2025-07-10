@@ -7,8 +7,8 @@ from typing import Any, Callable, Union
 from transformers.tokenization_utils import PreTrainedTokenizer
 from tree_sitter_language_pack import SupportedLanguage
 
-from stdout import logger
-from typedef import *
+from .stdout import logger
+from .typedef import *
 
 
 # <---- Decorator for validating filepath extension when calling save_outputs ---->

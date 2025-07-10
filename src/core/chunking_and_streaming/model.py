@@ -10,16 +10,18 @@ import torch
 import wandb
 from datasets import Dataset
 from peft import AutoPeftModelForCausalLM, LoraConfig, TaskType
-from sklearn.metrics import (accuracy_score, classification_report,
-                             confusion_matrix)
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from tqdm import tqdm
-from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig, pipeline)
-from transformers.tokenization_utils import (PreTrainedModel,
-                                             PreTrainedTokenizer)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    pipeline,
+)
+from transformers.tokenization_utils import PreTrainedTokenizer
 from trl import SFTConfig, SFTTrainer
 
-from stdout import logger
+from .stdout import logger
 
 
 @dataclass
@@ -39,8 +41,8 @@ class ModelHandler:
     def __post_init__(self):
         # Determine paths for checkpoints and trainer output
         provider, model_id = self.base_model.split("/")
-        date: str = datetime.today().strftime(format="%Y-%m-%d")
-        time: str = datetime.now().strftime(format="%H-%M-%S")
+        date: str = datetime.today().strftime("%Y-%m-%d")
+        time: str = datetime.now().strftime("%H-%M-%S")
         common_suffix: str = os.path.join(provider, model_id, date, time)
         self.checkpoint_dir: str = os.path.join("./checkpoints/", common_suffix)
         self.trainer_dir: str = os.path.join("./trainer", common_suffix)
@@ -50,10 +52,10 @@ class ModelHandler:
         os.makedirs(self.trainer_dir, exist_ok=True)
 
         # Initialize model and tokenizer to None, they will be loaded later
-        self.model: Optional[PreTrainedModel] = None
+        self.model = None
         self.tokenizer: Optional[PreTrainedTokenizer] = None
         # Fine-tuned model and tokenizer
-        self.merged_model: Optional[PreTrainedModel] = None
+        self.merged_model = None
         self.ft_tokenizer: Optional[PreTrainedTokenizer] = None
 
     def WB_init(self) -> None:
@@ -105,9 +107,6 @@ class ModelHandler:
             # load model with pre-trained weights
             self.model = AutoModelForCausalLM.from_pretrained(**model_params)
             if self.model:
-                print(
-                    f"automodel has attr config: { hasattr(AutoModelForCausalLM, "config")}"
-                )
                 # Disable cache for training
                 self.model.config.use_cache = False
                 # Tensor parallelism for better performance
@@ -259,11 +258,15 @@ class ModelHandler:
             logger.info("Saving fine-tuned model and tokenizer...")
             # The SFTTrainer saves the PEFT adapter, not the merged model by default.
             # To save the merged model, we need to load the adapter and merge it.
-            trainer.save_model(os.path.join(self.trainer_dir, "model"))
-            if self.tokenizer:
-                self.tokenizer.save_pretrained(
-                    os.path.join(self.trainer_dir, "tokenizer")
+            
+            if self.model and self.tokenizer:
+                self.model.save_pretrained(
+                    save_directory=os.path.join(self.trainer_dir, "model")
                 )
+                self.tokenizer.save_pretrained(
+                    save_directory=os.path.join(self.trainer_dir, "tokenzier")
+                )
+            # trainer.save_model(os.path.join(self.trainer_dir, "model"))
             logger.info(f"Model and tokenizer saved to {self.trainer_dir}")
 
         except Exception as e:
@@ -280,9 +283,10 @@ class ModelHandler:
         try:
             # Load fine-tuned tokenizer
             self.ft_tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path=os.path.join(
-                    self.trainer_dir, "tokenizer"
-                )
+                pretrained_model_name_or_path=self.base_model
+                # os.path.join(
+                #     self.trainer_dir,  "model"#"tokenizer"
+                # )
             )
             if self.ft_tokenizer:
                 if self.ft_tokenizer.pad_token is None:
@@ -555,45 +559,45 @@ if __name__ == "__main__":
         f.write("dummy")
 
     # 4. Load Fine-tuned Model for Inference
-    model_handler.MODEL_load_ft_model()
-
-    # 5. Prepare test prompts for inference
-    # This step would typically involve using DatasetHandler's logic to chunk and format
-    # the df_test_data into the inference prompt skeleton.
-    # For this dummy example, we'll manually create a couple of inference prompts
-    INFERENCE_PROMPT_SKELETON = (
-        "You are an AI system that analyzes C code for vulnerabilities.\n\n"
-        + "**TASK**: Given the following code fragment, determine whether it contains a security vulnerability.\n"
-        + "KEY:Code is chunked; reassemble by function signature to obtain full original source code.\n"
-        + "Note: input chunk may not be a valid C code. This is intended, the merge of them (removing the overlap due to contex) is valid.\n"
-        + "Function signature:\n{signature}\n\n"
-        + "Code Fragment:\n{subchunk}\n\n"
-        + "Answer 'YES' if vulnerable, 'NO' otherwise."
-    ).strip()
-    inference_prompts = [
-        INFERENCE_PROMPT_SKELETON.format(
-            signature="int main()", subchunk="int x = 0; // This is safe code."
-        ),
-        INFERENCE_PROMPT_SKELETON.format(
-            signature="void vulnerable()", subchunk="char buffer[10]; gets(buffer);"
-        ),
-    ]
-
-    # 6. Perform Inference
-    predictions = model_handler.PEFT_MODEL_infer(input_prompts=inference_prompts)
-    print(f"\nInference Predictions: {predictions}")
-
-    # 7. Evaluate (using original labels from df_test_data)
-    # Note: This evaluation is simplified for the dummy case.
-    # In a real scenario, you'd align predictions with the original test data's labels.
-    # Here, we'll just use the dummy_test_df's targets mapped to "YES"/"NO".
-    true_labels_for_eval = [
-        "NO",
-        "YES",
-    ]  # Corresponds to dummy_test_df targets "0", "1"
-
-    # Adjust predictions for evaluation if they are not exactly "YES"/"NO"
-    # The PEFT_MODEL_infer now returns "YES"/"NO"/"UNKNOWN"/"ERROR", so we use that directly.
-    model_handler.MODEL_evaluate(y_true=true_labels_for_eval, y_pred=predictions)
-
-    print("\nModelHandler pipeline demonstration complete.")
+    # model_handler.MODEL_load_ft_model()
+    #
+    # # 5. Prepare test prompts for inference
+    # # This step would typically involve using DatasetHandler's logic to chunk and format
+    # # the df_test_data into the inference prompt skeleton.
+    # # For this dummy example, we'll manually create a couple of inference prompts
+    # INFERENCE_PROMPT_SKELETON = (
+    #     "You are an AI system that analyzes C code for vulnerabilities.\n\n"
+    #     + "**TASK**: Given the following code fragment, determine whether it contains a security vulnerability.\n"
+    #     + "KEY:Code is chunked; reassemble by function signature to obtain full original source code.\n"
+    #     + "Note: input chunk may not be a valid C code. This is intended, the merge of them (removing the overlap due to contex) is valid.\n"
+    #     + "Function signature:\n{signature}\n\n"
+    #     + "Code Fragment:\n{subchunk}\n\n"
+    #     + "Answer 'YES' if vulnerable, 'NO' otherwise."
+    # ).strip()
+    # inference_prompts = [
+    #     INFERENCE_PROMPT_SKELETON.format(
+    #         signature="int main()", subchunk="int x = 0; // This is safe code."
+    #     ),
+    #     INFERENCE_PROMPT_SKELETON.format(
+    #         signature="void vulnerable()", subchunk="char buffer[10]; gets(buffer);"
+    #     ),
+    # ]
+    #
+    # # 6. Perform Inference
+    # predictions = model_handler.PEFT_MODEL_infer(input_prompts=inference_prompts)
+    # print(f"\nInference Predictions: {predictions}")
+    #
+    # # 7. Evaluate (using original labels from df_test_data)
+    # # Note: This evaluation is simplified for the dummy case.
+    # # In a real scenario, you'd align predictions with the original test data's labels.
+    # # Here, we'll just use the dummy_test_df's targets mapped to "YES"/"NO".
+    # true_labels_for_eval = [
+    #     "NO",
+    #     "YES",
+    # ]  # Corresponds to dummy_test_df targets "0", "1"
+    #
+    # # Adjust predictions for evaluation if they are not exactly "YES"/"NO"
+    # # The PEFT_MODEL_infer now returns "YES"/"NO"/"UNKNOWN"/"ERROR", so we use that directly.
+    # model_handler.MODEL_evaluate(y_true=true_labels_for_eval, y_pred=predictions)
+    #
+    # print("\nModelHandler pipeline demonstration complete.")

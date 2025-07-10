@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vullm_pipeline"
+version = "0.1.0"
+
+# Tells setuptools that your packages are in the 'src' directory
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Tells pytest to add the 'src' directory to the python path before running tests
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]

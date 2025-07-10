@@ -10,11 +10,11 @@ from tree_sitter import Language, Node, Parser, Query, Tree, TreeCursor
 from tree_sitter_language_pack import (SupportedLanguage, get_language,
                                        get_parser)
 
-from decorators import (safeguard_label_values, safeguard_trimming_type,
+from .decorators import (safeguard_label_values, safeguard_trimming_type,
                         validate_chunking_fn_params,
                         validate_filepath_extension)
-from typedef import *
-from utils import UNUSED
+from .typedef import *
+from .utils import UNUSED
 
 # ========================
 # CONFIG
