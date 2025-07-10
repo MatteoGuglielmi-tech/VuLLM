@@ -25,3 +25,14 @@ src/core/chunking_and_streaming/guidelines.md
 src/core/chunking_and_streaming/visualize_chunks.py
 src/core/chunking_and_streaming/chunks.py
 src/core/chunking_and_streaming/datacollator.py
+
+setup/unsloth.sh
+setup/unsloth.yml
+src/core/chunking_and_streaming/checkpoints/
+src/core/chunking_and_streaming/lora_model/
+src/core/chunking_and_streaming/trainer/
+src/core/chunking_and_streaming/unsloth_compiled_cache/
+src/core/chunking_and_streaming/wandb/
+src/llms.md
+src/vullm_pipeline.egg-info/
+unsloth_compiled_cache/
