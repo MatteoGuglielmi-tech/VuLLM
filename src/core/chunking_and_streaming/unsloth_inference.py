@@ -17,7 +17,7 @@ from transformers.utils.quantization_config import BitsAndBytesConfig
 from transformers.generation.logits_process import LogitsProcessor
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from .typedef import ChatMsg
-from .unsloth_model import fourbit_models
+from .unsloth_trainer import fourbit_models
 from .logits_processor import EnforceSingleTokenGeneration
 
 
@@ -37,7 +37,6 @@ class InferencePipeline:
         max_seq_length (int): The maximum sequence length for the model's tokenizer. Must match the
             value used during training.
         max_tokens_per_answer (int): The maximum number of new tokens to generate during inference.
-        PROMPT_TEMPLATE_INFERENCE (str): The f-string template for formatting inference prompts.
         model (FastLanguageModel): The loaded, inference-ready model.
         tokenizer (PreTrainedTokenizer): The tokenizer associated with the model.
         output_dir (str): The automatically generated path where evaluation results will be saved.
@@ -46,17 +45,7 @@ class InferencePipeline:
     lora_model_dir: str
     max_seq_length: int = 100
     max_tokens_per_answer: int = 5
-
-    PROMPT_TEMPLATE_INFERENCE: str = (
-        "You are an AI system that analyzes C code for vulnerabilities.\n\n"
-        "**TASK**: Given the following code fragment, determine whether it contains a security vulnerability.\n"
-        "KEY:Code is chunked; reassemble by function signature to obtain full original source code.\n"
-        "Note: input chunk may not be a valid C code. This is intended, the merge of them (removing the overlap due to contex) is valid.\n"
-        "Function signature:\n{signature}\n\n"
-        "Code Fragment:\n{subchunk}\n\n"
-        "Answer 'YES' if vulnerable, 'NO' otherwise.\n"
-        "Correct answer:\n"
-    )
+    use_double_quantization: bool = False
 
     # <---- Attributes for managing paths and models ---->
     model: Optional[FastLanguageModel] = field(init=False, default=None)
@@ -94,7 +83,7 @@ class InferencePipeline:
             "bnb_4bit_compute_dtype": (
                 torch.bfloat16 if is_bfloat16_supported() else None
             ),
-            # " bnb_4bit_use_double_quant": True,
+            "bnb_4bit_use_double_quant": self.use_double_quantization,
         }
 
     def _unsloth_load_finetuned_model(self) -> None:

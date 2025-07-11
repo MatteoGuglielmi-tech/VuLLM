@@ -7,8 +7,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 # Third-party library imports
-import pandas as pd
-
 # FIX: Unsloth must be imported before transformers and peft
 from unsloth import FastLanguageModel, is_bfloat16_supported  # isort: ignore
 import torch
@@ -70,22 +68,10 @@ class UnslothModel:
     base_model_str: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
     # Max sequence length for the model's tokenizer.
     max_seq_length: int = 2048
-    max_tokens_per_answer: int = 5
     # how long to train for precedence to epochs
     training_epochs: int = -1
     training_steps: int = -1
-
-    # The prompt structure for training (includes the answer)
-    PROMPT_TEMPLATE_TRAINING: str = (
-        "You are an AI system that analyzes C code for vulnerabilities.\n\n"
-        "**TASK**: Given the following code fragment, determine whether it contains a security vulnerability.\n"
-        "KEY:Code is chunked; reassemble by function signature to obtain full original source code.\n"
-        "Note: input chunk may not be a valid C code. This is intended, the merge of them (removing the overlap due to contex) is valid.\n"
-        "Function signature:\n{signature}\n\n"
-        "Code Fragment:\n{subchunk}\n\n"
-        "Answer 'YES' if vulnerable, 'NO' otherwise.\n"
-        "Correct answer:\n{ground_truth}"
-    )
+    use_double_quantization: bool = False
 
     # <---- Attributes for managing paths and models ---->
     lora_model_dir: str = field(init=False)
@@ -100,11 +86,11 @@ class UnslothModel:
         common_suffix: str = os.path.join(provider, model_id, date, time)
 
         # saving model checkpoint
-        self.checkpoint_dir: str = os.path.join("./checkpoints/", common_suffix)
         # target directory for metrics
-        self.output_dir: str = os.path.join("./results/", f"{model_id}_{date}_{time}")
         trainer_dir: str = os.path.join("./trainer", common_suffix)
         self.lora_model_dir: str = os.path.join(trainer_dir, "lora_model")
+        self.checkpoint_dir: str = os.path.join("./checkpoints/", common_suffix)
+        self.output_dir: str = os.path.join("./results/", f"{model_id}_{date}_{time}")
 
         # Ensure output directories exist
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -116,7 +102,7 @@ class UnslothModel:
             "bnb_4bit_compute_dtype": (
                 torch.bfloat16 if is_bfloat16_supported() else None
             ),
-            # "bnb_4bit_use_double_quant": True,
+            "bnb_4bit_use_double_quant": self.use_double_quantization,
         }
 
     def wb_init(self) -> None:
@@ -125,7 +111,7 @@ class UnslothModel:
         try:
             # wandb.login()
             wandb.init(
-                project=f"Fine-tune {os.path.split(self.base_model_str)[-1]} for vulnerability detection.",
+                project=f"Unsloth fine-tune {os.path.split(self.base_model_str)[-1]} for vulnerability detection.",
                 job_type="training",
                 anonymous="allow",
             )
@@ -261,7 +247,7 @@ class UnslothModel:
 
         return SFTConfig(
             use_liger_kernel=True,
-            max_seq_length=self.max_seq_length,
+            max_length=self.max_seq_length,
             # with full_finetuning=True
             num_train_epochs=self.training_epochs,
             max_steps=self.training_steps,
@@ -320,62 +306,3 @@ class UnslothModel:
         gc.collect()
         torch.cuda.empty_cache()
         print("Cleanup complete. VRAM should now be released.")
-
-
-if __name__ == "__main__":
-    # 1. Create Dummy Data reflecting the new prompt structure
-    training_data = {
-        "signature": [
-            "strcpy_vulnerable(char *dst, const char *src)",
-            "safe_copy(char *dst, const char *src, size_t size)",
-            "process_request(http_request *req)",
-            "validate_input(const char* input)",
-        ],
-        "subchunk": [
-            "{\n  strcpy(dst, src);\n}",
-            "{\n  strncpy(dst, src, size - 1);\n  dst[size - 1] = '\\0';\n}",
-            '{\n  char buffer[128];\n  sprintf(buffer, "User agent: %s", req->user_agent);\n}',
-            "{\n  if (strlen(input) < 10) return true;\n  return false;\n}",
-        ],
-        "ground_truth": ["YES", "NO", "YES", "NO"],
-    }
-    dummy_train_df = pd.DataFrame(training_data)
-
-    # Format the training data into the 'text' column required by SFTTrainer
-    dummy_train_df["text"] = dummy_train_df.apply(
-        lambda row: UnslothModel.PROMPT_TEMPLATE_TRAINING.format(
-            signature=row["signature"],
-            subchunk=row["subchunk"],
-            ground_truth=row["ground_truth"],
-        ),
-        axis=1,
-    )
-
-    # Test data uses the same structure but 'ground_truth' is named 'label' for evaluation
-    test_data = {
-        "signature": [
-            "get_user_data(const char *user)",
-            "init_secure_buffer(size_t n)",
-        ],
-        "subchunk": [
-            "{\n  char query[256];\n  sprintf(query, \"SELECT * FROM users WHERE name = '%s'\", user);\n}",
-            "{\n  char *buf = malloc(n);\n  if (!buf) return NULL;\n  memset(buf, 0, n);\n  return buf;\n}",
-        ],
-        "label": ["YES", "NO"],
-    }
-    dummy_test_df = pd.DataFrame(test_data)
-
-    hf_train_data = Dataset.from_pandas(pd.DataFrame(dummy_train_df["text"]))
-    hf_eval_data = hf_train_data  # Use same for eval in this example
-
-    # 2. Instantiate and Run the UnslothModel pipeline
-    model_pipeline = UnslothModel(
-        hf_train_data=hf_train_data,
-        hf_eval_data=hf_eval_data,
-        # df_test_data=dummy_test_df,
-    )
-
-    # Execute the training workflow
-    model_pipeline.unsloth_load_base_model()
-    model_pipeline.unsloth_patch_model()
-    model_pipeline.unsloth_start_training()
