@@ -15,3 +15,8 @@ where = ["src"]
 pythonpath = [
   "src"
 ]
+
+# Add this markers section
+markers = [
+    "slow: marks tests as slow to run, requires a GPU"
+]
