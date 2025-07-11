@@ -3,14 +3,14 @@ from unittest.mock import MagicMock
 from datasets import Dataset
 
 # Import the class to be tested
-from core.chunking_and_streaming.unsloth_model import UnslothModel
+from core.chunking_and_streaming.unsloth_trainer import UnslothModel
 
 
 @pytest.fixture
-def dummy_datasets() -> dict:
+def dummy_datasets() -> dict[str, Dataset]:
     """Provides dummy train and eval datasets."""
-    data = {"text": ["prompt 1", "prompt 2"]}
-    ds = Dataset.from_dict(data)
+    data: dict[str, list[str]] = {"text": ["prompt 1", "prompt 2"]}
+    ds: Dataset = Dataset.from_dict(data)
     return {"train": ds, "eval": ds}
 
 
@@ -20,10 +20,14 @@ def test_training_workflow_orchestration(mocker, dummy_datasets):
     and that SFTTrainer is configured correctly.
     """
     # --- Mock heavyweight components ---
-    mocker.patch("core.chunking_and_streaming.unsloth_model.UnslothModel.unsloth_load_base_model")
-    mocker.patch("core.chunking_and_streaming.unsloth_model.UnslothModel.unsloth_patch_model")
+    mocker.patch(
+        "core.chunking_and_streaming.unsloth_trainer.UnslothModel.unsloth_load_base_model"
+    )
+    mocker.patch(
+        "core.chunking_and_streaming.unsloth_trainer.UnslothModel.unsloth_patch_model"
+    )
     mock_sft_trainer_class = mocker.patch(
-        "core.chunking_and_streaming.unsloth_model.SFTTrainer", autospec=True
+        "core.chunking_and_streaming.unsloth_trainer.SFTTrainer", autospec=True
     )
 
     # --- Setup ---

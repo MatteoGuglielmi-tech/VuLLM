@@ -11,18 +11,21 @@ from core.chunking_and_streaming.dataset import DatasetHandler
 @pytest.fixture
 def dummy_tokenizer():
     """Mocks the Hugging Face tokenizer to avoid downloading real models."""
-    tokenizer = MagicMock()
+
+    tokenizer: MagicMock = MagicMock()
     # Simulate the encode method to return a list of dummy IDs
     tokenizer.encode.return_value = [1, 2, 3]
     # Set model_max_length for the _get_max_tokens_and_step method
     tokenizer.model_max_length = 2048
+
     return tokenizer
 
 
 @pytest.fixture
 def dummy_raw_data_file(tmp_path: Path) -> str:
     """Creates a fake raw JSON dataset in a temporary directory."""
-    raw_data = {
+
+    raw_data: dict[str,dict[str,str]] = {
         "file1.c": {
             "func": "int main() { return 0; }",
             "target": "0",
@@ -44,9 +47,11 @@ def dummy_raw_data_file(tmp_path: Path) -> str:
             "project": "proj_C",
         },
     }
-    file_path = tmp_path / "dummy_dataset.json"
-    with open(file_path, "w") as f:
-        json.dump(raw_data, f)
+
+    file_path: Path = tmp_path / "dummy_dataset.json"
+    with open(file=file_path, mode="w") as f:
+        json.dump(obj=raw_data, fp=f)
+
     return str(file_path)
 
 
@@ -54,9 +59,10 @@ def test_dataset_handler_full_workflow(dummy_tokenizer, dummy_raw_data_file: str
     """
     Tests the full data processing workflow from loading to chunking.
     """
+
     # --- Setup ---
     # Use the temporary file provided by the fixtures
-    data_handler = DatasetHandler(
+    data_handler: DatasetHandler = DatasetHandler(
         pth_raw_dataset=dummy_raw_data_file,
         pth_inline_dataset="./data/inline_dataset.jsonl",
         tokenizer=dummy_tokenizer,
