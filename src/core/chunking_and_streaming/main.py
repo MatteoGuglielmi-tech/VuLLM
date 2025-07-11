@@ -3,10 +3,9 @@ import torch
 import gc
 from transformers import AutoTokenizer
 
-# Import your custom classes
-from .dataset import DatasetHandler
-from .unsloth_model import UnslothModel
-from .inference_pipeline import InferencePipeline
+from core.chunking_and_streaming.dataset import DatasetHandler
+from core.chunking_and_streaming.unsloth_trainer import UnslothModel
+from core.chunking_and_streaming.unsloth_inference import InferencePipeline
 
 # =================================================================================
 # MAIN EXECUTION SCRIPT
@@ -51,8 +50,8 @@ if __name__ == "__main__":
     print("\n--- 🚀 Starting Training Process ---")
 
     training_pipeline = UnslothModel(
-        hf_train_data=processed_data_splits["train"],
-        hf_eval_data=processed_data_splits["val"],
+        hf_train_data=processed_data_splits["train"],  # type: ignore
+        hf_eval_data=processed_data_splits["val"],  # type: ignore
         base_model_str=BASE_MODEL,
         max_seq_length=MAX_SEQ_LENGTH,
         training_steps=100,  # train for 100 steps
@@ -95,7 +94,7 @@ if __name__ == "__main__":
 
     # Calculate and save all metrics
     InferencePipeline.calculate_and_save_metrics(
-        y_true=evaluation_results_df["label"].to_list(),
+        y_true=evaluation_results_df["ground_truth"].to_list(),
         y_pred=evaluation_results_df["predicted_label"].to_list(),
         output_dir=inference_pipeline.output_dir,
     )
