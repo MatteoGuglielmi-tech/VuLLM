@@ -1,55 +1,65 @@
-from itertools import cycle
+import sys
 from threading import Thread
 from time import sleep
 
 
 class Loader:
-    def __init__(self, desc="Loading...", end="Done!", timeout=0.1):
-        """A loader-like context manager.
+    def __init__(
+        self,
+        desc_msg: str = "Loading...",
+        end_msg: str = "✅ Done.",
+        timeout: float = 0.1,
+    ) -> None:
+        """A simple context manager to display a loader animation in the terminal.
 
         Args:
             desc (str, optional): The loader's description. Defaults to "Loading...".
             end (str, optional): Final print. Defaults to "Done!".
             timeout (float, optional): Sleep time between prints. Defaults to 0.1.
+
+
+        Usage:
+            with Loader(desc="Loading..."):
+                time.sleep(3) # Simulate a long task
         """
-        self.desc = desc
-        self.end = end
-        self.timeout = timeout
 
-        self._thread = Thread(target=self._animate, daemon=True)
-
+        self.desc: str = desc_msg
+        self.end: str = end_msg
+        self.timeout: float = timeout
+        self._thread: Thread = Thread(target=self._animate, daemon=True)
         self.steps = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
+        # self.steps = ['|', '/', '-', '\\']
         self.done = False
 
-    def start(self):
+    def _animate(self):
+        """The animation logic that runs in a separate thread."""
+
+        while not self.done:
+            for char in self.steps:
+                if self.done:
+                    break
+
+                sys.stdout.write(f"\r{self.desc} {char}")
+                sys.stdout.flush()
+                # print(f"\r{self.desc} {c}", flush=True, end="")
+                sleep(self.timeout)
+
+    def __enter__(self):
+        """Starts the animation thread when entering the 'with' block."""
+
         self._thread.start()
         return self
 
-    def _animate(self):
-        for c in cycle(self.steps):
-            if self.done:
-                break
-            print(f"\r{self.desc} {c}", flush=True, end="")
-            sleep(self.timeout)
-
-    # for calling loader in with statement
-    def __enter__(self):
-        self.start()
-
     def __exit__(self, *args):
-        self.stop()
+        """Stops the animation and cleans up when exiting the 'with' block."""
 
-    def stop(self):
         self.done = True
-        print(f"\n{self.end}")
+        self._thread.join()
+        sys.stdout.write(f"\r{self.desc} {self.end}\n")
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
     with Loader("Loading with context manager..."):
         for i in range(10):
             sleep(0.25)
-
-    loader = Loader("Loading with object...", "That was fast!", 0.05).start()
-    for i in range(10):
-        sleep(0.25)
-    loader.stop()
