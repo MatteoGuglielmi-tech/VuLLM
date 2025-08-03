@@ -12,11 +12,9 @@ where = ["src"]
 
 # Tells pytest to add the 'src' directory to the python path before running tests
 [tool.pytest.ini_options]
-pythonpath = [
-  "src"
-]
+pythonpath = ["src"]
 
-# Add this markers section
 markers = [
-    "slow: marks tests as slow to run, requires a GPU"
+    "slow_gpu: marks tests as slow to run, requires a GPU",
+    "slow_api: marks tests as slow slow, requires an API Key"
 ]
