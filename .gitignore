@@ -39,3 +39,10 @@ unsloth_compiled_cache/
 
 # Environment variables
 .env
+
+
+misc/app.bak
+misc/app.log
+src/dataset/restructure/tbt
+src/dataset/restructure/depr
+src/dataset/analysis/assets
