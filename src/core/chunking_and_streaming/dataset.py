@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 from datasets import load_dataset
-from transformers import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 

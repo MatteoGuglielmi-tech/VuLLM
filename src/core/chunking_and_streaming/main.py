@@ -1,11 +1,16 @@
 import pandas as pd
-import torch
 import gc
-from transformers import AutoTokenizer
 
-from core.chunking_and_streaming.dataset import DatasetHandler
+# critical: order of imports here is important for Unsloth to work optimally
+# First, import the modules that use Unsloth to apply patches
 from core.chunking_and_streaming.unsloth_trainer import UnslothModel
 from core.chunking_and_streaming.unsloth_inference import InferencePipeline
+
+# Then, import other modules that use transformers
+from core.chunking_and_streaming.dataset import DatasetHandler
+
+import torch
+from transformers import AutoTokenizer
 
 # =================================================================================
 # MAIN EXECUTION SCRIPT
@@ -45,6 +50,7 @@ if __name__ == "__main__":
         raise RuntimeError("Data processing failed. No tokenized data was produced.")
 
     print("✅ Data preparation complete.")
+    exit()
 
     # <---- 3. Training Step ---->
     print("\n--- 🚀 Starting Training Process ---")

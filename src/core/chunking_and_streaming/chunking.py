@@ -7,12 +7,14 @@ from typing import Any, Callable, Optional, Union
 from transformers import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from tree_sitter import Language, Node, Parser, Query, Tree, TreeCursor
-from tree_sitter_language_pack import (SupportedLanguage, get_language,
-                                       get_parser)
+from tree_sitter_language_pack import SupportedLanguage, get_language, get_parser
 
-from .decorators import (safeguard_label_values, safeguard_trimming_type,
-                        validate_chunking_fn_params,
-                        validate_filepath_extension)
+from .decorators import (
+    safeguard_label_values,
+    safeguard_trimming_type,
+    validate_chunking_fn_params,
+    validate_filepath_extension,
+)
 from .typedef import *
 from .utils import UNUSED
 
@@ -507,7 +509,8 @@ def level_based_split_line_based(
             current_subchunk_start_idx_in_text_lines_only = idx
             current_subchunk_text_tokens = stmt_tokens
             # For a newly started subchunk, its inner_context is empty.
-            next_subchunk_inner_context = ""
+            # modified:
+            # next_subchunk_inner_context = ""
 
         else:
             # Current statement fits into the existing subchunk
@@ -1041,9 +1044,9 @@ def split_large_chunk(
 
     # for idx, stmt in enumerate(statement_nodes):
     for idx, unit in enumerate(units_for_splitting):
-        stmt_text: str = unit.get("text", "")  # MODIFIED: Get text from unit
-        stmt_tokens: int = unit.get("tokens", 0)  # MODIFIED: Get tokens from unit
-        stmt_node: Optional[Node] = unit.get("node")  # NEW: Get node if available
+        stmt_text: str = unit.get("text", "")
+        stmt_tokens: int = unit.get("tokens", 0)
+        stmt_node: Optional[Node] = unit.get("node")
         # stmt_text: str = get_node_text_preserving_indentation(
         #     node=stmt, code=code_bytes.decode(encoding="utf-8")
         # )
@@ -1507,6 +1510,7 @@ def extract_structured_chunks_with_context(
 
     # find single function definition (guaranteed by pre-processing)
     func_node: Optional[Node] = None
+    print(f"current func : {code.splitlines()[0]}")
     for node in traverse_tree(tree=full_tree):
         if node.type == "function_definition":
             func_node = node
