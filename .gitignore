@@ -36,3 +36,6 @@ src/core/chunking_and_streaming/wandb/
 src/llms.md
 src/vullm_pipeline.egg-info/
 unsloth_compiled_cache/
+
+# Environment variables
+.env
