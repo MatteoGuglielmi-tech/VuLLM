@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 
 def read_json(pth: str) -> dict:
@@ -9,3 +10,8 @@ def read_json(pth: str) -> dict:
     json_data: dict = json.loads(json_string)
 
     return json_data
+
+
+def UNUSED(var: Any) -> None:
+    _ = var
+    del _
