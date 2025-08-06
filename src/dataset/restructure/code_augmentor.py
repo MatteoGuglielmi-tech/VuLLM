@@ -5,7 +5,8 @@ from tree_sitter import Tree, Node, Query, QueryCursor
 
 from .log import logger
 from .animate import Loader
-from .gemini_client import Gemini
+from .gemini_client import GeminiClient
+from .llama_describer import LlamaCodeDescriber
 from .tree_sitter_parser import TreeSitterParser
 
 
@@ -14,11 +15,17 @@ class CodeAugmentor:
     """A unified pipeline to pre-process and enrich a code dataset in a single pass."""
 
     metadata_filepath: str
+    model_family: str = "llama"
 
     def __post_init__(self):
         """Initializes the Gemini model and loads the metadata map."""
 
-        self.gemini: Gemini = Gemini(model_name="gemini-1.5-flash")
+        match self.model_family:
+            case "gemini":
+                self.genmodel = GeminiClient(model_name="gemini-1.5-flash")
+            case _:
+                self.genmodel = LlamaCodeDescriber()
+
         self.metadata_map: dict[str,dict[str,str]] = self._load_and_map_metadata()
         self.ts_parsers:dict[str,TreeSitterParser] = { "c": TreeSitterParser("c"), "cpp": TreeSitterParser("cpp") }
 
@@ -34,7 +41,10 @@ class CodeAugmentor:
             raise ValueError("metadata file not in valid JSONL format. Abort.")
 
         metadata_map: dict[str,dict[str,str]] = {}
-        with Loader(desc_msg=f"Loading metadata from {self.metadata_filepath}..."):
+        with Loader(
+            desc_msg=f"Loading metadata from {self.metadata_filepath}...",
+            end_msg=f"✅ Done!\nCreated a map for {len(metadata_map)} unique commit IDs.",
+        ):
             with open(file=self.metadata_filepath, mode="r", encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
@@ -46,8 +56,6 @@ class CodeAugmentor:
                                 "cwe": entry.get("CWE", ""),
                                 "cve": entry.get("CVE", ""),
                             }
-
-            logger.info(f"Created a map for {len(metadata_map)} unique commit IDs.")
 
         return metadata_map
 
@@ -98,6 +106,8 @@ class CodeAugmentor:
         commit_id:str|None = entry.get("commit_id")
         if commit_id and commit_id in self.metadata_map:
             entry["vulnerability_description"] = self.metadata_map[commit_id]
+        else:
+            entry["vulnerability_description"] = ""
 
         # --- 2. Add Code Metrics ---
         metrics:dict[str,int] = self._get_code_metrics(code=func_code, lang=lang)
@@ -105,7 +115,7 @@ class CodeAugmentor:
 
         # --- 3. Generate Function Description (API Call) ---
         try:
-            func_desc:str = self.gemini.generate_description(func_str=func_code)
+            func_desc:str = self.genmodel.generate_description(c_code=func_code)
             entry["function_description"] = func_desc
         except Exception as e:
             logger.error(f"Gemini API failed for an entry: {e}")
