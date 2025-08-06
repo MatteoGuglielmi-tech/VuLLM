@@ -4,6 +4,7 @@ import json
 import shutil
 
 from dataset.restructure.vulcan_pipeline import Vulcan
+from dataset.restructure.llama_describer import LlamaCodeDescriber
 
 @pytest.fixture(scope="session")
 def project_root():
@@ -52,10 +53,12 @@ def setup_test_environment(test_data_dir, project_root):
     return config_data
 
 @pytest.fixture
-def vulcan_pipeline(setup_test_environment, test_data_dir):
+def vulcan_pipeline(monkeypatch, setup_test_environment, test_data_dir):
     """Provides an initialized Vulcan pipeline instance for each test.
     It changes the CWD to the test directory so Vulcan can find config.json.
     """
+
+    monkeypatch.setattr("dataset.restructure.code_augmentor.LlamaCodeDescriber", MockLlamaCodeDescriber)
 
     original_cwd = os.getcwd()
     os.chdir(test_data_dir)
@@ -67,3 +70,15 @@ def vulcan_pipeline(setup_test_environment, test_data_dir):
     if os.path.exists(misc_dir):
         shutil.rmtree(misc_dir)
 
+
+
+class MockLlamaCodeDescriber:
+    """A lightweight mock that simulates the real LlamaCodeDescriber."""
+    def __init__(self, model_name: str = "mock_model"):
+        # This __init__ does nothing; it doesn't load any models.
+        print("Initialized MOCK LlamaCodeDescriber.")
+        pass
+
+    def generate_description(self, c_code: str) -> str:
+        # It always returns a predictable, hardcoded string.
+        return "This is a mock function description."
