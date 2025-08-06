@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from tree_sitter import Language, Parser, Tree, TreeCursor, Node
+from tree_sitter import Language, Parser, Tree, TreeCursor, Node, Query, QueryCursor
 import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
 
@@ -65,6 +65,13 @@ class TreeSitterParser:
                 if cursor.goto_next_sibling():
                     break
 
+    def query(self, code:str, query_str:str) -> dict[str,list[Node]]:
+        """Make a query to an AST given by TreeSitter."""
+
+        function_query:Query = Query(self.language, query_str)
+        return QueryCursor(function_query).captures(self.parse(code).root_node)
+
+
     def print_ast(self, node: TSNode, indent=""):
         """Recursively prints the AST to reveal the true node types."""
 
@@ -76,11 +83,9 @@ class TreeSitterParser:
             self.print_ast(child, indent + "  ")
 
     def has_error_nodes(self, tree: Tree) -> bool:
-        n = any(node.is_error for node in self.traverse_tree(tree))
         return any(node.is_error for node in self.traverse_tree(tree))
 
     def has_missing_nodes(self, tree: Tree) -> bool:
-        n = any(node.is_missing for node in self.traverse_tree(tree))
         return any(node.is_missing for node in self.traverse_tree(tree))
 
     def is_broken_tree(self, tree:Tree) -> bool:
