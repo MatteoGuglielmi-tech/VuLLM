@@ -1,6 +1,6 @@
 {
   "clang_format_path" : ".clang-format",
-  "default_input_path": "../../../DiverseVul/diversevul_20230702.jsonl",
-  "default_output_path": "../../../DiverseVul/diversevul_preprocessed.jsonl"
-  "default_metadata_path": "../../../DiverseVul/diversevul_metadata.jsonl"
+  "default_input_path": "DiverseVul/small_dataset.jsonl",
+  "default_output_path": "DiverseVul/diversevul_preprocessed.jsonl",
+  "default_metadata_path": "DiverseVul/diversevul_metadata.jsonl"
 }
