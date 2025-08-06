@@ -2,6 +2,7 @@ import os
 import json
 from dataclasses import dataclass
 from tqdm import tqdm
+from tree_sitter import Query, QueryCursor
 
 from .proc_utils import load_config, decode_escaped_string, is_cpp, get_refactored_code, pause_exec, read_file, read_lines, write2file
 from .tree_sitter_parser import C_LANGUAGE, TreeSitterParser, Tree
@@ -21,7 +22,9 @@ class Vulcan:
 
     def __post_init__(self):
         self.processed_data: dict[str,str]= {}
-        self.config:dict[str,str] = load_config(fp="config.json")
+
+        # adjust paths
+        self._setup_config()
 
         # Initialize the pipeline components
         self.sanitizer = CodeSanitizer()
@@ -32,6 +35,22 @@ class Vulcan:
         self.tmp_c_file = "./misc/tmp.c"
         self.tmp_cpp_file = "./misc/tmp.cpp"
         os.makedirs(name="./misc", exist_ok=True)
+
+    def _setup_config(self):
+        # find the absolute path to this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # define the project root 
+        project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
+        # build the absolute path to the config file.
+        config_path = os.path.join(script_dir, "config.json")
+        # load config with relative paths 
+        self.config = load_config(fp=config_path)
+        # update paths in config file
+        for key, value in self.config.items():
+            if key.endswith("_path"):
+                self.config[key] = os.path.join(project_root, value)
+                # self.config[key] = os.path.abspath(os.path.join(project_root, value))
+
 
     def _process_snippet(self, data: dict[str, str]) -> dict[str, str]:
         """Processes a single function snippet through the entire pipeline:
@@ -53,19 +72,34 @@ class Vulcan:
             data["language"] = lang
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
 
-            # --- 1. SANITIZE ---
+            # --- PRELIMINARY SANITIZATION ---
             code:str = self.sanitizer.remove_comments(code=decoded_code, tsp=tsp)
+            # filter out empty strings or comments only
+            if not code.strip():
+                data["func"] = "error: non valid function (empty or comments only)"
+                return data
             code = self.sanitizer._preprocess_directives(code=code, tsp=tsp)
             code = self.sanitizer._balance_directives(code=code, tsp=tsp)
 
-            # --- 2. REPAIR (THE FORGE) ---
+            # --- STRUCTURAL REPAIR (THE FORGE) ---
             # Step 2a: Fix interleaved blocks with regex first.
             code = self.interleaved_fixer.full_structural_refactor(c_code=code)
             code = self.sanitizer.add_missing_braces(code=code)
             # Step 2b: Run the tree-sitter based multi-pass repair.
             code = self.foundry.run_multi_pass_fix(code=code)
 
-            # --- 3. FORMAT ---
+            # --- finish sanitizing ---
+            code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
+            code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
+
+            # check to ensure a function-like structure exists
+            function_query_str = "(function_definition) @function"
+            captures = tsp.query(code=code, query_str=function_query_str)
+            if not captures:
+                data["func"] = "error: non valid function (no function definition found)"
+                return data
+
+            # --- FORMAT ---
             code = get_refactored_code(
                 code=code,
                 lang_name=lang,
@@ -74,7 +108,7 @@ class Vulcan:
             )
             data["func"] = code
 
-            # --- 4. HEALTH CHECK & MANUAL FIX (Human-in-the-Loop) ---
+            # --- HEALTH CHECK & MANUAL FIX (Human-in-the-Loop) ---
             final_tree:Tree = tsp.parse(code=code)
             if tsp.is_broken_tree(tree=final_tree):
                 manual_fix_path:str = "./misc/manual_fix_required.c"
@@ -93,7 +127,7 @@ class Vulcan:
                 data["func"] = read_file(fp=manual_fix_path, strip=False)
                 logger.info("✅ Resuming pipeline with manually fixed code. ✅")
 
-            # --- 4. AUGMENT ---
+            # --- AUGMENT ---
             enriched_data:dict[str,str] = self.augmentor.enrich_entry(entry=data)
 
             return enriched_data
@@ -129,5 +163,5 @@ class Vulcan:
         logger.info(f"🗃️ Finished dataset saved to: {self.config["default_output_path"]} 🗃️")
 
         # clean up temporary files
-        # if os.path.exists(self.tmp_c_file):
-        #     os.remove(self.tmp_c_file)
+        if os.path.exists(self.tmp_c_file):
+            os.remove(self.tmp_c_file)
