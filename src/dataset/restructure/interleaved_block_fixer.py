@@ -1,91 +1,3 @@
-# import re
-#
-# class InterleavedBlockFixer:
-#     def _rewrite_structure(self, match: re.Match, keyword: str) -> str:
-#         """A helper called by re.sub. It validates the match before rewriting."""
-#
-#         preprocessor_block = match.group(1)
-#         shared_body = match.group(2)
-#
-#         # VALIDATION STEP: Check if the preprocessor block actually contains
-#         # the incomplete opener we're looking for (e.g., "if (...) {").
-#         opener_pattern = rf"{keyword}\s*\((?:.|\n)*?\)\s*\{{"
-#         if not re.search(opener_pattern, preprocessor_block):
-#             return match.group(0)
-#
-#         stripped_shared_body = shared_body.strip()
-#         replacement_block = f"{{\n    {stripped_shared_body}\n}}"
-#         corrected_block = preprocessor_block.replace("{", replacement_block)
-#
-#         return corrected_block
-#
-#     def _fix_interleaved_block_general(self, c_code: str, keyword: str, is_complex_body: bool) -> str:
-#         """Generic fixer that finds candidate blocks and passes them to the 
-#         _rewrite_structure function for validation and correction.
-#         """
-#
-#         body_quantifier = "*" if is_complex_body else "*?"
-#
-#         pattern = re.compile(
-#             # Group 1: The entire preprocessor block (greedy for nesting).
-#             rf"((?:#if|#ifdef)(?:.|\n)*#endif)\s*"
-#             # Group 2: The shared body content.
-#             rf"((?:.|\n){body_quantifier})\s*^\s*}}",
-#             re.MULTILINE | re.DOTALL
-#         )
-#
-#         return pattern.sub(lambda m: self._rewrite_structure(m, keyword), c_code)
-#
-#     def fix_interleaved_if(self, c_code: str) -> str:
-#         # if bodies are usually simple (non-greedy body capture is safer).
-#         return self._fix_interleaved_block_general(c_code, "if", is_complex_body=False)
-#
-#     def fix_interleaved_switch(self, c_code: str) -> str:
-#         # switch bodies are also simple (non-greedy is safer).
-#         return self._fix_interleaved_block_general(c_code, "switch", is_complex_body=False)
-#
-#     def fix_interleaved_while(self, c_code: str) -> str:
-#         # while/for loops can have complex bodies with braces (greedy capture is needed).
-#         return self._fix_interleaved_block_general(c_code, "while", is_complex_body=True)
-#
-#     def fix_interleaved_for(self, c_code: str) -> str:
-#         # while/for loops can have complex bodies with braces (greedy capture is needed).
-#         return self._fix_interleaved_block_general(c_code, "for", is_complex_body=True)
-#
-#     def _fix_interleaved_do_while(self, c_code: str) -> str:
-#         pattern = re.compile(
-#             r"do\s*\{((?:.|\n)*?)\s*"
-#             r"(#if(?:.|\n)*\}\s*while(?:.|\n)*#endif)",
-#             re.DOTALL
-#         )
-#
-#         def _rewrite_structure(match: re.Match) -> str:
-#             do_body_content = match.group(1).strip()
-#             preprocessor_block = match.group(2)
-#
-#             replicated_do_block = f"do {{\n    {do_body_content}\n}}"
-#
-#             corrected_block = re.sub(
-#                 r"\}\s*while",
-#                 f"{replicated_do_block} while",
-#                 preprocessor_block
-#             )
-#
-#             return corrected_block
-#
-#         return pattern.sub(_rewrite_structure, c_code)
-#
-#     def full_structural_refactor(self, c_code: str) -> str:
-#         """Applies all interleaved block fixers in a cascade to repair code."""
-#
-#         code = self._fix_interleaved_do_while(c_code)
-#         code = self.fix_interleaved_if(code)
-#         code = self.fix_interleaved_switch(code)
-#         code = self.fix_interleaved_while(code)
-#         code = self.fix_interleaved_for(code)
-#
-#         return code
-
 import re
 
 class InterleavedBlockFixer:
@@ -162,12 +74,12 @@ class InterleavedBlockFixer:
         This is fixed by duplicating the parent statement inside each directive.
         """
 
-        # Group 1: The full statement opener, e.g., "for (...) {"
-        # Group 3: The entire preprocessor block that splits the body.
-        pattern: re.Pattern = re.compile(
-            pattern=r"(\b(for|while|if|switch)\s*\((?:.|\n)*?\)\s*\{)\s*"
+        pattern = re.compile(
+            # Group 1: The full statement opener.
+            r"(\b(for|while|if|switch)\s*\([^{#]*?\)\s*\{)\s*"
+            # Group 3: The entire preprocessor block that splits the body.
             r"((?:#if|#ifdef)(?:.|\n)*?#endif)",
-            flags=re.DOTALL
+            re.DOTALL
         )
 
         def _rewrite(match: re.Match[str]) -> str:
@@ -263,7 +175,7 @@ class InterleavedBlockFixer:
 
 
                     if found_structure and is_truly_malformed:
-                        full_block_lines:list[str] = buffer + shared_body_lines# + ["}"]
+                        full_block_lines:list[str] = buffer + shared_body_lines # + ["}"]
                         fixed_block:str = self._rewrite_block(full_block_lines)
                         output_lines.append(fixed_block)
 
