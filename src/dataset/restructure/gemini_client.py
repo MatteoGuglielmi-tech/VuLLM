@@ -9,7 +9,7 @@ from google.generativeai.types.generation_types import GenerationConfig
 
 
 @dataclass
-class Gemini:
+class GeminiClient:
     """A client for interacting with the Google Gemini API."""
 
     model_name: str = "gemini-2.5-flash"
@@ -42,7 +42,7 @@ class Gemini:
             response_schema=str,  # in JSON I want strings
         )
 
-    def generate_description(self, func_str: str) -> str:
+    def generate_description(self, c_code: str) -> str:
         """Generates a functional description for a given C/C++ code snippet."""
 
         if not self.gemini_model or not self.gemini_generation_config:
@@ -61,7 +61,7 @@ class Gemini:
             "**Description**:\n"
         ).strip()
 
-        full_prompt: str = prompt_skeleton.format(code_snippet=func_str)
+        full_prompt: str = prompt_skeleton.format(code_snippet=c_code)
 
         synth_desc: str = self.gemini_model.generate_content(
             contents=full_prompt,
