@@ -1,17 +1,17 @@
 import pytest
 import json
 
-from dataset.restructure.gemini_client import Gemini
+from dataset.restructure.gemini_client import GeminiClient
 
 pytestmark: pytest.MarkDecorator = pytest.mark.slow_api
 
 @pytest.fixture(scope="module")
-def gemini_client() -> Gemini:
+def gemini_client() -> GeminiClient:
     """Provides an initialized Gemini client for the tests."""
 
-    return Gemini(model_name="gemini-2.5-flash")
+    return GeminiClient(model_name="gemini-2.5-flash")
 
-def test_generate_description_returns_valid_json_string(gemini_client: Gemini):
+def test_generate_description_returns_valid_json_string(gemini_client: GeminiClient):
     """This is an integration test that makes a real API call to Gemini.
     It verifies that the response is a valid JSON string and respects the
     length constraints.

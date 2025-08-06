@@ -228,12 +228,7 @@ void print_values(int max) {
 """
 
 interleaved_content_test_cases = [
-    pytest.param(
-        BROKEN_INTERLEAVED_FOR_CONTENT_INPUT,
-        BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT,
-        "c",
-        id="interleaved_content_for_loop",
-    ),
+    pytest.param(BROKEN_INTERLEAVED_FOR_CONTENT_INPUT, BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT, "c", id="interleaved_content_for_loop"),
 ]
 
 
@@ -506,13 +501,11 @@ test_cases = interleaved_content_test_cases + interleaved_dowhile_test_cases + f
         pytest.param(SIMPLE_CASE_INPUT, SIMPLE_CASE_EXPECTED, "c", id="simple_case"),
         pytest.param(REAL_LIKE_INPUT, REAL_LIKE_EXPECTED, "c", id="real_like_case"),
         pytest.param(UNBALANCED_DIRECTIVES_INPUT, UNBALANCED_DIRECTIVES_EXPECTED, "c", id="unbalanced_directives"),
-    ]
+]
 
 
 @pytest.mark.parametrize("input_code, expected_code, lang", test_cases)
-def test_vulcan_full_pipeline(
-    vulcan_pipeline, input_code: str, expected_code: str, lang: str
-):
+def test_vulcan_full_pipeline(vulcan_pipeline, input_code: str, expected_code: str, lang: str):
     """An integration test that runs a code snippet through the entire Vulcan pipeline."""
 
     # --- 1. Setup ---
@@ -553,3 +546,92 @@ def test_vulcan_full_pipeline(
     assert "vulnerability_description" in result_data
     assert "cyclomatic_complexity" in result_data
     assert result_data.get("language") == "c"
+
+
+# --- Pytest Parametrization ---
+NON_VALID_FUNCTION_1 = """
+int lookup_count;
+bool is_ram_cache_hit;
+
+_CacheLookupInfo()
+: action(CACHE_DO_UNDEFINED),
+transform_action(CACHE_DO_UNDEFINED),
+write_status(NO_CACHE_WRITE),
+transform_write_status(NO_CACHE_WRITE),
+lookup_url(NULL),
+lookup_url_storage(),
+original_url(),
+object_read(NULL),
+second_object_read(NULL),
+object_store(),
+transform_store(),
+config(),
+directives(),
+open_read_retries(0),
+open_write_retries(0),
+write_lock_state(CACHE_WL_INIT),
+"""
+
+NON_VALID_FUNCTION_2 = """
+bool logging_enabled;
+bool retry_intercept_failures;
+
+_HttpApiInfo()
+: parent_proxy_name(NULL),
+"""
+
+NON_VALID_FUNCTION_3 = """
+ServerState_t state;
+int attempts;
+
+_CurrentInfo()
+"""
+
+test_cases = [
+        pytest.param(" ", "error: non valid function (empty or comments only)", id="empty_entry"),
+        pytest.param("/// @c true if the connection is transparent.", "error: non valid function (empty or comments only)", id="only_comment"),
+        pytest.param(NON_VALID_FUNCTION_1, "error: non valid function (no function definition found)", id="non_valid_function_1"),
+        pytest.param(NON_VALID_FUNCTION_2, "error: non valid function (no function definition found)", id="non_valid_function_2"),
+        pytest.param(NON_VALID_FUNCTION_3, "error: non valid function (no function definition found)", id="non_valid_function_3"),
+]
+
+@pytest.mark.parametrize("input_code, expected_code", test_cases)
+def test_pipeline_rejects_empty_string_and_only_comments(vulcan_pipeline, input_code:str, expected_code:str):
+    input_data = {"func": input_code}
+    result = vulcan_pipeline._process_snippet(input_data)
+    assert result["func"] == expected_code
+
+
+def test_vulcan_full_pipeline_with_real_dataset(vulcan_pipeline):
+    # --- 1. Setup ---
+    real_dataset_path = "/home/matteo/dev/VuLLM/DiverseVul/small_dataset.jsonl"
+    # Get the input and output paths from the pipeline's configuration
+    pipeline_input_path = vulcan_pipeline.config["default_input_path"]
+    pipeline_output_path = vulcan_pipeline.config["default_output_path"]
+
+    assert os.path.exists(real_dataset_path), "The real dataset file was not found."
+
+    # --- 2. Execute ---
+    vulcan_pipeline.run()
+
+    # --- 3. Assert ---
+    assert os.path.exists(pipeline_output_path), "Output file was not created"
+
+    with open(real_dataset_path, "r") as f_orig, open(pipeline_output_path, "r") as f_proc:
+        original_lines = f_orig.readlines()
+        processed_lines = f_proc.readlines()
+
+    assert len(original_lines) == len(processed_lines), "Output file has a different number of lines than the input."
+
+    for i, (original_line, processed_line) in enumerate(zip(original_lines, processed_lines)):
+        original_data = json.loads(original_line)
+        processed_data = json.loads(processed_line)
+
+        # Assert that the enrichment step worked for each entry
+        if not processed_data.get("func", "").startswith(("error:", "skipped:")):
+            assert "vulnerability_description" in processed_data, f"Missing 'vulnerability_description' on line {i}"
+            assert "cyclomatic_complexity" in processed_data, f"Missing 'cyclomatic_complexity' on line {i}"
+            assert "language" in processed_data, f"Missing 'language' on line {i}"
+
+
+
