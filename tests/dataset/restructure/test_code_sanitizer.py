@@ -7,74 +7,6 @@ from dataset.restructure.tree_sitter_parser import TreeSitterParser
 from dataset.restructure.interleaved_block_fixer import InterleavedBlockFixer
 from dataset.restructure.code_sanitizer import CodeSanitizer
 
-# =================================================================================
-# TEST CASES
-# =================================================================================
-test_data_decode_escaped: list[tuple[str, str]] = [
-    (
-        'void func() {\\n\\tprintf(\\"Hello World!\\");\\n}',
-        'void func() {\n\tprintf("Hello World!");\n}',
-    ),
-    (
-        r"""void yajl_string_decode(yajl_buf buf, const unsigned char *str, unsigned int len) {\n    unsigned int beg = 0;\n    unsigned int end = 0;\n\n    while (end < len) {\n        if (str[end] == '\\\\') {\n            char utf8Buf[5];\n            const char * unescaped = \"?\";\n            yajl_buf_append(buf, str + beg, end - beg);\n            switch (str[++end]) {\n                case 'r': unescaped = \"\\r\"; break;\n                case 'n': unescaped = \"\\n\"; break;\n                case '\\\\': unescaped = \"\\\\\"; break;\n                case '/': unescaped = \"/\"; break;\n                case '\"': unescaped = \"\\\"\"; break;\n                case 'f': unescaped = \"\\f\"; break;\n                case 'b': unescaped = \"\\b\"; break;\n                case 't': unescaped = \"\\t\"; break;\n            }\n            yajl_buf_append(buf, unescaped, (unsigned int)strlen(unescaped));\n            beg = ++end;\n        } else {\n            end++;\n        }\n    }\n    yajl_buf_append(buf, str + beg, end - beg);\n}""",
-        r"""void yajl_string_decode(yajl_buf buf, const unsigned char *str, unsigned int len) {
-    unsigned int beg = 0;
-    unsigned int end = 0;
-
-    while (end < len) {
-        if (str[end] == '\\') {
-            char utf8Buf[5];
-            const char * unescaped = "?";
-            yajl_buf_append(buf, str + beg, end - beg);
-            switch (str[++end]) {
-                case 'r': unescaped = "\r"; break;
-                case 'n': unescaped = "\n"; break;
-                case '\\': unescaped = "\\"; break;
-                case '/': unescaped = "/"; break;
-                case '"': unescaped = "\""; break;
-                case 'f': unescaped = "\f"; break;
-                case 'b': unescaped = "\b"; break;
-                case 't': unescaped = "\t"; break;
-            }
-            yajl_buf_append(buf, unescaped, (unsigned int)strlen(unescaped));
-            beg = ++end;
-        } else {
-            end++;
-        }
-    }
-    yajl_buf_append(buf, str + beg, end - beg);
-}"""
-    ),
-    (
-        'static int snd_mem_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)\n{\n\tint len = 0;\n\tlong pages = snd_allocated_pages >> (PAGE_SHIFT-12);\n\tstruct snd_mem_list *mem;\n\tint devno;\n\tstatic char *types[] = { "UNKNOWN", "CONT", "DEV", "DEV-SG", "SBUS" };\n\n\tmutex_lock(&list_mutex);\n\tlen += snprintf(page + len, count - len,\n\t\t\t"pages  : %li bytes (%li pages per %likB)\\n",\n\t\t\tpages * PAGE_SIZE, pages, PAGE_SIZE / 1024);\n\tdevno = 0;\n\tlist_for_each_entry(mem, &mem_list_head, list) {\n\t\tdevno++;\n\t\tlen += snprintf(page + len, count - len,\n\t\t\t\t"buffer %d : ID %08x : type %s\\n",\n\t\t\t\tdevno, mem->id, types[mem->buffer.dev.type]);\n\t\tlen += snprintf(page + len, count - len,\n\t\t\t\t"  addr = 0x%lx, size = %d bytes\\n",\n\t\t\t\t(unsigned long)mem->buffer.addr, (int)mem->buffer.bytes);\n\t}\n\tmutex_unlock(&list_mutex);\n\treturn len;\n}',
-        """static int snd_mem_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
-{
-	int len = 0;
-	long pages = snd_allocated_pages >> (PAGE_SHIFT-12);
-	struct snd_mem_list *mem;
-	int devno;
-	static char *types[] = { "UNKNOWN", "CONT", "DEV", "DEV-SG", "SBUS" };
-
-	mutex_lock(&list_mutex);
-	len += snprintf(page + len, count - len,
-			"pages  : %li bytes (%li pages per %likB)\n",
-			pages * PAGE_SIZE, pages, PAGE_SIZE / 1024);
-	devno = 0;
-	list_for_each_entry(mem, &mem_list_head, list) {
-		devno++;
-		len += snprintf(page + len, count - len,
-				"buffer %d : ID %08x : type %s\n",
-				devno, mem->id, types[mem->buffer.dev.type]);
-		len += snprintf(page + len, count - len,
-				"  addr = 0x%lx, size = %d bytes\n",
-				(unsigned long)mem->buffer.addr, (int)mem->buffer.bytes);
-	}
-	mutex_unlock(&list_mutex);
-	return len;
-}""",
-    ),
-]
-
 
 # =================================================================================
 @pytest.fixture(scope="module")
@@ -107,10 +39,89 @@ def _get_refactored_code(code: str, lang_name: str, fp: str):
 class TestPipelineUnit:
     """A test class to group unit tests for individual pipeline methods."""
 
+    # ==============================================================================================================
+    # `decode_escaped_string` TESTS
+    # =============================================================================================================
+
+    # ---
+    SIMPLE_FUNC_INPUT = 'void func() {\\n\\tprintf(\\"Hello World!\\");\\n}'
+    SIMPLE_FUNC_OUTPUT = 'void func() {\n\tprintf("Hello World!");\n}'
+    # ---
+
+    # ---
+    REAL_LIKE_EXAMPLE_INPUT = r"""void yajl_string_decode(yajl_buf buf, const unsigned char *str, unsigned int len) {\n    unsigned int beg = 0;\n    unsigned int end = 0;\n\n    while (end < len) {\n        if (str[end] == '\\\\') {\n            char utf8Buf[5];\n            const char * unescaped = \"?\";\n            yajl_buf_append(buf, str + beg, end - beg);\n            switch (str[++end]) {\n                case 'r': unescaped = \"\\r\"; break;\n                case 'n': unescaped = \"\\n\"; break;\n                case '\\\\': unescaped = \"\\\\\"; break;\n                case '/': unescaped = \"/\"; break;\n                case '\"': unescaped = \"\\\"\"; break;\n                case 'f': unescaped = \"\\f\"; break;\n                case 'b': unescaped = \"\\b\"; break;\n                case 't': unescaped = \"\\t\"; break;\n            }\n            yajl_buf_append(buf, unescaped, (unsigned int)strlen(unescaped));\n            beg = ++end;\n        } else {\n            end++;\n        }\n    }\n    yajl_buf_append(buf, str + beg, end - beg);\n}"""
+    REAL_LIKE_EXAMPLE_OUTPUT = r"""void yajl_string_decode(yajl_buf buf, const unsigned char *str, unsigned int len) {
+        unsigned int beg = 0;
+        unsigned int end = 0;
+
+        while (end < len) {
+            if (str[end] == '\\') {
+                char utf8Buf[5];
+                const char * unescaped = "?";
+                yajl_buf_append(buf, str + beg, end - beg);
+                switch (str[++end]) {
+                    case 'r': unescaped = "\r"; break;
+                    case 'n': unescaped = "\n"; break;
+                    case '\\': unescaped = "\\"; break;
+                    case '/': unescaped = "/"; break;
+                    case '"': unescaped = "\""; break;
+                    case 'f': unescaped = "\f"; break;
+                    case 'b': unescaped = "\b"; break;
+                    case 't': unescaped = "\t"; break;
+                }
+                yajl_buf_append(buf, unescaped, (unsigned int)strlen(unescaped));
+                beg = ++end;
+            } else {
+                end++;
+            }
+        }
+        yajl_buf_append(buf, str + beg, end - beg);
+    }"""
+    # ---
+  
+    # ---
+    DATASET_EXAMPLE_INPUT = 'static int snd_mem_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)\n{\n\tint len = 0;\n\tlong pages = snd_allocated_pages >> (PAGE_SHIFT-12);\n\tstruct snd_mem_list *mem;\n\tint devno;\n\tstatic char *types[] = { "UNKNOWN", "CONT", "DEV", "DEV-SG", "SBUS" };\n\n\tmutex_lock(&list_mutex);\n\tlen += snprintf(page + len, count - len,\n\t\t\t"pages  : %li bytes (%li pages per %likB)\\n",\n\t\t\tpages * PAGE_SIZE, pages, PAGE_SIZE / 1024);\n\tdevno = 0;\n\tlist_for_each_entry(mem, &mem_list_head, list) {\n\t\tdevno++;\n\t\tlen += snprintf(page + len, count - len,\n\t\t\t\t"buffer %d : ID %08x : type %s\\n",\n\t\t\t\tdevno, mem->id, types[mem->buffer.dev.type]);\n\t\tlen += snprintf(page + len, count - len,\n\t\t\t\t"  addr = 0x%lx, size = %d bytes\\n",\n\t\t\t\t(unsigned long)mem->buffer.addr, (int)mem->buffer.bytes);\n\t}\n\tmutex_unlock(&list_mutex);\n\treturn len;\n}'
+    DATASET_EXAMPLE_OUTPUT = """static int snd_mem_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
+    {
+    	int len = 0;
+    	long pages = snd_allocated_pages >> (PAGE_SHIFT-12);
+    	struct snd_mem_list *mem;
+    	int devno;
+    	static char *types[] = { "UNKNOWN", "CONT", "DEV", "DEV-SG", "SBUS" };
+
+    	mutex_lock(&list_mutex);
+    	len += snprintf(page + len, count - len,
+    			"pages  : %li bytes (%li pages per %likB)\n",
+    			pages * PAGE_SIZE, pages, PAGE_SIZE / 1024);
+    	devno = 0;
+    	list_for_each_entry(mem, &mem_list_head, list) {
+    		devno++;
+    		len += snprintf(page + len, count - len,
+    				"buffer %d : ID %08x : type %s\n",
+    				devno, mem->id, types[mem->buffer.dev.type]);
+    		len += snprintf(page + len, count - len,
+    				"  addr = 0x%lx, size = %d bytes\n",
+    				(unsigned long)mem->buffer.addr, (int)mem->buffer.bytes);
+    	}
+    	mutex_unlock(&list_mutex);
+    	return len;
+    }"""
+    # ---
+
+    # --- Integration Test ---
+    test_data_decode_escaped = [
+        pytest.param(SIMPLE_FUNC_INPUT, SIMPLE_FUNC_OUTPUT, id="simple_func_input"),
+        pytest.param(REAL_LIKE_EXAMPLE_INPUT, REAL_LIKE_EXAMPLE_OUTPUT, id="real_like_example"),
+        pytest.param(DATASET_EXAMPLE_INPUT, DATASET_EXAMPLE_OUTPUT, id="dataset_example"),
+    ]
     @pytest.mark.parametrize("raw_string, expected_string", test_data_decode_escaped)
     def test_decode_escaped_string(self, raw_string: str, expected_string: str):
-        assert decode_escaped_string(raw_string) == expected_string
+        decoded_string: str = decode_escaped_string(raw_string)
+        assert _get_refactored_code(decoded_string, lang_name="c", fp="./tmp_candidate.c") == _get_refactored_code(expected_string, lang_name="c", fp="./tmp_expected.c")
 
+    # ==============================================================================================================
+    # `is_cpp` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "code, expected",
         [
@@ -143,6 +154,9 @@ class TestPipelineUnit:
         """Tests the language detection heuristic."""
         assert is_cpp(code) == expected
 
+    # ==============================================================================================================
+    # `remove_comments` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "code, expected", [
             ("    //! Wait for any event occuring either on the display \\c disp1 or \\c disp2.\n    static void wait(CImgDisplay& disp1, CImgDisplay& disp2) {\n      disp1._is_event = disp2._is_event = false;\n      while ((!disp1._is_closed || !disp2._is_closed) &&\n             !disp1._is_event && !disp2._is_event) wait_all();", "static void wait(CImgDisplay& disp1, CImgDisplay& disp2) {\n      disp1._is_event = disp2._is_event = false;\n      while ((!disp1._is_closed || !disp2._is_closed) &&\n             !disp1._is_event && !disp2._is_event) wait_all();"),
@@ -153,6 +167,9 @@ class TestPipelineUnit:
     def test_remove_comments(self, code_sanitizer_instance: CodeSanitizer, code: str, expected: str):
         assert code_sanitizer_instance.remove_comments(code, tsp=TreeSitterParser("c")) == expected
 
+    # ==============================================================================================================
+    # `_validate_and_extract_body` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "code, expected_type, expected_code",
         [
@@ -191,6 +208,9 @@ class TestPipelineUnit:
             assert tree.root_node.children[0].type == expected_type
             assert result == expected_code
 
+    # ==============================================================================================================
+    # `_validate_and_extract_body` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "code, expected_type, expected_code",
         [
@@ -245,6 +265,9 @@ class TestPipelineUnit:
             assert tree.root_node.children[0].type == expected_type
             assert result == expected_code
 
+    # ==============================================================================================================
+    # `test_preprocess_directives` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "input_code, expected_code",
         [
@@ -267,6 +290,9 @@ class TestPipelineUnit:
         result = code_sanitizer_instance._preprocess_directives(input_code, tsp=TreeSitterParser("c"))
         assert "".join(result.split()) == "".join(expected_code.split())
 
+    # ==============================================================================================================
+    # `add_missing_braces` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "input_code, expected_code",
         [
@@ -311,6 +337,9 @@ class TestPipelineUnit:
         assert "".join(result.split()) == "".join(expected_code.split())
 
 
+    # ==============================================================================================================
+    # `_balance_directives` TESTS
+    # =============================================================================================================
     @pytest.mark.parametrize(
         "input_code, expected_code",
         [
@@ -447,3 +476,229 @@ class TestPipelineUnit:
         result: str = code_sanitizer_instance._balance_directives(code=input_code, tsp=tsp)
         assert "".join(result.split()) == "".join(expected_code.split())
 
+    # ==============================================================================================================
+    # `_kr_style_to_ansi` TESTS
+    # =============================================================================================================
+    # ---
+    SIMPLE_KR_INPUT = """
+    funcname(a, b) int a; int b; {
+        return a > b ? a : b;
+    }
+    """
+    SIMPLE_KR_EXPECTED = """
+    int funcname(int a, int b) {
+        return a > b ? a : b;
+    }
+    """
+    # ---
+
+    # ---
+    SIMPLE_KR_SINGLE_DECL_INPUT = """
+    funcname(a, b) int a, b; {
+        return a > b ? a : b;
+    }
+    """
+    SIMPLE_KR_SINGLE_DECL_OUTPUT = SIMPLE_KR_EXPECTED
+    # ---
+
+    # ---
+    SIMPLE_KR_SINGLE_DECL_TYPE_INPUT = """
+    int funcname(a, b) int a, b; {
+        return a > b ? a : b;
+    }
+    """
+    SIMPLE_KR_SINGLE_DECL_TYPE_OUTPUT = SIMPLE_KR_EXPECTED
+    # ---
+
+    # ---
+    COMPLEX_KR_INPUT = """
+    inline volatile static void process_data(ptr1, ptr2, size, count)
+        char *ptr1, *ptr2;
+        unsigned int size, count;
+    {
+        /* function body */
+    }
+    """
+    COMPLEX_KR_EXPECTED = """
+    inline volatile static void process_data(char * ptr1, char * ptr2, unsigned int size, unsigned int count)
+    {
+        /* function body */
+    }
+    """
+    # ---
+
+    # ---
+    MACRO_LIKE_INPUT = """
+    glue(a, b)(int x, int y)
+    {
+        return x + y;
+    }
+    """
+    MACRO_LIKE_EXPECTED = MACRO_LIKE_INPUT
+    # ---
+
+    # ---
+    COMPLEX_MACRO_LIKE_INPUT = """
+    glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s, uint8_t *dst, const uint8_t *src,
+                                           int dstpitch, int srcpitch, int bltwidth, int bltheight) {
+      int x, y;
+      dstpitch -= bltwidth;
+      srcpitch -= bltwidth;
+      for(y = 0; y < bltheight; y++) {
+        for(x = 0; x < bltwidth; x++) {
+          ROP_OP(*dst, *src);
+          dst++;
+          src++;
+        }
+        dst += dstpitch;
+        src += srcpitch;
+      }
+    }
+    """
+    COMPLEX_MACRO_LIKE_OUTPUT = COMPLEX_MACRO_LIKE_INPUT
+    # ---
+
+    # ---
+    MODERN_C_INPUT = """
+    int multiply(int x, int y) {
+        // This is a valid modern function
+        return x * y;
+    }
+    """
+    MODERN_C_EXPECTED = MODERN_C_INPUT
+    # ---
+
+    # --- Integration Test ---
+    kr_test_cases = [
+        pytest.param(SIMPLE_KR_INPUT, SIMPLE_KR_EXPECTED, id="simple_kr_implicit_int"),
+        pytest.param(SIMPLE_KR_SINGLE_DECL_INPUT, SIMPLE_KR_SINGLE_DECL_OUTPUT, id="single_decl_kr_implicit_int"),
+        pytest.param(SIMPLE_KR_SINGLE_DECL_TYPE_INPUT, SIMPLE_KR_SINGLE_DECL_TYPE_OUTPUT, id="single_decl_kr_explicit_int"),
+        pytest.param(COMPLEX_KR_INPUT, COMPLEX_KR_EXPECTED, id="complex_kr_multi_declarations"),
+        pytest.param(COMPLEX_MACRO_LIKE_INPUT, COMPLEX_MACRO_LIKE_OUTPUT, id="complex_macro_like"),
+        pytest.param(MACRO_LIKE_INPUT, MACRO_LIKE_EXPECTED, id="macro_style_no_change"),
+        pytest.param(MODERN_C_INPUT, MODERN_C_EXPECTED, id="modern_c_no_change"),
+    ]
+
+    @pytest.mark.parametrize( "input_code, expected_code", kr_test_cases)
+    def test_fix_kr_style_function_integration(self, code_sanitizer_instance: CodeSanitizer, input_code:str, expected_code:str):
+        # --- Act ---
+        actual_code = code_sanitizer_instance._kr_style_to_ansi(input_code, tsp=TreeSitterParser())
+        # --- Assert ---
+        assert _get_refactored_code(actual_code, lang_name="c", fp="./tmp_in.c")  == _get_refactored_code(expected_code, lang_name="c", fp="./tmp_out.c")
+
+
+    # ==============================================================================================================
+    # `add_missing_return_types` TESTS
+    # =============================================================================================================
+
+    # ---
+    SIMPLE_KR_INPUT = "my_func() { return 0; }"
+    SIMPLE_KR_EXPECTED = "int my_func() { return 0; }"
+    # ---
+  
+    # ---
+    MACRO_KR_INPUT = """
+    glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s, uint8_t *dst, const uint8_t *src,
+                                           int dstpitch, int srcpitch, int bltwidth, int bltheight) {
+      int x, y;
+      dstpitch -= bltwidth;
+      srcpitch -= bltwidth;
+      for(y = 0; y < bltheight; y++) {
+        for(x = 0; x < bltwidth; x++) {
+          ROP_OP(*dst, *src);
+          dst++;
+          src++;
+        }
+        dst += dstpitch;
+        src += srcpitch;
+      }
+    }
+    """
+    MACRO_KR_EXPECTED = """
+    int glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s, uint8_t *dst, const uint8_t *src,
+                                           int dstpitch, int srcpitch, int bltwidth, int bltheight) {
+      int x, y;
+      dstpitch -= bltwidth;
+      srcpitch -= bltwidth;
+      for(y = 0; y < bltheight; y++) {
+        for(x = 0; x < bltwidth; x++) {
+          ROP_OP(*dst, *src);
+          dst++;
+          src++;
+        }
+        dst += dstpitch;
+        src += srcpitch;
+      }
+    }
+    """
+    # ---
+
+    # ---
+    MACRO_INPUT = """
+    glue(cirrus_bitblt_rop_fwd_, ROP_NAME) {
+      int x, y;
+      dstpitch -= bltwidth;
+      srcpitch -= bltwidth;
+      for(y = 0; y < bltheight; y++) {
+        for(x = 0; x < bltwidth; x++) {
+          ROP_OP(*dst, *src);
+          dst++;
+          src++;
+        }
+        dst += dstpitch;
+        src += srcpitch;
+      }
+    }
+    """
+    MACRO_OUTPUT = """
+    int glue(cirrus_bitblt_rop_fwd_, ROP_NAME) {
+      int x, y;
+      dstpitch -= bltwidth;
+      srcpitch -= bltwidth;
+      for(y = 0; y < bltheight; y++) {
+        for(x = 0; x < bltwidth; x++) {
+          ROP_OP(*dst, *src);
+          dst++;
+          src++;
+        }
+        dst += dstpitch;
+        src += srcpitch;
+      }
+    }
+    """
+    # ---
+    # ---
+    MODERN_FUNC_INPUT = "void modern_func(int x) { return; }"
+    MODERN_FUNC_EXPECTED = MODERN_FUNC_INPUT
+    # ---
+
+    # ---
+    KR_WITH_TYPE_INPUT = """
+    static char *kr_with_type(p) char *p; {
+        return p;
+    }
+    """
+    KR_WITH_TYPE_EXPECTED = KR_WITH_TYPE_INPUT
+    # ---
+
+    # ---
+    GLOBAL_VAR_INPUT = "int global_x = 10;"
+    GLOBAL_VAR_EXPECTED = GLOBAL_VAR_INPUT
+
+    # --- Integration Test ---
+    tests = [
+        pytest.param(SIMPLE_KR_INPUT, SIMPLE_KR_EXPECTED, id="simple_kr_function"),
+        pytest.param(MACRO_KR_INPUT, MACRO_KR_EXPECTED, id="macro_based_function"),
+        pytest.param(MACRO_INPUT, MACRO_OUTPUT, id="macro_function"),
+        pytest.param(MODERN_FUNC_INPUT, MODERN_FUNC_EXPECTED, id="valid_modern_function"),
+        pytest.param(KR_WITH_TYPE_INPUT, KR_WITH_TYPE_EXPECTED, id="valid_kr_with_type"),
+        pytest.param(GLOBAL_VAR_INPUT, GLOBAL_VAR_EXPECTED, id="non_function_global_var"),
+    ]
+
+    @pytest.mark.parametrize("input_code, expected_code", tests)
+    def test_add_missing_return_types(self, code_sanitizer_instance: CodeSanitizer, input_code: str, expected_code: str):
+        # --- Act ---
+        actual_code = code_sanitizer_instance.add_missing_return_types(code=input_code, tsp=TreeSitterParser("c"))
+        # --- Assert ---
+        assert _get_refactored_code(actual_code, lang_name="c", fp="./tmp_candidate.c")  == _get_refactored_code(expected_code, lang_name="c", fp="./tmp_expected.c")
+    
