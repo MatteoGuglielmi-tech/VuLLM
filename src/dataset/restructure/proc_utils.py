@@ -13,12 +13,6 @@ C_LANGUAGE = Language(tsc.language())
 CPP_LANGUAGE = Language(tscpp.language())
 
 
-def pause_exec(keyword: str ="continue"):
-    while True:
-        if input("").strip().lower() == keyword:
-            break
-
-
 def write2file(fp: str, content: str, encoding: str = "utf-8") -> None:
     """Utility to serialize string.
 
@@ -291,6 +285,18 @@ def spawn_clang_format(filepath: str, lang_name: str, clang_format_config_file: 
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"clang-format failed with exit code {e.returncode}:\n{e.stderr}")
 
+
 def get_refactored_code(code: str, lang_name: str, fp: str, clang_format_file_path: str) -> str:
     write2file(fp=fp, content=code)
     return spawn_clang_format(fp, lang_name, clang_format_file_path)
+
+
+def pause_exec(keyword: str ="continue"):
+    """Pauses execution and waits for the user to type a specific keyword."""
+
+    # Print a newline to move the cursor off the tqdm progress bar line.
+    print()
+    while True:
+        if input(f"Type `{keyword}` when you're ready to proceed.").strip().lower() == keyword:
+            break
+
