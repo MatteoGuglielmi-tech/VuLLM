@@ -64,25 +64,15 @@ class InferencePipeline:
         # After the model is loaded, prepare the logits processor
         if self.tokenizer:
             # Important: Get the token IDs for the exact words you want
-            yes_token_id: int = self.tokenizer.encode(
-                text="YES", add_special_tokens=False
-            )[0]
-            no_token_id: int = self.tokenizer.encode(
-                text="NO", add_special_tokens=False
-            )[0]
+            yes_token_id: int = self.tokenizer.encode(text="YES", add_special_tokens=False)[0]
+            no_token_id: int = self.tokenizer.encode(text="NO", add_special_tokens=False)[0]
 
-            self.logits_processor = [
-                EnforceSingleTokenGeneration(
-                    allowed_token_ids=[yes_token_id, no_token_id]
-                )
-            ]
+            self.logits_processor = [ EnforceSingleTokenGeneration(allowed_token_ids=[yes_token_id, no_token_id]) ]
 
         self.bnb_config_arguments: dict[str, Any] = {
             "load_in_4bit": True,
             "bnb_4bit_quant_type": "nf4",
-            "bnb_4bit_compute_dtype": (
-                torch.bfloat16 if is_bfloat16_supported() else None
-            ),
+            "bnb_4bit_compute_dtype": torch.bfloat16 if is_bfloat16_supported() else None,
             "bnb_4bit_use_double_quant": self.use_double_quantization,
         }
 
