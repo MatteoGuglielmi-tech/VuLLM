@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from tree_sitter import Node, Tree, Query, QueryCursor
 
@@ -6,6 +7,7 @@ from .tree_sitter_parser import TreeSitterParser
 
 TSNode = Node | None
 Nodes = list[Node]
+Match = re.Match[str]|None
 
 
 @dataclass
@@ -217,3 +219,123 @@ class CodeSanitizer:
             return code + '\n' + '}' * missing_braces
 
         return code
+
+    def add_missing_return_types(self, code: str, tsp: TreeSitterParser) -> str:
+        """Finds and fixes C functions that are missing an explicit
+        return type by adding the default 'int'.
+        """
+
+        tree: Tree = tsp.parse(code=code)
+        root_node:Node = tree.root_node
+
+        if root_node.child_count > 0 and root_node.children[0].type == "function_definition":
+            return code
+
+        # A function with a missing return type is often parsed as two top-level
+        # nodes: the header (as an ERROR or expression_statement) and the body.
+        if root_node.child_count >= 2:
+            first_child = root_node.children[0]
+            second_child = root_node.children[1]
+
+            # Check for the two known broken patterns:
+            # 1. (ERROR) followed by (compound_statement)
+            # 2. (expression_statement) followed by (compound_statement)
+            is_broken_pattern = (
+                first_child.type in ["ERROR", "expression_statement"] and
+                second_child.type == "compound_statement"
+            )
+
+            if is_broken_pattern:
+                return "int " + code
+
+        return code
+
+    def _find_identifier_in_declarator(self, node: Node) -> Node|None:
+        """Recursively finds the base identifier node within a declarator."""
+
+        if node.type == "identifier": return node
+        declarator_child = node.child_by_field_name("declarator")
+        if declarator_child:
+            return self._find_identifier_in_declarator(declarator_child)
+
+        return None
+
+    def _kr_style_to_ansi(self, code: str, tsp: TreeSitterParser) -> str:
+        """Transforms a K&R C-style function into a modern ANSI C function using
+        a robust, two-stage Tree-sitter approach.
+        """
+
+        # --- Stage 1: Normalization Pass ---
+        # check for the "broken" AST pattern of a K&R function
+        broken_kr_query_str = """
+            (translation_unit
+              (expression_statement) @header
+              (declaration)+ @param_decls .
+              (compound_statement) @body
+            )
+        """
+        if tsp.query(code=code, query_str=broken_kr_query_str):
+            code = "int " + code.strip()
+
+        # --- Stage 2: Conversion Pass ---
+        # all K&R functions should have a valid `function_definition` node.
+        # This query finds a function_definition with K&R-style parameter declarations.
+        kr_func_query_str = """
+            (function_definition
+              (storage_class_specifier)* @specifiers
+              type: (primitive_type) @ret_type
+              declarator: (function_declarator
+                parameters: (parameter_list) @param_names)
+              (declaration)+ @param_decls
+              body: (compound_statement) @body
+            ) @kr_function
+        """
+
+        captures:dict[str,list[Node]] = tsp.query(code=code, query_str=kr_func_query_str)
+
+        param_names_nodes:list[Node]|None = captures.get("param_names", [])
+        param_decl_nodes:list[Node]|None = captures.get("param_decls", [])
+
+        if not (param_names_nodes and param_decl_nodes): return code
+
+        param_names_node:Node = param_names_nodes[0]
+
+        # --- Reconstruct the Parameter List ---
+        param_names:list[str] = [
+            p.text.decode('utf-8') for p in param_names_node.children 
+            if p.type == 'identifier' and p.text
+        ]
+
+        param_decl_map: dict[str, str] = {}
+        for decl_node in param_decl_nodes:
+            type_node = decl_node.child_by_field_name("type")
+            if not type_node or not type_node.text: continue
+
+            type_text = type_node.text.decode('utf-8')
+
+            for declarator_node in decl_node.children_by_field_name("declarator"):
+                if not declarator_node.text: continue
+
+                full_declarator_text = declarator_node.text.decode('utf-8')
+                identifier_node = self._find_identifier_in_declarator(declarator_node)
+
+                if identifier_node and identifier_node.text:
+                    var_name = identifier_node.text.decode('utf-8')
+                    param_decl_map[var_name] = f"{type_text} {full_declarator_text}"
+
+        new_params = [param_decl_map.get(name, f"int {name}") for name in param_names]
+
+        # --- Plan and Apply Edits ---
+        edits = []
+        new_param_list_text = f"({', '.join(new_params)})".encode('utf-8')
+        edits.append((param_names_node.start_byte, param_names_node.end_byte, new_param_list_text))
+
+        start_byte_to_remove = param_names_node.end_byte
+        end_byte_to_remove = param_decl_nodes[-1].end_byte
+        edits.append((start_byte_to_remove, end_byte_to_remove, b''))
+
+        code_bytes = bytearray(code, "utf-8")
+        for start, end, text in sorted(edits, key=lambda x: x[0], reverse=True):
+            code_bytes[start:end] = text
+
+        return code_bytes.decode("utf-8")
