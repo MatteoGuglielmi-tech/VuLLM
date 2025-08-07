@@ -291,12 +291,12 @@ def get_refactored_code(code: str, lang_name: str, fp: str, clang_format_file_pa
     return spawn_clang_format(fp, lang_name, clang_format_file_path)
 
 
-def pause_exec(keyword: str ="continue"):
+def pause_exec(keyword: str ="ok"):
     """Pauses execution and waits for the user to type a specific keyword."""
 
     # Print a newline to move the cursor off the tqdm progress bar line.
     print()
     while True:
-        if input(f"Type `{keyword}` when you're ready to proceed.").strip().lower() == keyword:
+        if input(f"Type `{keyword}` when you're ready to proceed.  ").strip().lower() == keyword:
             break
 
