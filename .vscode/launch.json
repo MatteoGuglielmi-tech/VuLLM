@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "Python: Run as Module",
+      "module": "src.dataset.restructure.vulcan_run",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
