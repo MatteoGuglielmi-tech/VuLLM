@@ -2,15 +2,18 @@ import os
 import json
 from dataclasses import dataclass
 from tqdm import tqdm
+from tree_sitter import Tree
 
 from .proc_utils import load_config, decode_escaped_string, is_cpp, get_refactored_code, pause_exec, read_file, read_lines, write2file
-from .tree_sitter_parser import C_LANGUAGE, TreeSitterParser, Tree
 from .code_sanitizer import CodeSanitizer
 from .interleaved_block_fixer import InterleavedBlockFixer
 from .code_foundry import CodeFoundry
 from .code_augmentor import CodeAugmentor
 
-from .log import logger
+from .shared.tree_sitter_parser import TreeSitterParser, C_LANGUAGE
+from .shared.log import logger
+from .llm_clients.gemini_describer import GeminiClient
+from .llm_clients.llama_describer import LlamaCodeDescriber
 
 
 @dataclass
@@ -18,6 +21,8 @@ class Vulcan:
     """The master pipeline orchestrator. Vulcan forges raw code snippets into
     clean, repaired, and enriched dataset entries.
     """
+
+    USE_LOCAL_MODEL: bool = True
 
     def __post_init__(self):
         self.processed_data: dict[str,str]= {}
@@ -29,7 +34,10 @@ class Vulcan:
         self.sanitizer = CodeSanitizer()
         self.interleaved_fixer = InterleavedBlockFixer()
         self.foundry = CodeFoundry(ts_lang=C_LANGUAGE)
-        self.augmentor = CodeAugmentor(metadata_filepath=self.config["default_metadata_path"])
+        self.augmentor = CodeAugmentor(
+            metadata_filepath=self.config["default_metadata_path"],
+            description_generator=LlamaCodeDescriber() if self.USE_LOCAL_MODEL else GeminiClient(),
+        )
 
         self.tmp_c_file = "./misc/tmp.c"
         self.tmp_cpp_file = "./misc/tmp.cpp"
@@ -94,7 +102,6 @@ class Vulcan:
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
             code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
 
-
             # check to ensure a function-like structure exists
             function_query_str = "(function_definition) @function"
             captures = tsp.query(code=code, query_str=function_query_str)
@@ -128,10 +135,7 @@ class Vulcan:
                 data["func"] = read_file(fp=manual_fix_path, strip=False)
                 logger.info("✅ Resuming pipeline with manually fixed code. ✅")
 
-            # --- AUGMENT ---
-            enriched_data:dict[str,str] = self.augmentor.enrich_entry(entry=data)
-
-            return enriched_data
+            return data
 
         except Exception as e:
             error_msg = str(e).replace("\n", " ").strip()
@@ -149,16 +153,27 @@ class Vulcan:
             logger.error(f"The source file was not found at {self.config["default_input_path"]}")
             return
 
-        with open(file=self.config["default_output_path"], mode="w", encoding="utf-8") as outfile:
-            for i, line in enumerate(tqdm(iterable=lines, desc="Forging Code Snippets")):
-                try:
-                    data:dict[str,str] = json.loads(line)
-                    processed_data:dict[str,str] = self._process_snippet(data=data)
-                    outfile.write(json.dumps(processed_data) + "\n")
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse line {i}. Skipping.")
-                    error_entry:dict[str,str] = { "original_line": str(i), "func": "error: failed to parse line" }
-                    outfile.write(json.dumps(error_entry) + "\n")
+        processed_entries: list[dict[str,str]] = []
+        # with open(file=self.config["default_output_path"], mode="w", encoding="utf-8") as outfile:
+        for i, line in enumerate(tqdm(iterable=lines, desc="Forging Code Snippets")):
+            try:
+                data:dict[str,str] = json.loads(line)
+                processed_data:dict[str,str] = self._process_snippet(data=data)
+                processed_entries.append(processed_data)
+                # outfile.write(json.dumps(processed_data) + "\n")
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse line {i}. Skipping.")
+                error_entry:dict[str,str] = { "original_line": str(i), "func": "error: failed to parse line" }
+                processed_entries.append(error_entry)
+                # outfile.write(json.dumps(error_entry) + "\n")
+
+        # -- run augmentation on accumulated entries at once --
+        logger.debug("Start enrichment")
+        final_entries = self.augmentor.enrich_dataset_batch(processed_entries)
+        # -- write final, fully enriched data to the output file --
+        with open(self.config["default_output_path"], "w", encoding="utf-8") as outfile:
+            for entry in tqdm(final_entries, desc="Writing Output"):
+                outfile.write(json.dumps(entry) + "\n")
 
         logger.info(f"✅ Successfully forged {len(lines)} snippets. ✅")
         logger.info(f"🗃️ Finished dataset saved to: {self.config["default_output_path"]} 🗃️")
