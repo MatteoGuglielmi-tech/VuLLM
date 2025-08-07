@@ -2,7 +2,6 @@ import os
 import json
 from dataclasses import dataclass
 from tqdm import tqdm
-from tree_sitter import Query, QueryCursor
 
 from .proc_utils import load_config, decode_escaped_string, is_cpp, get_refactored_code, pause_exec, read_file, read_lines, write2file
 from .tree_sitter_parser import C_LANGUAGE, TreeSitterParser, Tree
@@ -64,20 +63,23 @@ class Vulcan:
 
         try:
             decoded_code:str = decode_escaped_string(raw_string=raw_func_str)
-            if is_cpp(code=decoded_code):
-                data.update({"func": "skipped: c++ function", "language": "cpp"})
-                return data
-
+            # --- premature removal of comments to avoid false C++ positives ---
             lang:str="c"
-            data["language"] = lang
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
-
-            # --- PRELIMINARY SANITIZATION ---
             code:str = self.sanitizer.remove_comments(code=decoded_code, tsp=tsp)
             # filter out empty strings or comments only
             if not code.strip():
                 data["func"] = "error: non valid function (empty or comments only)"
                 return data
+
+            # --- lang check ---
+            if is_cpp(code=code):
+                data.update({"func": "skipped: c++ function", "language": "cpp"})
+                return data
+
+            data["language"] = lang
+
+            # --- PRELIMINARY SANITIZATION ---
             code = self.sanitizer._preprocess_directives(code=code, tsp=tsp)
             code = self.sanitizer._balance_directives(code=code, tsp=tsp)
 
@@ -92,6 +94,7 @@ class Vulcan:
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
             code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
 
+
             # check to ensure a function-like structure exists
             function_query_str = "(function_definition) @function"
             captures = tsp.query(code=code, query_str=function_query_str)
@@ -101,10 +104,8 @@ class Vulcan:
 
             # --- FORMAT ---
             code = get_refactored_code(
-                code=code,
-                lang_name=lang,
-                fp=self.tmp_c_file,
-                clang_format_file_path=self.config["clang_format_path"],
+                code=code, lang_name=lang,
+                fp=self.tmp_c_file, clang_format_file_path=self.config["clang_format_path"],
             )
             data["func"] = code
 
