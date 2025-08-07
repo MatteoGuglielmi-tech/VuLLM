@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from tree_sitter import Node, Tree, Query, QueryCursor
 
-from .tree_sitter_parser import TreeSitterParser
+from src.dataset.restructure.shared.tree_sitter_parser import TreeSitterParser
 
 TSNode = Node | None
 Nodes = list[Node]
