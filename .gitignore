@@ -48,3 +48,6 @@ src/dataset/restructure/depr
 src/dataset/analysis/assets
 src/dataset/restructure/misc/
 src/dataset/restructure/readme.md
+
+
+tests/dataset/restructure/ast_inspector.py
