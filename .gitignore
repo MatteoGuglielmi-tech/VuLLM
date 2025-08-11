@@ -1,5 +1,5 @@
 # Dataset folder
-Dataset/
+DiverseVul/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -8,6 +8,8 @@ src/core/__pycache__/
 src/core/assets/
 src/core/results/
 src/core/wandb/
+src/core/chunking_and_streaming/cpp_chunking.py
+src/core/chunking_and_streaming/misc/
 
 # initial experiments
 src/core/initial_exp/
@@ -26,8 +28,7 @@ src/core/chunking_and_streaming/visualize_chunks.py
 src/core/chunking_and_streaming/chunks.py
 src/core/chunking_and_streaming/datacollator.py
 
-setup/unsloth.sh
-setup/unsloth.yml
+setup/*
 src/core/chunking_and_streaming/checkpoints/
 src/core/chunking_and_streaming/lora_model/
 src/core/chunking_and_streaming/trainer/
@@ -40,9 +41,10 @@ unsloth_compiled_cache/
 # Environment variables
 .env
 
-
 misc/app.bak
 misc/app.log
 src/dataset/restructure/tbt
 src/dataset/restructure/depr
 src/dataset/analysis/assets
+src/dataset/restructure/misc/
+src/dataset/restructure/readme.md
