@@ -1,0 +1,9 @@
+{
+  "clang_format_path": ".clang-format",
+  "default_input_path": "DiverseVul/raw/small_dataset.jsonl",
+  "default_metadata_path": "DiverseVul/raw/diversevul_metadata.jsonl",
+  "default_output_path": "DiverseVul/processed/diversevul_preprocessed.jsonl",
+  "pth_chunked_train": "DiverseVul/processed/chunked_train_data.jsonl",
+  "pth_chunked_val": "DiverseVul/processed/chunked_val_data.jsonl",
+  "pth_chunked_test": "DiverseVul/processed/chunked_test_data.jsonl"
+}
