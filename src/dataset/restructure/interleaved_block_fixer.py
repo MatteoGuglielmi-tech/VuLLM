@@ -1,5 +1,6 @@
 import re
 
+
 class InterleavedBlockFixer:
     """
     A robust C code restructurer using a single-pass state machine to

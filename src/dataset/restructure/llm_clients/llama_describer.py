@@ -4,7 +4,7 @@ import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline # type: ignore
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from src.dataset.restructure.shared.log import logger
+from dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
 

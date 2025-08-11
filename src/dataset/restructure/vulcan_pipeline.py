@@ -49,7 +49,7 @@ class Vulcan:
         # define the project root 
         project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
         # build the absolute path to the config file.
-        config_path = os.path.join(script_dir, "config.json")
+        config_path = os.path.join(project_root, "config.json")
         # load config with relative paths 
         self.config = load_config(fp=config_path)
         # update paths in config file
