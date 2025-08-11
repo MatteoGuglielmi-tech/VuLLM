@@ -1,6 +1,6 @@
 import pytest
 
-from dataset.restructure.tree_sitter_parser import TreeSitterParser
+from dataset.restructure.shared.tree_sitter_parser import TreeSitterParser
 
 probe_codes = [
     (
