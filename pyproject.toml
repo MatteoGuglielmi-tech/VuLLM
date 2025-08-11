@@ -18,3 +18,15 @@ markers = [
     "slow_gpu: marks tests as slow to run, requires a GPU",
     "slow_api: marks tests as slow slow, requires an API Key"
 ]
+
+
+# [tool.pyright]
+# # Define the top-level directories that pyright should analyze.
+# include = ["src", "tests"]
+# reportUnusedVariable = "warning" # default level
+#
+# # --- configuration for diable rules ---
+# executionEnvironments = [
+#   { root = "tests", reportUnusedVariable = false },
+#   { root = "src" }
+# ]
