@@ -121,7 +121,7 @@ def vulcan_pipeline(monkeypatch: pytest.MonkeyPatch, setup_test_environment: dic
         An initialized instance of the Vulcan pipeline.
     """
 
-    monkeypatch.setattr("dataset.restructure.code_augmentor.LlamaCodeDescriber", MockLlamaCodeDescriber)
+    monkeypatch.setattr("dataset.restructure.code_augmentor.description_generator", MockLlamaCodeDescriber)
 
     original_cwd = os.getcwd()
     os.chdir(test_data_dir)
