@@ -1,25 +1,28 @@
-# official documentation : https://docs.unsloth.ai/
-# Standard library imports
 import os
 import gc
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+from pathlib import Path
 
-# Third-party library imports
-# FIX: Unsloth must be imported before transformers and peft
-from unsloth import FastLanguageModel, is_bfloat16_supported  # isort: ignore
+# official documentation : https://docs.unsloth.ai/
+from unsloth import FastLanguageModel, is_bfloat16_supported
 
 import torch
+import wandb
+import bitsandbytes as bnb
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
-import bitsandbytes as bnb
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
-import wandb
-from .stdout import logger
 
-# 4bit pre quantized models we support for 4x faster downloading + no OOMs.
+from .shared.animate import Loader
+
+import logging
+from .shared.stdout import MY_LOGGER_NAME
+logger = logging.getLogger(MY_LOGGER_NAME)
+
+# supported 4bit pre-quantized models for 4x faster downloading + no OOMs.
 # More models at https://huggingface.co/unsloth
 fourbit_models = [
     "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
@@ -65,33 +68,28 @@ class UnslothModel:
 
     hf_train_data: Dataset
     hf_eval_data: Dataset
-    # base model to fine-tune
-    base_model_str: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
-    # Max sequence length for the model's tokenizer.
-    max_seq_length: int = 2048
+    base_model_str: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit" # base model to fine-tune
+    max_seq_length: int = 2048  # Max sequence length for the model's tokenizer.
     # how long to train for precedence to epochs
     training_epochs: int = -1
     training_steps: int = -1
     use_double_quantization: bool = False
-
-    # <---- Attributes for managing paths and models ---->
+ 
     lora_model_dir: str = field(init=False)
-    base_model: Optional[FastLanguageModel] = field(init=False, default=None)
-    base_tokenizer: Optional[PreTrainedTokenizer] = field(init=False, default=None)
+    base_model: FastLanguageModel|None = field(init=False, default=None)
+    base_tokenizer: PreTrainedTokenizer|None= field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        # Determine paths for checkpoints and trainer output
         provider, model_id = self.base_model_str.split("/")
         date: str = datetime.today().strftime("%Y-%m-%d")
         time: str = datetime.now().strftime("%H-%M-%S")
-        common_suffix: str = os.path.join(provider, model_id, date, time)
 
-        # saving model checkpoint
-        # target directory for metrics
-        trainer_dir: str = os.path.join("./trainer", common_suffix)
-        self.lora_model_dir: str = os.path.join(trainer_dir, "lora_model")
-        self.checkpoint_dir: str = os.path.join("./checkpoints/", common_suffix)
-        self.output_dir: str = os.path.join("./results/", f"{model_id}_{date}_{time}")
+        common_suffix: Path = Path(provider) / model_id / date / time
+
+        trainer_dir: Path = Path("./trainer") / common_suffix
+        self.lora_model_dir: str = str(trainer_dir / "lora_model")
+        self.checkpoint_dir: str = str(Path("./checkpoints") / common_suffix)
+        self.output_dir: str = str(Path("./results") / f"{model_id}_{date}_{time}")
 
         # Ensure output directories exist
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -100,9 +98,7 @@ class UnslothModel:
         self.bnb_config_arguments: dict[str, Any] = {
             "load_in_4bit": True,
             "bnb_4bit_quant_type": "nf4",
-            "bnb_4bit_compute_dtype": (
-                torch.bfloat16 if is_bfloat16_supported() else None
-            ),
+            "bnb_4bit_compute_dtype": (torch.bfloat16 if is_bfloat16_supported() else None),
             "bnb_4bit_use_double_quant": self.use_double_quantization,
         }
 
@@ -110,138 +106,99 @@ class UnslothModel:
         """Initializes Weights & Biases for experiment tracking."""
 
         try:
-            # wandb.login()
             wandb.init(
                 project=f"Unsloth fine-tune {os.path.split(self.base_model_str)[-1]} for vulnerability detection.",
                 job_type="training",
-                anonymous="allow",
+                anonymous="allow"
             )
-            print("Weights & Biases initialized.")
+            logger.info("Weights & Biases initialized.")
         except Exception as e:
-            print(f"Failed to initialize Weights & Biases: {e}")
+            logger.error(f"Failed to initialize Weights & Biases: {e}")
 
-    # <---- MODEL LOADING, PATCHING, AND TRAINING METHODS ---->
-    def unsloth_load_base_model(self) -> None:
-        """
-        Dynamically loads the base model by first attempting to load it all onto
+    def unsloth_load_base_model(self):
+        """Dynamically loads the base model by first attempting to load it all onto
         the GPU, and then falling back to automatic CPU offloading if VRAM is insufficient.
         """
 
-        print(f"Initializing base model and tokenizer for '{self.base_model_str}'...")
+        logger.info(f"Initializing base model and tokenizer for '{self.base_model_str}'...")
 
-        # <---- Step 1: The "Pre-check" - Attempt to load everything to GPU ---->
+        load_kwargs: dict[str,Any] = {
+            "model_name": self.base_model_str,
+            "max_seq_length": self.max_seq_length,
+            "device_map": "auto",  # let Unsloth/Accelerate handle device placement
+            "attn_implementation": "flash_attention_2",
+        }
+
+        if self.base_model_str in fourbit_models:
+            load_kwargs["load_in_4bit"] = True
+        else:
+            logger.info("Model is not pre-quantized. Applying custom BitsAndBytesConfig...")
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(**self.bnb_config_arguments)
+
         try:
-            print("Attempting to load model directly onto GPU...")
-            load_kwargs = {
-                "model_name": self.base_model_str,
-                "max_seq_length": self.max_seq_length,
-                "device_map": "cuda:0",  # Force to GPU
-                "attn_implementation": "flash_attention_2",
-            }
-            if self.base_model_str in fourbit_models:
-                load_kwargs["load_in_4bit"] = True
-            else:
-                # For any other model, apply the custom quantization config on the fly
-                print(
-                    "Model is not pre-quantized. Applying custom BitsAndBytesConfig..."
-                )
-                load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    **self.bnb_config_arguments
-                )
-
-            self.base_model, self.base_tokenizer = FastLanguageModel.from_pretrained(
-                **load_kwargs
-            )
-            print("✅ Model fits entirely on GPU.")
-            return
-
-        except torch.cuda.OutOfMemoryError:
-            print("⚠️ OOM Error: Model does not fit entirely on GPU.")
-            print("Retrying with automatic CPU offloading enabled...")
+            self.base_model, self.base_tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
+            logger.info("✅ Model and tokenizer loaded successfully.")
+        except torch.cuda.OutOfMemoryError as oom:
+            logger.critical("⚠️ OOM Error: Model does not fit entirely on GPU.")
+            logger.critical(f"Please try a smaller model or use a GPU with more VRAM.")
             torch.cuda.empty_cache()  # Clear cache after OOM error
+            raise oom
+        except Exception as e:
+            logger.critical(f"❌ Failed to load model: {e}")
+            raise e
 
-            # --- Step 2: The "Fallback" - Load with dynamic offloading ---
-            try:
-                # For offloading to work, we MUST provide the quantization config with the
-                self.bnb_config_arguments["llm_int8_enable_fp32_cpu_offload"] = True
-
-                self.base_model, self.base_tokenizer = (
-                    FastLanguageModel.from_pretrained(
-                        model_name=self.base_model_str,
-                        max_seq_length=self.max_seq_length,
-                        quantization_config=BitsAndBytesConfig(
-                            **self.bnb_config_arguments
-                        ),
-                        device_map="auto",  # The key is 'auto' + the quantization_config
-                        attn_implementation="flash_attention_2",
-                    )
-                )
-                print("✅ Model loaded successfully with dynamic CPU offloading.")
-
-            except Exception as e:
-                print(f"❌ Failed to load model even with offloading enabled: {e}")
-                raise e
-
-        # --- Step 3: Final Verification ---
-        # This check runs after a successful load from either the try or except block.
+        # --- final Verification ---
         if self.base_model:
-            is_quantized = hasattr(self.base_model, "quantization_config") and self.base_model.quantization_config.load_in_4bit or any(isinstance(m, bnb.nn.Linear4bit) for m in self.base_model.modules())  # type: ignore
-            print(
-                "✅ Verification successful: Model is loaded in 4-bit."
-                if is_quantized
-                else "⚠️ Verification warning: Model does not appear to be loaded in 4-bit."
+            is_quantized = (
+                hasattr(self.base_model, "quantization_config")
+                and self.base_model.quantization_config.load_in_4bit # type: ignore
+                or any(isinstance(m, bnb.nn.Linear4bit) for m in self.base_model.modules()) # type: ignore
             )
+
+            if is_quantized: logger.info("✅ Verification successful: Model is loaded in 4-bit.")
+            else: logger.warning("⚠️ Verification warning: Model does not appear to be loaded in 4-bit.")
 
     def unsloth_patch_model(self) -> None:
         """Applies PEFT to the base model for LoRA fine-tuning."""
 
         if not self.base_model:
-            raise ValueError(
-                "Base model is not loaded. Please run `unsloth_load_base_model` first."
-            )
+            self.unsloth_load_base_model() # load base model
 
-        def find_all_linear_names(model) -> list[str]:
+        def _find_all_linear_names(model) -> list[str]:
             cls = bnb.nn.Linear4bit  # Assuming 4-bit quantization
             lora_module_names = set()
             for name, module in model.named_modules():
                 if isinstance(module, cls):
                     names = name.split(".")
                     lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-
-            if "lm_head" in lora_module_names:
-                # lm_head is usually not LoRA-adapted
+            if "lm_head" in lora_module_names: # lm_head is usually not LoRA-adapted
                 lora_module_names.remove("lm_head")
 
             return list(lora_module_names)
 
-        print("Applying PEFT to the model...")
-        self.base_model = FastLanguageModel.get_peft_model(
-            model=self.base_model,
-            max_seq_length=self.max_seq_length,
-            r=16,  # r>0, suggested vals: {8, 16, 32, 64, 128}
-            lora_alpha=16,  # Alpha parameter for LoRA scaling, suggestion r=alpha or alpha=2*r
-            target_modules=find_all_linear_names(model=self.base_model),
-            modules_to_save=None,
-            lora_dropout=0,  # Dropout probability for LoRA layers. Supports any, but = 0 is optimized
-            bias="none",  # Bias type for LoRA layers. Supports any, but = "none" is optimized
-            # "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
-            use_gradient_checkpointing="unsloth",  # type: ignore
-            random_state=3407,
-        )
-        print("PEFT applied successfully.")
+        with Loader("Patching model"):
+            self.base_model = FastLanguageModel.get_peft_model(
+                model=self.base_model,
+                max_seq_length=self.max_seq_length,
+                r=16,  # r>0, suggested vals: {8, 16, 32, 64, 128}
+                lora_alpha=16,  # Alpha parameter for LoRA scaling, suggestion r=alpha or alpha=2*r
+                target_modules=_find_all_linear_names(model=self.base_model),
+                modules_to_save=None,
+                lora_dropout=0,  # Dropout probability for LoRA layers. Supports any, but = 0 is optimized
+                bias="none",  # Bias type for LoRA layers. Supports any, but = "none" is optimized
+                # "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
+                use_gradient_checkpointing="unsloth",  # type: ignore
+                random_state=3407,
+            )
 
     def _unsloth_config_training(self) -> SFTConfig:
         """Configures the training parameters for SFTTrainer."""
 
         if self.training_epochs != -1 and self.training_steps != -1:
-            logger.warning(
-                msg="Both training_epochs and training_steps have been specified. Doing so, steps are taken as reference"
-            )
+            logger.warning("Both training_epochs and training_steps have been specified. Doing so, steps are taken as reference")
 
         if self.training_epochs == self.training_steps == -1:
-            logger.warning(
-                msg="No training duration has been specified. Fallback to 1 training epoch"
-            )
+            logger.warning("No training duration has been specified. Fallback to 1 training epoch")
             self.training_epochs = 1
 
         bfloat16_supported: bool = is_bfloat16_supported()
@@ -276,34 +233,28 @@ class UnslothModel:
     def unsloth_start_training(self) -> None:
         """Starts the fine-tuning process."""
 
-        if not self.base_model or not self.base_tokenizer:
-            raise ValueError(
-                "Base model or tokenizer not loaded. Cannot start training."
-            )
+        if not self.base_model: self.unsloth_patch_model()
 
-        print("Starting model training...")
         trainer = SFTTrainer(
-            # `FastLanguageModel` acts like a `PreTrainedModel` at runtime,
-            # but the type checker can't see this. We ignore the error.
-            model=self.base_model,  # type: ignore
+            model=self.base_model,  # type: ignore # `FastLanguageModel` acts like a `PreTrainedModel` at runtime
             processing_class=self.base_tokenizer,
             train_dataset=self.hf_train_data,
             eval_dataset=self.hf_eval_data,
             args=self._unsloth_config_training(),
         )
         trainer.train()
-        print("Training completed.")
+        logger.info("✅ Training completed. ✅")
 
         # Save the LoRA adapters
-        print(f"Saving LoRA adapters to {self.lora_model_dir}")
         if self.base_model and self.base_tokenizer:
-            # `save_pretrained` is dynamically available on the model object.
             self.base_model.save_pretrained(save_directory=self.lora_model_dir)  # type: ignore
             self.base_tokenizer.save_pretrained(save_directory=self.lora_model_dir)
 
+        logger.info(f"✅ LoRA adapters saved successfully. ✅")
+
         # <----- CLEANUP BLOCK ---->
-        print("Cleaning up training resources to free VRAM...")
+        logger.debug("Cleaning up training resources to free VRAM...")
         del trainer
         gc.collect()
         torch.cuda.empty_cache()
-        print("Cleanup complete. VRAM should now be released.")
+        logger.debug("✅ Cleanup complete. VRAM should now be released. ✅")
