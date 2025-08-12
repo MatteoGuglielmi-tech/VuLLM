@@ -2,8 +2,8 @@ import pytest
 import os
 import shutil
 
-from dataset.restructure.proc_utils import write2file, decode_escaped_string, is_cpp, spawn_clang_format
-from dataset.restructure.tree_sitter_parser import TreeSitterParser
+from dataset.restructure.shared.proc_utils import write2file, decode_escaped_string, is_cpp, spawn_clang_format
+from dataset.restructure.shared.tree_sitter_parser import TreeSitterParser
 from dataset.restructure.interleaved_block_fixer import InterleavedBlockFixer
 from dataset.restructure.code_sanitizer import CodeSanitizer
 

@@ -12,10 +12,12 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 from transformers.generation.logits_process import LogitsProcessor
 
-from .stdout import logger
-from .typedef import ChatMsg
+from .shared.typedef import ChatMsg
 from .logits_processor import EnforceSingleTokenGeneration
 
+import logging
+from .shared.stdout import MY_LOGGER_NAME
+logger = logging.getLogger(MY_LOGGER_NAME)
 
 @dataclass
 class InferencePipeline:
