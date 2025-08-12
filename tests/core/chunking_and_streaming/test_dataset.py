@@ -3,10 +3,12 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-# Import the class to be tested
 from core.chunking_and_streaming.dataset import DatasetHandler
 from core.chunking_and_streaming.shared.utils import save_to_jsonl
 from core.chunking_and_streaming.prompt_strategies import Llama3Strategy
+
+
+pytestmark: pytest.MarkDecorator = pytest.mark.slow_api
 
 @pytest.fixture
 def dummy_tokenizer():
