@@ -1,6 +1,6 @@
 from typing import Any, TypeAlias, TypedDict
 from tree_sitter import Node
-from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
+from datasets import IterableDataset
 
 
 # <---- tree_sitter_parser.py ---->
@@ -20,8 +20,7 @@ class FinalChunk(TypedDict):
     tcount: int
 
 # <---- dataset.py ---->
-StreamingDataset: TypeAlias = DatasetDict|Dataset|IterableDatasetDict|IterableDataset
-StreamedSplit: TypeAlias = dict[str, StreamingDataset]
+StreamedSplit: TypeAlias = dict[str, IterableDataset]
 ChatMsg: TypeAlias = list[dict[str, str]]
 DatasetEntry: TypeAlias = dict[str,Any]
 JsonlData: TypeAlias = list[DatasetEntry]
