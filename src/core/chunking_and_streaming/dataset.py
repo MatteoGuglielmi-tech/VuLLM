@@ -22,12 +22,12 @@ logger = logging.getLogger(MY_LOGGER_NAME)
 
 @dataclass
 class DatasetHandler:
-    pth_raw_dataset: Path
     tokenizer: PreTrainedTokenizer
     max_chunk_tokens: int = 1024  # as per default for SFTTrainer from HF
     trimming_technique: str = "ast"
 
     # fields
+    pth_raw_dataset: Path = field(default_factory=Path, init=False)
     raw_dataset: JsonlData = field(default_factory=list, init=False)
     prompting_strategy: PromptingStrategy = field(default_factory=GenericStrategy)
     chunked_data: dict[str,IterableDataset]|None = field(default=None)
@@ -78,13 +78,16 @@ class DatasetHandler:
         config_path = project_root / "config.json"
         config = load_json_config(filepath=str(config_path))
 
-        # paths for saving chunked data
+        # paths definition
+        self.pth_raw_dataset: Path = Path(config["default_input_path"])
         self.pth_intermediate_train: Path = Path(config["pth_intermediate_train"])
         self.pth_intermediate_val: Path = Path(config["pth_intermediate_val"])
         self.pth_intermediate_test: Path = Path(config["pth_intermediate_test"])
         self.pth_final_train: Path = Path(config["pth_final_train"])
         self.pth_final_val: Path = Path(config["pth_final_val"])
         self.pth_final_test: Path = Path(config["pth_final_test"])
+        self.pth_tokenized_train = Path(config["pth_tokenized_train"])
+        self.pth_tokenized_val = Path(config["pth_tokenized_val"])
 
     def load_raw_dataset(self) -> None:
         """Loads the entire raw dataset into memory from a JSONL file.
@@ -190,7 +193,7 @@ class DatasetHandler:
         output_dir.mkdir(parents=True, exist_ok=True)
         save_to_jsonl(dataset=dataset, filepath=filepath)
 
-    def _load_all_splits_streaming(self, split_paths: dict[str, Path]) -> dict[str,IterableDataset]:
+    def _load_splits_streaming(self, split_paths: dict[str, Path]) -> dict[str,IterableDataset]:
         """Loads all dataset splits in streaming mode from a single call.
 
         Parameters
@@ -310,13 +313,13 @@ class DatasetHandler:
         # do not chunk if already done once
         if all(p.exists() for p in final_chunked_paths.values()):
             logger.info("✅ Final chunked data already exists. Loading directly from disk.")
-            self.chunked_data = self._load_all_splits_streaming(split_paths=final_chunked_paths)
+            self.chunked_data = self._load_splits_streaming(split_paths=final_chunked_paths)
             return
 
         # 2. load the intermediate project-based splits and process them.
         logger.info("Final chunked data not found. Starting the chunking process...")
         project_split_paths = { "train": self.pth_intermediate_train, "val": self.pth_intermediate_val, "test": self.pth_intermediate_test }
-        stream_data: dict[str,IterableDataset] = self._load_all_splits_streaming(split_paths=project_split_paths)
+        stream_data: dict[str,IterableDataset] = self._load_splits_streaming(split_paths=project_split_paths)
         max_tokens: int = self._get_chunking_token_budget()
 
         self.chunked_data = {
@@ -367,10 +370,18 @@ class DatasetHandler:
         )
         return tokenized
 
-    def get_processed_data(self) -> StreamedSplit:
-        """Applies tokenization to all splits of the chunked dataset.
+    def load_tokenized_dataset(self) -> StreamedSplit:
+        """Loads a pre-tokenized dataset from JSONL files in streaming mode."""
 
-        This method iterates through the 'train', 'val', and 'test' splits of
+        logger.info("Loading pre-tokenized dataset from disk...")
+        tokenized_paths = { "train": self.pth_tokenized_train, "val": self.pth_tokenized_val }
+        return self._load_splits_streaming(split_paths=tokenized_paths)
+
+
+    def tokenize_chunks_train(self) -> StreamedSplit:
+        """Applies tokenization to train and validation splits of the chunked dataset.
+
+        This method iterates through the 'train' and 'val' splits of
         the `self.chunked_data`, applying the `_tokenize_fn` to each example.
         It removes the original "text" column from the dataset after tokenization
         to save memory. Finally, it deletes the `self.chunked_data` attribute
@@ -390,17 +401,48 @@ class DatasetHandler:
         """
 
         if self.chunked_data is None:
-            raise RuntimeError("Chunked data is not available. Please run DATASET_chunk() first.")
+            raise RuntimeError("Chunked data is not available. Please run chunk() first.")
 
-        self.tokenized_data = {
-            split: self.chunked_data[split].map(
-                self._tokenize_fn,
-                batched=False,  # Process one example (one prompt string) at a time
-                remove_columns=["text"], # no more need for text, input_ids and attention_mask counts now
-            )
-            for split in ["train", "val", "test"]
-        }
+        for split in ["train", "val"]:
+            # no more need for text, input_ids and attention_mask counts now
+            tokenized_stream = self.chunked_data[split].map(self._tokenize_fn, batched=False, remove_columns=["text"])
+            save_path = self.pth_tokenized_train if split == "train" else self.pth_tokenized_val
+            self._save_iterable_dataset_to_jsonl(dataset=tokenized_stream, filepath=save_path)
 
+        logger.info("⚙️ Data successfully tokenized for all splits. ⚙️")
+
+        # clean up chunked_data to free memory
+        del self.chunked_data
+        gc.collect()
+
+        return self.load_tokenized_dataset()
+
+    def tokenize_chunks_test(self) -> StreamedSplit:
+        """Applies tokenization to the test split of the chunked dataset.
+
+        This method iterates through the 'test' split of
+        the `self.chunked_data`, applying the `_tokenize_fn` to each example.
+        It removes the original "text" column from the dataset after tokenization
+        to save memory. Finally, it deletes the `self.chunked_data` attribute
+        and triggers garbage collection to free up resources.
+
+        Returns
+        -------
+        StreamedSplit
+            A dictionary where keys are data splits ('train', 'val', 'test')
+            and values are the corresponding tokenized datasets.
+
+        Raises
+        ------
+        RuntimeError
+            If `self.chunked_data` is `None`, indicating that the preceding
+            data chunking step has not been completed.
+        """
+
+        if self.chunked_data is None:
+            raise RuntimeError("Chunked data is not available. Please run chunk() first.")
+
+        self.tokenized_data = { "test": self.chunked_data["test"].map(self._tokenize_fn, batched=False, remove_columns=["text"]) }
         logger.info("⚙️ Data successfully tokenized for all splits. ⚙️")
 
         # clean up chunked_data to free memory
@@ -419,5 +461,14 @@ class DatasetHandler:
                 logger.info(f"Successfully removed intermediate directory: {intermediate_dir}")
             except OSError as e:
                 logger.error(f"Error removing intermediate directory {intermediate_dir}: {e}")
+
+
+    def execute_base(self):
+        """Executes the full pipeline."""
+
+        self.load_raw_dataset()
+        self.project_based_split()
+        self.chunk()
+
 
 

@@ -1,5 +1,4 @@
 import torch
-from .utils import UNUSED
 from transformers.generation.logits_process import LogitsProcessor
 
 
@@ -22,7 +21,7 @@ class EnforceSingleTokenGeneration(LogitsProcessor):
             torch.Tensor: The modified logits.
         """
 
-        UNUSED(input_ids)
+        _ = input_ids
 
         # Create a mask that sets all token probabilities to negative infinity
         mask: torch.Tensor = torch.full_like(input=scores, fill_value=-float("inf"))
