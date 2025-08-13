@@ -43,11 +43,8 @@ fourbit_models = [
 ]
 
 
-# =================
-# TRAINING PIPELINE
-# =================
 @dataclass
-class UnslothModel:
+class UnslothFineTunePipeline:
     """
     A class to handle the fine-tuning of a base model from Hugging Face.
 
@@ -191,7 +188,7 @@ class UnslothModel:
                 random_state=3407,
             )
 
-    def _unsloth_config_training(self) -> SFTConfig:
+    def _unsloth_set_fine_tune(self) -> SFTConfig:
         """Configures the training parameters for SFTTrainer."""
 
         if self.training_epochs != -1 and self.training_steps != -1:
@@ -230,7 +227,7 @@ class UnslothModel:
             report_to="wandb",
         )
 
-    def unsloth_start_training(self) -> None:
+    def unsloth_fine_tune(self) -> None:
         """Starts the fine-tuning process."""
 
         if not self.base_model: self.unsloth_patch_model()
@@ -240,7 +237,7 @@ class UnslothModel:
             processing_class=self.base_tokenizer,
             train_dataset=self.hf_train_data,
             eval_dataset=self.hf_eval_data,
-            args=self._unsloth_config_training(),
+            args=self._unsloth_set_fine_tune(),
         )
         trainer.train()
         logger.info("✅ Training completed. ✅")
@@ -258,3 +255,8 @@ class UnslothModel:
         gc.collect()
         torch.cuda.empty_cache()
         logger.debug("✅ Cleanup complete. VRAM should now be released. ✅")
+
+    def execute(self):
+        self.unsloth_load_base_model()
+        self.unsloth_patch_model()
+        self.unsloth_fine_tune()
