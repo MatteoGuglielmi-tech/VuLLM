@@ -8,5 +8,8 @@
   "pth_intermediate_test": "DiverseVul/tmp/chunked_test_data.jsonl",
   "pth_final_train": "DiverseVul/processed/chunked_train_data.jsonl",
   "pth_final_val": "DiverseVul/processed/chunked_val_data.jsonl",
-  "pth_final_test": "DiverseVul/processed/chunked_test_data.jsonl"
+  "pth_final_test": "DiverseVul/processed/chunked_test_data.jsonl",
+  "pth_tokenized_train": "DiverseVul/tokenized/tokenized_train_chunks.jsonl",
+  "pth_tokenized_val": "DiverseVul/tokenized/tokenized_val_chunks.jsonl",
+  "pth_tokenized_test": "DiverseVul/tokenized/tokenized_test_chunks.jsonl"
 }
