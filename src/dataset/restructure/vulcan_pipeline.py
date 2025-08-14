@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from tree_sitter import Tree
 
-from .shared.proc_utils import ( load_config, decode_escaped_string, is_cpp,
+from .shared.proc_utils import ( load_config, is_cpp,
     get_refactored_code, pause_exec, read_file, read_lines, write2file)
 from .code_sanitizer import CodeSanitizer
 from .interleaved_block_fixer import InterleavedBlockFixer
@@ -71,11 +71,10 @@ class Vulcan:
             return data
 
         try:
-            decoded_code:str = decode_escaped_string(raw_string=raw_func_str)
             # --- premature removal of comments to avoid false C++ positives ---
             lang:str="c"
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
-            code:str = self.sanitizer.remove_comments(code=decoded_code, tsp=tsp)
+            code:str = self.sanitizer.remove_comments(code=raw_func_str, tsp=tsp)
             # filter out empty strings or comments only
             if not code.strip():
                 data["func"] = "error: non valid function (empty or comments only)"
