@@ -95,84 +95,44 @@ def setup_test_environment(test_data_dir, project_root:str) -> dict[str,str]:
 
     return config_data
 
-@pytest.fixture
-def vulcan_pipeline(monkeypatch: pytest.MonkeyPatch, setup_test_environment: dict[str,str], test_data_dir):
-    """Provides an initialized Vulcan pipeline instance for each test.
-
-    This fixture prepares the environment for a single test by:
-    1. Mocking the `LlamaCodeDescriber` to prevent actual model calls.
-    2. Changing the current working directory to the test data directory
-       so that `Vulcan` can automatically find its `config.json`.
-    3. Cleaning up by restoring the original CWD and removing any generated
-       `misc` directories after the test completes.
-
-    Parameters
-    ----------
-    monkeypatch : pytest.MonkeyPatch
-        The pytest fixture for modifying classes, methods, etc.
-    setup_test_environment : dict[str,str]
-        A fixture that ensures the test environment and dummy files are set up.
-    test_data_dir : py.path.local
-        The temporary directory where test files are located.
-
-    Yields
-    ------
-    Vulcan
-        An initialized instance of the Vulcan pipeline.
-    """
-
-    monkeypatch.setattr("dataset.restructure.code_augmentor.description_generator", MockLlamaCodeDescriber)
-
-    original_cwd = os.getcwd()
-    os.chdir(test_data_dir)
-
-    try: yield Vulcan()
-    finally: os.chdir(original_cwd)
-
-    misc_dir = os.path.join(os.getcwd(), "misc")
-    if os.path.exists(misc_dir):
-        shutil.rmtree(misc_dir)
-
-
 
 class MockLlamaCodeDescriber:
-    """A lightweight mock that simulates the real LlamaCodeDescriber.
-
-    This class is used during testing to replace the actual LlamaCodeDescriber,
-    avoiding the need for a real language model and ensuring tests are fast
-    and deterministic. It provides the same interface but returns a
-    hardcoded, predictable output.
     """
-
+    A mock that accurately mimics the LlamaCodeDescriber interface.
+    """
     def __init__(self, model_name: str = "mock_model"):
-        """Initializes the mock code describer.
-
-        Parameters
-        ----------
-        model_name : str, optional
-            A placeholder for the model name, by default "mock_model".
-            This parameter is ignored in the mock implementation.
-        """
-
         print("Initialized MOCK LlamaCodeDescriber.")
         pass
 
-    def generate_description(self, c_code: str) -> str:
-        """Generates a mock description for a given C code snippet.
-
-        This method simulates the behavior of the real `generate_description`
-        by returning a static, predefined string, regardless of the input.
-
-        Parameters
-        ----------
-        c_code : str
-            The C code for which to generate a description. This parameter
-            is ignored in the mock implementation.
-
-        Returns
-        -------
-        str
-            A hardcoded mock function description.
+    def generate_batch_descriptions(self, c_code_batch: list[str]) -> list[str]:
         """
+        Returns a list of mock descriptions, one for each input snippet.
+        """
+        return ["This is a mock function description."] * len(c_code_batch)
 
-        return "This is a mock function description."
+    def generate_batch_cwe_descriptions(self, cwe_ids_batch: list[str]) -> list[str]:
+        """
+        Returns a list of mock CWE descriptions, one for each input CWE.
+        """
+        return ["This is a mock CWE description."] * len(cwe_ids_batch)
+
+
+@pytest.fixture
+def vulcan_pipeline(monkeypatch: pytest.MonkeyPatch, setup_test_environment: dict[str,str], test_data_dir):
+    """
+    Provides an initialized Vulcan pipeline instance for each test.
+    """
+
+    monkeypatch.setattr("dataset.restructure.vulcan_pipeline.LlamaCodeDescriber", MockLlamaCodeDescriber)
+    original_cwd = os.getcwd()
+    os.chdir(test_data_dir)
+    vulcan_instance = None
+    try:
+        vulcan_instance = Vulcan()
+        yield vulcan_instance
+    finally:
+        os.chdir(original_cwd)
+        misc_dir = test_data_dir.join("misc")
+        if os.path.exists(misc_dir):
+            shutil.rmtree(misc_dir)
+

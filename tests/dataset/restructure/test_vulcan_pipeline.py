@@ -2,7 +2,7 @@ import pytest
 import json
 import os
 
-from dataset.restructure.proc_utils import write2file, spawn_clang_format
+from dataset.restructure.shared.proc_utils import write2file, spawn_clang_format
 
 
 # ============================ UTILITIES ==============================
@@ -76,11 +76,11 @@ int get_status(void) {
 # INTERLEAVED DO-WHILE STATEMENT TESTS
 # =============================================================================================================
 # ---
-CORRECT_DOWHILE_LOOP_INPUT = r"""
+CORRECT_DOWHILE_LOOP_INPUT = """
 void process_data(char* buffer) {
   int i = 0;
   do {
-    printf("Processing index %d\\\\n", i);
+    printf("Processing index %d\\n", i);
   #if defined(VERBOSE_MODE)
     log_event(i);
   #endif
@@ -88,7 +88,7 @@ void process_data(char* buffer) {
     } while (i < 10);
 }
 """
-CORRECT_DOWHILE_LOOP_OUTPUT = r"""
+CORRECT_DOWHILE_LOOP_OUTPUT = """
 void process_data(char* buffer) {
   int i = 0;
   do {
@@ -103,22 +103,22 @@ void process_data(char* buffer) {
 # ---
 
 # ---
-BROKEN_NESTED_DO_WHILE_INPUT = r"""
+BROKEN_NESTED_DO_WHILE_INPUT = """
 void process_data(char *buffer) {
   char *ptr = buffer;
   do {
     *ptr = get_next_char();
 #if defined(PLATFORM_X)
-  } while(*ptr != '\\\\0' && fast_validate(ptr));
+  } while(*ptr != '\\0' && fast_validate(ptr));
 #elif defined(PLATFORM_Y)
-  } while(*ptr != '\\\\0' && platform_y_validate(ptr));
+  } while(*ptr != '\\0' && platform_y_validate(ptr));
 #else
-  } while(*ptr != '\\\\0');
+  } while(*ptr != '\\0');
 #endif
   printf("Finished processing data.");
 }
 """
-BROKEN_NESTED_DO_WHILE_OUTPUT = r"""
+BROKEN_NESTED_DO_WHILE_OUTPUT = """
 void process_data(char *buffer) {
   char *ptr = buffer;
   #if defined(PLATFORM_X)
@@ -134,26 +134,26 @@ void process_data(char *buffer) {
 # ---
 
 # ---
-BROKEN_DOUBLE_NESTED_DO_WHILE_INPUT = r"""
+BROKEN_DOUBLE_NESTED_DO_WHILE_INPUT = """
 void process_data(char *buffer) {
   char *ptr = buffer;
   do {
     *ptr = get_next_char();
 #if defined(PLATFORM_X)
   #if defined(FAST_VALIDATION)
-  } while(*ptr != '\\\\0' && fast_validate(ptr));
+  } while(*ptr != '\\0' && fast_validate(ptr));
   #else
-  } while(*ptr != '\\\\0' && full_validate(ptr));
+  } while(*ptr != '\\0' && full_validate(ptr));
   #endif
 #elif defined(PLATFORM_Y)
-  } while(*ptr != '\\\\0' && platform_y_validate(ptr));
+  } while(*ptr != '\\0' && platform_y_validate(ptr));
 #else
-  } while(*ptr != '\\\\0');
+  } while(*ptr != '\\0');
 #endif
   printf("Finished processing data.");
 }
 """
-BROKEN_DOUBLE_NESTED_DO_WHILE_OUTPUT = r"""
+BROKEN_DOUBLE_NESTED_DO_WHILE_OUTPUT = """
 void process_data(char *buffer) {
 char *ptr = buffer;
 #if defined(PLATFORM_X)
@@ -202,18 +202,18 @@ interleaved_dowhile_test_cases = [
 # ==============================================================================================================
 
 # ---
-BROKEN_INTERLEAVED_FOR_CONTENT_INPUT = r"""
+BROKEN_INTERLEAVED_FOR_CONTENT_INPUT = """
 void print_values(int max) {
   for(int i = 0; i < max; i++) {
 #if defined(debug)
-    printf("value: %d\\\\n", i);
+    printf("value: %d\\n", i);
   }
 #else
-    printf("%d\\\\n", i);
+    printf("%d\\n", i);
   }
 #endif
 """
-BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT = r"""
+BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT = """
 void print_values(int max) {
 #if defined(debug)
   for(int i = 0; i < max; i++) {
@@ -270,216 +270,244 @@ NO_INTERLEAVED_STATEMENTS_OUTPUT = NO_INTERLEAVED_STATEMENTS_INPUT
 
 # ---
 BROKEN_INTERLEAVED_IF_ELIF_ELSE_ENDIF_INPUT = """
-#if defined(CONFIG_A)
-if(x > 100 && check_status(y)) {
-#elif defined(CONFIG_B)
-  #if defined(SUB_CONFIG)
-if(z == 0) {
-  #else
-if(z != 0) {
-  #endif
-#else
-if(x < 0) {
-#endif
-  int result = process_data(x, y, z);
-  log_result(result);
+int interleaved_if(void){
+    #if defined(CONFIG_A)
+    if(x > 100 && check_status(y)) {
+    #elif defined(CONFIG_B)
+      #if defined(SUB_CONFIG)
+    if(z == 0) {
+      #else
+    if(z != 0) {
+      #endif
+    #else
+    if(x < 0) {
+    #endif
+      int result = process_data(x, y, z);
+      log_result(result);
+    }
 }
 """
 BROKEN_INTERLEAVED_IF_ELIF_ELSE_ENDIF_OUTPUT = """
-#if defined(CONFIG_A)
-if(x > 100 && check_status(y)) {
-  int result = process_data(x, y, z);
-  log_result(result);
+int interleaved_if(void){
+    #if defined(CONFIG_A)
+    if(x > 100 && check_status(y)) {
+      int result = process_data(x, y, z);
+      log_result(result);
+    }
+    #elif defined(CONFIG_B)
+      #if defined(SUB_CONFIG)
+    if(z == 0) {
+      int result = process_data(x, y, z);
+      log_result(result);
+    }
+      #else
+    if(z != 0) {
+      int result = process_data(x, y, z);
+      log_result(result);
+    }
+      #endif
+    #else
+    if(x < 0) {
+      int result = process_data(x, y, z);
+      log_result(result);
+    }
+    #endif
 }
-#elif defined(CONFIG_B)
-  #if defined(SUB_CONFIG)
-if(z == 0) {
-  int result = process_data(x, y, z);
-  log_result(result);
-}
-  #else
-if(z != 0) {
-  int result = process_data(x, y, z);
-  log_result(result);
-}
-  #endif
-#else
-if(x < 0) {
-  int result = process_data(x, y, z);
-  log_result(result);
-}
-#endif
 """
 # ---
 
 # ---
 BROKEN_NESTED_INTERLEAVED_SWITCH_INPUT = """
-#if defined(use_complex_id)
-switch(get_id(user, true)) {
-#else
-  #if defined(simple_id)
-switch(user->id) {
-  #else
-switch(0) {
-  #endif
-#endif
-  case 0 : handle_guest(); break;
-  case 10 :
-  case 20 : handle_admin(); break;
-  default : handle_error(); break;
+int interleaved_switch(void){
+    #if defined(use_complex_id)
+    switch(get_id(user, true)) {
+    #else
+      #if defined(simple_id)
+    switch(user->id) {
+      #else
+    switch(0) {
+      #endif
+    #endif
+      case 0 : handle_guest(); break;
+      case 10 :
+      case 20 : handle_admin(); break;
+      default : handle_error(); break;
+    }
 }
 """
 BROKEN_NESTED_INTERLEAVED_SWITCH_OUTPUT = """
-#if defined(use_complex_id)
-switch(get_id(user, true)) {
-  case 0 : handle_guest(); break;
-  case 10 :
-  case 20 : handle_admin(); break;
-  default : handle_error(); break;
+int interleaved_switch(void){
+    #if defined(use_complex_id)
+    switch(get_id(user, true)) {
+      case 0 : handle_guest(); break;
+      case 10 :
+      case 20 : handle_admin(); break;
+      default : handle_error(); break;
+    }
+    #else
+      #if defined(simple_id)
+    switch(user->id) {
+      case 0 : handle_guest(); break;
+      case 10 :
+      case 20 : handle_admin(); break;
+      default : handle_error(); break;
+    }
+      #else
+    switch(0) {
+      case 0 : handle_guest(); break;
+      case 10 :
+      case 20 : handle_admin(); break;
+      default : handle_error(); break;
+    }
+      #endif
+    #endif
 }
-#else
-  #if defined(simple_id)
-switch(user->id) {
-  case 0 : handle_guest(); break;
-  case 10 :
-  case 20 : handle_admin(); break;
-  default : handle_error(); break;
-}
-  #else
-switch(0) {
-  case 0 : handle_guest(); break;
-  case 10 :
-  case 20 : handle_admin(); break;
-  default : handle_error(); break;
-}
-  #endif
-#endif
 """
 # ---
 
 # ---
 BROKEN_SIMPLE_INTERLEAVED_SWITCH_INPUT = """
-#if defined(use_integer_codes)
-switch(get_int_code()) {
-#else
-switch(get_char_code()) {
-#endif
-  case 1 :
-    //...
-    break;
-  default :
-    //...
-    break;
+int interleaved_switch(void){
+  #if defined(use_integer_codes)
+  switch(get_int_code()) {
+  #else
+  switch(get_char_code()) {
+  #endif
+    case 1 :
+      //...
+      break;
+    default :
+      //...
+      break;
+  }
 }
 """
 BROKEN_SIMPLE_INTERLEAVED_SWITCH_OUTPUT = """
-#if defined(use_integer_codes)
-switch(get_int_code()) {
-  case 1 :
-    break;
-  default :
-    break;
+int interleaved_switch(void){
+  #if defined(use_integer_codes)
+  switch(get_int_code()) {
+    case 1 :
+      break;
+    default :
+      break;
+  }
+  #else
+  switch(get_char_code()) {
+    case 1 :
+      break;
+    default :
+      break;
+  }
+  #endif
 }
-#else
-switch(get_char_code()) {
-  case 1 :
-    break;
-  default :
-    break;
-}
-#endif
 """
 # ---
 BROKEN_INTERLEAVED_SIMPLE_WHILE_LOOP_INPUT = """
-#ifdef fast_mode
-while(fast_check()) {
-#else
-while(slow_check()) {
-#endif
-  do_work();
+int interleaved_while(void){
+  #ifdef fast_mode
+  while(fast_check()) {
+  #else
+  while(slow_check()) {
+  #endif
+    do_work();
+  }
 }
 """
 BROKEN_INTERLEAVED_SIMPLE_WHILE_LOOP_OUTPUT = """
-#ifdef fast_mode
-while(fast_check()) { do_work(); }
-#else
-while(slow_check()) { do_work(); }
-#endif
+int interleaved_while(void){
+  #ifdef fast_mode
+  while(fast_check()) { do_work(); }
+  #else
+  while(slow_check()) { do_work(); }
+  #endif
+}
 """
 # ---
 
 # ---
 BROKEN_INTERLEAVED_WHILE_LOOP_INPUT = """
-#if mode == 1
-while((c = getchar()) != eof) {
-#elif mode == 2
-while(read_buffer(buf) > 0) {
-#else
-while(true) {
-#endif
-  if(is_special(c)) { process_special(c); }
-  counter++;
+int interleaved_while(void){
+  #if mode == 1
+  while((c = getchar()) != eof) {
+  #elif mode == 2
+  while(read_buffer(buf) > 0) {
+  #else
+  while(true) {
+  #endif
+    if(is_special(c)) { process_special(c); }
+    counter++;
+  }
 }
 """
 BROKEN_INTERLEAVED_WHILE_LOOP_OUTPUT = """
-#if mode == 1
-while((c = getchar()) != eof) {
-  if(is_special(c)) { process_special(c); }
-  counter++;
+int interleaved_while(void){
+  #if mode == 1
+  while((c = getchar()) != eof) {
+    if(is_special(c)) { process_special(c); }
+    counter++;
+  }
+  #elif mode == 2
+  while(read_buffer(buf) > 0) {
+    if(is_special(c)) { process_special(c); }
+    counter++;
+  }
+  #else
+  while(true) {
+    if(is_special(c)) { process_special(c); }
+    counter++;
+  }
+  #endif
 }
-#elif mode == 2
-while(read_buffer(buf) > 0) {
-  if(is_special(c)) { process_special(c); }
-  counter++;
-}
-#else
-while(true) {
-  if(is_special(c)) { process_special(c); }
-  counter++;
-}
-#endif
 """
 # ---
 
 # ---
 BROKEN_INTERLEAVED_SIMPLE_FOR_LOOP_INPUT = """
-#ifdef fast_mode
-for(;fast_check();) {
-#else
-for(;slow_check();) {
-#endif
-  do_work();
+int interleaved_for(void){
+  #ifdef fast_mode
+  for(;fast_check();) {
+  #else
+  for(;slow_check();) {
+  #endif
+    do_work();
+  }
 }
 """
 BROKEN_INTERLEAVED_SIMPLE_FOR_LOOP_OUTPUT = """
-#ifdef fast_mode
-for(;fast_check();) { do_work(); }
-#else
-for(;slow_check();) { do_work(); }
-#endif
+int interleaved_for(void){
+  #ifdef fast_mode
+  for(;fast_check();) { do_work(); }
+  #else
+  for(;slow_check();) { do_work(); }
+  #endif
+}
 """
 # ---
 
 # ---
 BROKEN_INTERLEAVED_FOR_LOOP_INPUT = """
-#if defined(iterate_forward)
-for(int i = 0; i < max_items; i++) {
-#elif defined(iterate_backward)
-for(int i = max_items - 1; i >= 0; i--) {
-#else
-for(item_t *p = list_head; p != null; p = p->next) {
-#endif
-  process_item(p);
+int interleaved_for(void){
+  #if defined(iterate_forward)
+  for(int i = 0; i < max_items; i++) {
+  #elif defined(iterate_backward)
+  for(int i = max_items - 1; i >= 0; i--) {
+  #else
+  for(item_t *p = list_head; p != null; p = p->next) {
+  #endif
+    process_item(p);
+  }
 }
 """
 BROKEN_INTERLEAVED_FOR_LOOP_OUTPUT = """
-#if defined(iterate_forward)
-for(int i = 0; i < max_items; i++) { process_item(p); }
-#elif defined(iterate_backward)
-for(int i = max_items - 1; i >= 0; i--) { process_item(p); }
-#else
-for(item_t *p = list_head; p != null; p = p->next) { process_item(p); }
-#endif
+int interleaved_for(void){
+ #if defined(iterate_forward)
+ for(int i = 0; i < max_items; i++) { process_item(p); }
+ #elif defined(iterate_backward)
+ for(int i = max_items - 1; i >= 0; i--) { process_item(p); }
+ #else
+ for(item_t *p = list_head; p != null; p = p->next) { process_item(p); }
+ #endif
+}
 """
 # ---
 
@@ -498,54 +526,43 @@ full_pipeline_test_cases = [
 
 # --- Pytest Parametrization ---
 test_cases = interleaved_content_test_cases + interleaved_dowhile_test_cases + full_pipeline_test_cases + [
-        pytest.param(SIMPLE_CASE_INPUT, SIMPLE_CASE_EXPECTED, "c", id="simple_case"),
-        pytest.param(REAL_LIKE_INPUT, REAL_LIKE_EXPECTED, "c", id="real_like_case"),
-        pytest.param(UNBALANCED_DIRECTIVES_INPUT, UNBALANCED_DIRECTIVES_EXPECTED, "c", id="unbalanced_directives"),
+    pytest.param(SIMPLE_CASE_INPUT, SIMPLE_CASE_EXPECTED, "c", id="simple_case"),
+    pytest.param(REAL_LIKE_INPUT, REAL_LIKE_EXPECTED, "c", id="real_like_case"),
+    pytest.param(UNBALANCED_DIRECTIVES_INPUT, UNBALANCED_DIRECTIVES_EXPECTED, "c", id="unbalanced_directives"),
 ]
 
 
 @pytest.mark.parametrize("input_code, expected_code, lang", test_cases)
 def test_vulcan_full_pipeline(vulcan_pipeline, input_code: str, expected_code: str, lang: str):
     """An integration test that runs a code snippet through the entire Vulcan pipeline."""
-
     # --- 1. Setup ---
     input_path = vulcan_pipeline.config["default_input_path"]
     output_path = vulcan_pipeline.config["default_output_path"]
 
-    # Create the input JSONL file for this specific test case
-    input_entry = {"func": input_code, "commit_id": "0123456789abcdef"}
+    input_entry = {"func": input_code, "cwe": "CWE-125"} # Added CWE for full enrichment
     with open(input_path, "w") as f:
         f.write(json.dumps(input_entry) + "\n")
 
     # --- 2. Execute ---
-    # Run the full pipeline
     vulcan_pipeline.run()
 
     # --- 3. Assert ---
-    # Check that the output file was created
     assert os.path.exists(output_path), "Output file was not created"
 
-    # Read the result from the output file
     with open(output_path, "r") as f:
         result_line = f.readline()
-
     assert result_line, "Output file is empty"
-
     result_data = json.loads(result_line)
 
-    # Clean up whitespace for a more robust comparison
-    processed_func = " ".join(result_data.get("func", "").split())
-    expected_func = " ".join(expected_code.split())
+    processed_func = result_data.get("func", "").strip()
+    expected_code = _get_refactored_code(expected_code, lang, f"./tmp_expected.{lang}")
+    assert processed_func == expected_code
 
-    # Assert that the processed code matches the expected "golden" output
-    result_code = _get_refactored_code(processed_func, lang, f"./tmp_candidate.{lang}")
-    expected_code = _get_refactored_code(expected_func, lang, f"./tmp_expected.{lang}")
-    assert result_code == expected_code
-
-    # Assert that the enrichment step worked
-    assert "vulnerability_description" in result_data
+    # Assert that the enrichment from the MOCK object worked
+    assert result_data.get("function_description") == "This is a mock function description."
+    assert result_data.get("vulnerability_description") == "This is a mock CWE description."
     assert "cyclomatic_complexity" in result_data
-    assert result_data.get("language") == "c"
+    assert result_data.get("language") == lang
 
 
 # --- Pytest Parametrization ---
@@ -604,16 +621,14 @@ def test_pipeline_rejects_empty_string_and_only_comments(vulcan_pipeline, input_
 
 def test_vulcan_full_pipeline_with_real_dataset(vulcan_pipeline):
     # --- 1. Setup ---
-    real_dataset_path = "/home/matteo/dev/VuLLM/DiverseVul/small_dataset.jsonl"
+    real_dataset_path = "/home/matteo/dev/VuLLM/DiverseVul/raw/small_dataset.jsonl"
     # Get the input and output paths from the pipeline's configuration
-    pipeline_input_path = vulcan_pipeline.config["default_input_path"]
+    # pipeline_input_path = vulcan_pipeline.config["default_input_path"]
     pipeline_output_path = vulcan_pipeline.config["default_output_path"]
-
     assert os.path.exists(real_dataset_path), "The real dataset file was not found."
 
     # --- 2. Execute ---
     vulcan_pipeline.run()
-
     # --- 3. Assert ---
     assert os.path.exists(pipeline_output_path), "Output file was not created"
 
@@ -624,12 +639,12 @@ def test_vulcan_full_pipeline_with_real_dataset(vulcan_pipeline):
     assert len(original_lines) == len(processed_lines), "Output file has a different number of lines than the input."
 
     for i, (original_line, processed_line) in enumerate(zip(original_lines, processed_lines)):
-        original_data = json.loads(original_line)
+        # original_data = json.loads(original_line)
         processed_data = json.loads(processed_line)
-
-        # Assert that the enrichment step worked for each entry
         if not processed_data.get("func", "").startswith(("error:", "skipped:")):
+            assert "function_description" in processed_data, f"Missing 'function_description' on line {i}"
             assert "vulnerability_description" in processed_data, f"Missing 'vulnerability_description' on line {i}"
+            assert "language" in processed_data, f"Missing 'language' on line {i}"
             assert "cyclomatic_complexity" in processed_data, f"Missing 'cyclomatic_complexity' on line {i}"
             assert "language" in processed_data, f"Missing 'language' on line {i}"
 
