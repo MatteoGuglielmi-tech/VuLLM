@@ -1,8 +1,13 @@
 # Dataset folder
 DiverseVul/
+misc/
+trainer/
+unsloth_compiled_cache/
+checkpoints/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
+.pytest_cache/
 src/core/Llama-3.1-8B-Instruct-ft/
 src/core/__pycache__/
 src/core/assets/
