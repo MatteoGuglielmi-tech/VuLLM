@@ -8,7 +8,7 @@ import google.generativeai as genai
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.types.generation_types import GenerationConfig
 
-from dataset.restructure.shared.log import logger
+from src.dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
 

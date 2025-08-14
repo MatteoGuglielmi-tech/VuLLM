@@ -4,7 +4,7 @@ import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline # type: ignore
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from dataset.restructure.shared.log import logger
+from src.dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
 
@@ -15,13 +15,13 @@ class LlamaCodeDescriber(DescriptionGenerator):
     """
 
     def __init__(self, model_name: str = "unsloth/llama-3.1-8b-instruct-bnb-4bit"):
-        """
-        Initializes the model, tokenizer, and text-generation pipeline.
+        """Initializes the model, tokenizer, and text-generation pipeline.
 
-        Params:
-            model_name: str
-                The name of the model to load from Hugging Face.
-                Defaults to a 4-bit quantized Llama 3.1 8B model for memory efficiency.
+        Parameters
+        ----------
+        model_name: str
+            The name of the model to load from Hugging Face.
+            Defaults to a 4-bit quantized Llama 3.1 8B model for memory efficiency.
         """
 
         print(f"Loading model: {model_name}...")
@@ -113,53 +113,3 @@ class LlamaCodeDescriber(DescriptionGenerator):
             final_descriptions[index] = next(response_iter)
 
         return final_descriptions
-
-
-# --- Example Usage ---
-if __name__ == "__main__":
-
-    sample_c_function = """
-    int _gnutls_ciphertext2compressed(gnutls_session_t session, opaque * compress_data, int compress_size, gnutls_datum_t ciphertext, uint8 type) {
-        uint8 MAC[MAX_HASH_SIZE];
-        uint16 c_length;
-        int length;
-        mac_hd_t td;
-        int ret;
-        if (memcmp(MAC, &ciphertext.data[length], hash_size) != 0) {
-            gnutls_assert();
-            return GNUTLS_E_DECRYPTION_FAILED;
-        }
-        if (compress_size < length) {
-            gnutls_assert();
-            return GNUTLS_E_INTERNAL_ERROR;
-        }
-        memcpy(compress_data, ciphertext.data, length);
-        return length;
-    }
-    """
-
-    describer = LlamaCodeDescriber()
-
-    cwe_batch_to_test = [
-        "CWE-79",   # Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
-        "CWE-89",   # Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')
-        "CWE-125",  # Out-of-bounds Read
-        "CWE-416",  # Use After Free
-        "CWE-22",   # Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')
-        "CWE-306",  # Missing Authentication for Critical Function
-        "CWE-787",  # Out-of-bounds Write
-        "CWE-502",  # Deserialization of Untrusted Data
-        "CWE-20",   # Improper Input Validation
-        "CWE-918",  # Server-Side Request Forgery (SSRF)
-    ]
-
-    # Generate the description
-    print("\n--- Generating CWE Description ---")
-    descriptions = describer.generate_batch_cwe_descriptions(cwe_ids_batch=cwe_batch_to_test)
-
-    # Print the result
-    print("\n--- Generated CWE Description ---")
-    for d, c in zip(descriptions, cwe_batch_to_test):
-        print(f"\n--- Generated Description for {c} ---")
-        print(f"{d}\n")
-
