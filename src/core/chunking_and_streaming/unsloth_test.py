@@ -180,7 +180,7 @@ class UnslothTestPipeline:
         report_dict["per_class_accuracy"] = { label: acc for label, acc in zip(class_labels, per_class_accuracy) }
 
         logger.info("Calculating and saving metrics...")
-        metrics_path: str = os.path.join(output_dir, "classification_metrics.json")
+        metrics_path: Path = Path(output_dir) / "classification_metrics.json"
         with open(file=metrics_path, mode="w") as f:
             json.dump(obj=report_dict, fp=f, indent=4)
         logger.info(f"Classification metrics saved to {metrics_path}")

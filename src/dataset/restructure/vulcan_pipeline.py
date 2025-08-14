@@ -5,8 +5,7 @@ from tqdm import tqdm
 from tree_sitter import Tree
 
 from .shared.proc_utils import ( load_config, decode_escaped_string, is_cpp,
-    get_refactored_code, pause_exec, read_file, read_lines, write2file,
-)
+    get_refactored_code, pause_exec, read_file, read_lines, write2file)
 from .code_sanitizer import CodeSanitizer
 from .interleaved_block_fixer import InterleavedBlockFixer
 from .code_foundry import CodeFoundry
