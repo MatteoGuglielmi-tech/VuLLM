@@ -120,57 +120,67 @@ class InterleavedBlockFixer:
 
         return opener_pattern.sub(repl=replacer, string=preprocessor_block)
  
-
     def _fix_interleaved_do_while(self, c_code: str) -> str:
-        """Corrects a `do-while` loop that is improperly split by a preprocessor block.
-
-        This function identifies a specific anti-pattern in C code where a
-        `do-while` loop's `do { ... }` statement is separated from its
-        `} while(...);` clause by a preprocessor block (e.g., `#if...#endif`).
-        It refactors the code by duplicating the `do { ... }` portion inside
-        each branch of the preprocessor block, creating a complete and valid
-        `do-while` loop within each conditional path. If the pattern isn't
-        found, the original code is returned unmodified.
-
-        Parameters
-        ----------
-        c_code : str
-            A string containing the C source code to be analyzed and
-            potentially fixed.
-
-        Returns
-        -------
-        str
-            The refactored C code as a single string, or the original string
-            if the specific interleaved pattern was not detected.
         """
+        Corrects a `do-while` loop that is improperly split by a potentially
+        nested preprocessor block.
+        """
+        # Find the 'do { body' part that is immediately followed by a preprocessor directive.
+        # Group 1 captures the entire 'do { body' prefix.
+        match = re.search(r"(do\s*\{(?:[^{}]|\{[^{}]*\})*?)\s*(#if|#ifdef)", c_code, re.DOTALL)
+        if not match:
+            return c_code
 
-        pattern = re.compile(
-            # group 1: 'do {' + body -> (do\s*\{((?:(?!\s*\}\s*while).|\n)*?))
-            # group 2: body only -> ((?:(?!\s*\}\s*while).|\n)*?)
-            # group 3: the preprocessor block -> ((?:#if|#ifdef)(?:.|\n)*?#endif)
-            pattern=r"(do\s*\{((?:(?!\s*\}\s*while).|\n)*?))\s*"
-                    r"((?:#if|#ifdef)(?:.|\n)*?#endif)",
-            flags=re.DOTALL
-        )
+        do_prefix = match.group(1)
+        # The character index where the preprocessor block starts.
+        block_start_index = match.start(2)
 
-        match: re.Match[str]|None = pattern.search(string=c_code)
-        if not match: return c_code
+        # --- Use a counter to find the matching #endif for the nested block ---
+        if_level = 0
+        block_end_index = -1
+        # Create an iterator over all #if, #ifdef, #ifndef, and #endif directives
+        directive_finder = re.finditer(r"#\s*(if|ifdef|ifndef|endif)\b", c_code[block_start_index:])
 
-        do_block_prefix, preprocessor_block = match.group(1), match.group(3)
+        for directive_match in directive_finder:
+            directive = directive_match.group(1)
+            if directive in ("if", "ifdef", "ifndef"):
+                if_level += 1
+            elif directive == "endif":
+                if_level -= 1
 
-        # safeguard
+            # When the level returns to 0, we've found the matching #endif
+            if if_level == 0:
+                block_end_index = block_start_index + directive_match.end()
+                break
+                
+        if block_end_index == -1:
+            # No matching #endif was found; this is not the pattern we're fixing.
+            return c_code
+
+        # Isolate the full preprocessor block
+        preprocessor_block = c_code[block_start_index:block_end_index]
+        
+        # If the block doesn't contain the 'while' clause, it's not our pattern.
         if "} while" not in preprocessor_block:
             return c_code
 
-        corrected_preprocessor = re.sub(
-            # Capture the entire 'while' clause, including parentheses.
-            pattern=r"\}\s*(while\s*\(.*\);?)",
-            repl=lambda m: f"{do_block_prefix}}} {m.group(1)}",
-            string=preprocessor_block
+        # --- Perform the Rewrite ---
+        # Define a replacer function that injects the 'do { body }' before the 'while'
+        def replacer(m: re.Match[str]) -> str:
+            # m.group(1) is the 'while(...);' part.
+            # We add the 'do' prefix and a closing brace to form a complete loop.
+            return f"{do_prefix.strip()} }} {m.group(1)}"
+
+        # Apply the replacement to all '} while' clauses within the block
+        corrected_pp_block = re.sub(
+            r"\}\s*(while\s*\(.*\);?)",
+            replacer,
+            preprocessor_block
         )
 
-        return c_code.replace(match.group(0), corrected_preprocessor)
+        # Reconstruct the original code with the fix
+        original_full_block = c_code[match.start(1):block_end_index]
+        return c_code.replace(original_full_block, corrected_pp_block)
 
     def full_structural_refactor(self, c_code: str) -> str:
         """Applies all structural fixes to C code using a state machine.
@@ -209,7 +219,9 @@ class InterleavedBlockFixer:
         if_level, i = 0, 0 #int
         statement_opener: str|None = None
 
-        lines: list[str] = c_code.split(sep="\n")
+
+        # lines: list[str] = c_code.split(sep="\n")
+        lines: list[str] = self._fix_interleaved_do_while(c_code=c_code).split(sep="\n")
 
         while i < len(lines):
             line: str = lines[i]
@@ -269,8 +281,6 @@ class InterleavedBlockFixer:
 
                     # --- PATH B: No opener was captured, check for a shared body ---
                     else:
-                        buffered_code_str = self._fix_interleaved_do_while(buffered_code_str)
-
                         # --- lookahead logic ---
                         lookahead_index: int = i+1 #, brace_level = i + 1, 0
                         shared_body_lines, found_structure = [], False
