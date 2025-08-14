@@ -219,8 +219,6 @@ class InterleavedBlockFixer:
         if_level, i = 0, 0 #int
         statement_opener: str|None = None
 
-
-        # lines: list[str] = c_code.split(sep="\n")
         lines: list[str] = self._fix_interleaved_do_while(c_code=c_code).split(sep="\n")
 
         while i < len(lines):
