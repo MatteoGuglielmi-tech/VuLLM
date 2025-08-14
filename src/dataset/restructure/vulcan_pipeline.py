@@ -160,12 +160,10 @@ class Vulcan:
                 data:dict[str,str] = json.loads(line)
                 processed_data:dict[str,str] = self._process_snippet(data=data)
                 processed_entries.append(processed_data)
-                # outfile.write(json.dumps(processed_data) + "\n")
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse line {i}. Skipping.")
                 error_entry:dict[str,str] = { "original_line": str(i), "func": "error: failed to parse line" }
                 processed_entries.append(error_entry)
-                # outfile.write(json.dumps(error_entry) + "\n")
 
         # -- run augmentation on accumulated entries at once --
         logger.debug("Start enrichment")
