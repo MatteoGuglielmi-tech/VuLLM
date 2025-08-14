@@ -225,15 +225,16 @@ class CodeSanitizer:
         return type by adding the default 'int'.
         """
 
+        is_broken_pattern: bool = False
+
         tree: Tree = tsp.parse(code=code)
         root_node:Node = tree.root_node
 
         if root_node.child_count > 0 and root_node.children[0].type == "function_definition":
             return code
 
-        # A function with a missing return type is often parsed as two top-level
-        # nodes: the header (as an ERROR or expression_statement) and the body.
         if root_node.child_count >= 2:
+            # parsed as two top-level
             first_child = root_node.children[0]
             second_child = root_node.children[1]
 
@@ -241,12 +242,14 @@ class CodeSanitizer:
             # 1. (ERROR) followed by (compound_statement)
             # 2. (expression_statement) followed by (compound_statement)
             is_broken_pattern = (
-                first_child.type in ["ERROR", "expression_statement"] and
-                second_child.type == "compound_statement"
+                (first_child.type in ["ERROR", "expression_statement"] and second_child.type == "compound_statement")
             )
+        # case in which no type specifier and the function is parsed as macro_type_specifier
+        if root_node and root_node.children[0].type == "declaration" and root_node.children[0].named_children[0].type == "macro_type_specifier":
+            is_broken_pattern = True
 
-            if is_broken_pattern:
-                return "int " + code
+        if is_broken_pattern:
+            return "int " + code
 
         return code
 
