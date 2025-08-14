@@ -6,10 +6,12 @@ from core.chunking_and_streaming.unsloth_test import UnslothTestPipeline
 from core.chunking_and_streaming.dataset import DatasetHandler
 from transformers import AutoTokenizer
 from .run_fine_tune import BASE_MODEL
+from .shared.stdout import setup_logger
 
 
 if __name__ == "__main__":
     args: Namespace = get_parser().parse_args()
+    setup_logger()
 
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=BASE_MODEL)
     tokenizer.pad_token_id = tokenizer.eos_token_id

@@ -1,4 +1,5 @@
 from argparse import Namespace
+from .shared.stdout import setup_logger
 
 from core.chunking_and_streaming.shared.argparser import get_parser
 from core.chunking_and_streaming.unsloth_fine_tuner import UnslothFineTunePipeline
@@ -12,6 +13,7 @@ BASE_MODEL = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 
 if __name__ == "__main__":
     args: Namespace = get_parser().parse_args()
+    setup_logger()
 
     print("--- 🚀 Starting Data Preparation Process ---")
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=BASE_MODEL)
