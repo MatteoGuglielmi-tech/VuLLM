@@ -1,6 +1,6 @@
 import pytest
 
-from dataset.restructure.proc_utils import extract_function_signature
+from dataset.restructure.shared.proc_utils import extract_function_signature
 
 test_samples_func_signature = [
     (
