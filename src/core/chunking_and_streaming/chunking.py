@@ -646,6 +646,7 @@ def generate_code_chunks(
     current_function_signature: str = ""
     func_body_text: str = code
     body_node: TSNode = None
+    raw_chunks: list[IntermediateChunk] = []
  
     if func_node:
         current_function_signature = _get_function_signature(func_def_node=func_node, source_code=code)
@@ -665,27 +666,29 @@ def generate_code_chunks(
     signature_tokens: int = get_tcount(text=current_function_signature, tokenizer=tokenizer)
     available_tokens_for_content: int = max(0, max_tokens-signature_tokens)
 
-    raw_chunks: list[IntermediateChunk]
- 
-    nodes_for_splitting: list[Node] = get_func_statements(body_node, tsp) if body_node else []
-    if trimming_technique == "ast" and func_node:
-        raw_chunks = _split_by_ast(
-            text_nodes=nodes_for_splitting,
-            tokenizer=tokenizer,
-            available_tokens=available_tokens_for_content,
-            original_full_tree=tree,
-            original_full_code_bytes=code_bytes,
-        )
+    is_tree_valid = not tsp.is_broken_tree(tree) if tree else False
+    use_ast_splitting = (trimming_technique == "ast" and is_tree_valid and func_node)
 
-    else: # fallback into line-based chunking
+    if use_ast_splitting:
+        nodes_for_splitting: list[Node] = get_func_statements(body_node, tsp) if body_node else []
+        if nodes_for_splitting:
+            raw_chunks = _split_by_ast(
+                text_nodes=nodes_for_splitting,
+                tokenizer=tokenizer,
+                available_tokens=available_tokens_for_content,
+                original_full_tree=tree,
+                original_full_code_bytes=code_bytes,
+            )
+    else:  # fallback into line-based chunking
         lines = func_body_text.splitlines(keepends=True)
         units = [{"text": line, "tokens": get_tcount(line, tokenizer)} for line in lines if line.strip()]
-        raw_chunks = split_by_lines(
-            units_for_splitting=units,
-            max_tokens=available_tokens_for_content,
-            tokenizer=tokenizer,
-            overlap_stmts=overlap_stmts,
-        )
+        if units:
+            raw_chunks = split_by_lines(
+                units_for_splitting=units,
+                max_tokens=available_tokens_for_content,
+                tokenizer=tokenizer,
+                overlap_stmts=overlap_stmts,
+            )
 
     # add common metadata
     final_chunks = []
