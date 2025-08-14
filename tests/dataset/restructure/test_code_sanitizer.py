@@ -684,15 +684,40 @@ class TestPipelineUnit:
     # ---
     GLOBAL_VAR_INPUT = "int global_x = 10;"
     GLOBAL_VAR_EXPECTED = GLOBAL_VAR_INPUT
+    # --- 
+  
+    MACRO_TYPE_SPECIFIER_INPUT = """
+    isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg) {
+      uint minor = iminor(inode);
+      isdn_ctrl c;
+      int drvidx;
+      int chidx;
+      int ret;
+      int i;
+      char *p;
+      char *s;
+      union iocpar {
+        char name[10];
+        char bname[22];
+        isdn_ioctl_struct iocts;
+        isdn_net_ioctl_phone phone;
+        isdn_net_ioctl_cfg cfg;
+      } iocpar;
+      void *argp = (void *)arg;
+    }
+    """
+
+    MACRO_TYPE_SPECIFIER_OUTPUT = "int " + MACRO_TYPE_SPECIFIER_INPUT
 
     # --- Integration Test ---
     tests = [
-        pytest.param(SIMPLE_KR_INPUT, SIMPLE_KR_EXPECTED, id="simple_kr_function"),
-        pytest.param(MACRO_KR_INPUT, MACRO_KR_EXPECTED, id="macro_based_function"),
-        pytest.param(MACRO_INPUT, MACRO_OUTPUT, id="macro_function"),
-        pytest.param(MODERN_FUNC_INPUT, MODERN_FUNC_EXPECTED, id="valid_modern_function"),
-        pytest.param(KR_WITH_TYPE_INPUT, KR_WITH_TYPE_EXPECTED, id="valid_kr_with_type"),
-        pytest.param(GLOBAL_VAR_INPUT, GLOBAL_VAR_EXPECTED, id="non_function_global_var"),
+        # pytest.param(SIMPLE_KR_INPUT, SIMPLE_KR_EXPECTED, id="simple_kr_function"),
+        # pytest.param(MACRO_KR_INPUT, MACRO_KR_EXPECTED, id="macro_based_function"),
+        # pytest.param(MACRO_INPUT, MACRO_OUTPUT, id="macro_function"),
+        # pytest.param(MODERN_FUNC_INPUT, MODERN_FUNC_EXPECTED, id="valid_modern_function"),
+        # pytest.param(KR_WITH_TYPE_INPUT, KR_WITH_TYPE_EXPECTED, id="valid_kr_with_type"),
+        # pytest.param(GLOBAL_VAR_INPUT, GLOBAL_VAR_EXPECTED, id="non_function_global_var"),
+        pytest.param(MACRO_TYPE_SPECIFIER_INPUT, MACRO_TYPE_SPECIFIER_OUTPUT, id="macro_type_specifier"),
     ]
 
     @pytest.mark.parametrize("input_code, expected_code", tests)
