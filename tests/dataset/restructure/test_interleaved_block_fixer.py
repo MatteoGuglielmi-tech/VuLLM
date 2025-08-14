@@ -1,7 +1,7 @@
 import pytest
 import os
 
-from dataset.restructure.proc_utils import write2file, spawn_clang_format
+from dataset.restructure.shared.proc_utils import write2file, spawn_clang_format
 from dataset.restructure.interleaved_block_fixer import InterleavedBlockFixer
 
 
@@ -17,7 +17,7 @@ clang_format_file_path: str = os.path.join(project_root, ".clang-format")
 def _get_refactored_code(code: str, lang_name: str, fp: str):
     write2file(fp=fp, content=code)
     formatted_result = spawn_clang_format(fp, lang_name, clang_format_file_path)
-    os.remove(fp)
+    # os.remove(fp)
 
     return formatted_result
 
@@ -79,36 +79,36 @@ class TestRestructurerUnit:
       char *ptr = buffer;
       do {
         *ptr = get_next_char();
-    #if defined(PLATFORM_X)
-      #if defined(FAST_VALIDATION)
-      } while(*ptr != '\\0' && fast_validate(ptr));
+      #if defined(PLATFORM_X)
+        #if defined(FAST_VALIDATION)
+        } while(*ptr != '\\0' && fast_validate(ptr));
+        #else
+        } while(*ptr != '\\0' && full_validate(ptr));
+        #endif
+      #elif defined(PLATFORM_Y)
+        } while(*ptr != '\\0' && platform_y_validate(ptr));
       #else
-      } while(*ptr != '\\0' && full_validate(ptr));
+        } while(*ptr != '\\0');
       #endif
-    #elif defined(PLATFORM_Y)
-      } while(*ptr != '\\0' && platform_y_validate(ptr));
-    #else
-      } while(*ptr != '\\0');
-    #endif
-      printf("Finished processing data.");
+        printf("Finished processing data.");
     }
     """
     BROKEN_DOUBLE_NESTED_DO_WHILE_OUTPUT = """
     void process_data(char *buffer) {
-    char *ptr = buffer;
-    #if defined(PLATFORM_X)
-       #if defined(FAST_VALIDATION)
-       do { *ptr = get_next_char(); } while(*ptr != '\\0' && fast_validate(ptr));
-       #else
-       do { *ptr = get_next_char(); } while(*ptr != '\\0' && full_validate(ptr));
-       #endif
-     #elif defined(PLATFORM_Y)
-       do { *ptr = get_next_char(); } while(*ptr != '\\0' && platform_y_validate(ptr));
-     #else
-       do { *ptr = get_next_char(); } while(*ptr != '\\0');
-     #endif
-       printf("Finished processing data.");
-     }
+      char *ptr = buffer;
+      #if defined(PLATFORM_X)
+         #if defined(FAST_VALIDATION)
+         do { *ptr = get_next_char(); } while(*ptr != '\\0' && fast_validate(ptr));
+         #else
+         do { *ptr = get_next_char(); } while(*ptr != '\\0' && full_validate(ptr));
+         #endif
+      #elif defined(PLATFORM_Y)
+        do { *ptr = get_next_char(); } while(*ptr != '\\0' && platform_y_validate(ptr));
+      #else
+        do { *ptr = get_next_char(); } while(*ptr != '\\0');
+      #endif
+        printf("Finished processing data.");
+    }
     """
     # ---
 
@@ -341,7 +341,8 @@ class TestRestructurerUnit:
         pytest.param(CORRECT_DOWHILE_LOOP_INPUT, CORRECT_DOWHILE_LOOP_OUTPUT, "c", id="interleaved_loop"),
         pytest.param(BROKEN_NESTED_DO_WHILE_INPUT, BROKEN_NESTED_DO_WHILE_OUTPUT, "c", id="interleaved_do_while"),
         pytest.param(BROKEN_DOUBLE_NESTED_DO_WHILE_INPUT, BROKEN_DOUBLE_NESTED_DO_WHILE_OUTPUT, "c", id="interleaved_double_do_while"),
-        pytest.param(INTERLEAVED_IF_MULTIPLE_OPENERS_ONE_CLOSER_INPUT, INTERLEAVED_IF_MULTIPLE_OPENERS_ONE_CLOSER_INPUT, "c", id="non_dowhile_interleaved_statement")
+        pytest.param(INTERLEAVED_IF_MULTIPLE_OPENERS_ONE_CLOSER_INPUT, INTERLEAVED_IF_MULTIPLE_OPENERS_ONE_CLOSER_INPUT, "c", id="non_dowhile_interleaved_statement"),
+        pytest.param(LONG_PROBLEMATIC_REAL_INPUT, LONG_PROBLEMATIC_REAL_OUTPUT, "c", id="problematic_long_real_testcase"),
     ]
     @pytest.mark.parametrize("input, output, lang", interleaved_dowhile_test_cases)
     def test_fix_interleaved_do_while(self, interleaved_block_fixer: InterleavedBlockFixer, input: str, output: str, lang: str):
@@ -384,20 +385,6 @@ class TestRestructurerUnit:
     interleaved_content_test_cases = [
         pytest.param(BROKEN_INTERLEAVED_FOR_CONTENT_INPUT, BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT, "c", id="interleaved_content_for_loop"),
     ]
-    @pytest.mark.parametrize("input, output, lang", interleaved_content_test_cases)
-    def test_fix_interleaved_content(
-        self,
-        interleaved_block_fixer: InterleavedBlockFixer,
-        input: str,
-        output: str,
-        lang: str,
-    ):
-
-        raw_result = interleaved_block_fixer._fix_interleaved_statement_content(input)
-        formatted_result = _get_refactored_code(code=raw_result, lang_name=lang, fp=f"./tmp_in_do_while.{lang}")
-        formatted_output = _get_refactored_code(code=output, lang_name=lang, fp=f"./tmp_out_do_while.{lang}")
-
-        assert formatted_result.strip() == formatted_output.strip()
 
     # ==============================================================================================================
     # FULL PIPELINE TESTS
@@ -659,6 +646,9 @@ class TestRestructurerUnit:
         pytest.param(BROKEN_NESTED_INTERLEAVED_SWITCH_INPUT, BROKEN_NESTED_INTERLEAVED_SWITCH_OUTPUT, "c", id="interleaved_switch"),
         pytest.param(BROKEN_INTERLEAVED_SIMPLE_WHILE_LOOP_INPUT, BROKEN_INTERLEAVED_SIMPLE_WHILE_LOOP_OUTPUT, "c", id="interleaved_simple_while"),
         pytest.param(BROKEN_INTERLEAVED_WHILE_LOOP_INPUT, BROKEN_INTERLEAVED_WHILE_LOOP_OUTPUT, "c", id="interleaved_while"),
+        pytest.param(CORRECT_DOWHILE_LOOP_INPUT, CORRECT_DOWHILE_LOOP_OUTPUT, "c", id="interleaved_loop"),
+        pytest.param(BROKEN_NESTED_DO_WHILE_INPUT, BROKEN_NESTED_DO_WHILE_OUTPUT, "c", id="interleaved_do_while"),
+        pytest.param(BROKEN_DOUBLE_NESTED_DO_WHILE_INPUT, BROKEN_DOUBLE_NESTED_DO_WHILE_OUTPUT, "c", id="interleaved_double_do_while"),
         pytest.param(BROKEN_INTERLEAVED_SIMPLE_FOR_LOOP_INPUT, BROKEN_INTERLEAVED_SIMPLE_FOR_LOOP_OUTPUT, "c", id="interleaved_simple_for"),
         pytest.param(BROKEN_INTERLEAVED_FOR_LOOP_INPUT, BROKEN_INTERLEAVED_FOR_LOOP_OUTPUT, "c", id="interleaved_for"),
         pytest.param(BROKEN_INTERLEAVED_FOR_CONTENT_INPUT, BROKEN_INTERLEAVED_FOR_CONTENT_OUTPUT, "c", id="interleaved_content_for_loop"),
