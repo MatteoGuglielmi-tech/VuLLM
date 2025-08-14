@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from datasets import Dataset
 
-from core.chunking_and_streaming.unsloth_trainer import UnslothModel
+from core.chunking_and_streaming.unsloth_fine_tuner import UnslothFineTunePipeline
 
 
 @pytest.fixture
@@ -23,13 +23,13 @@ def test_training_workflow_orchestration(mocker: MagicMock, dummy_datasets: dict
     """
 
     # --- Mock Dependencies ---
-    mocker.patch("core.chunking_and_streaming.unsloth_trainer.UnslothModel.unsloth_load_base_model")
-    mocker.patch("core.chunking_and_streaming.unsloth_trainer.UnslothModel.unsloth_patch_model")
-    mock_sft_trainer_class = mocker.patch("core.chunking_and_streaming.unsloth_trainer.SFTTrainer", autospec=True)
-    mocker.patch("core.chunking_and_streaming.unsloth_trainer.UnslothModel._unsloth_config_training")
+    mocker.patch("core.chunking_and_streaming.unsloth_fine_tuner.UnslothFineTunePipeline.unsloth_load_base_model")
+    mocker.patch("core.chunking_and_streaming.unsloth_fine_tuner.UnslothFineTunePipeline.unsloth_patch_model")
+    mock_sft_trainer_class = mocker.patch("core.chunking_and_streaming.unsloth_fine_tuner.SFTTrainer", autospec=True)
+    mocker.patch("core.chunking_and_streaming.unsloth_fine_tuner.UnslothFineTunePipeline._unsloth_set_fine_tune")
 
     # --- Setup ---
-    training_pipeline = UnslothModel(hf_train_data=dummy_datasets["train"], hf_eval_data=dummy_datasets["eval"], training_steps=10)
+    training_pipeline = UnslothFineTunePipeline(hf_train_data=dummy_datasets["train"], hf_eval_data=dummy_datasets["eval"], training_steps=10)
 
     lora_save_path = tmp_path / "lora_model"
     training_pipeline.lora_model_dir = str(lora_save_path)
@@ -50,7 +50,7 @@ def test_training_workflow_orchestration(mocker: MagicMock, dummy_datasets: dict
     training_pipeline.base_model.save_pretrained.side_effect = simulate_save
 
     # --- Execution ---
-    training_pipeline.unsloth_start_training()
+    training_pipeline.unsloth_fine_tune()
 
     # --- Assertions ---
     mock_sft_trainer_class.assert_called_once()
