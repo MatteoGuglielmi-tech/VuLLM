@@ -17,7 +17,7 @@ clang_format_file_path: str = os.path.join(project_root, ".clang-format")
 def _get_refactored_code(code: str, lang_name: str, fp: str):
     write2file(fp=fp, content=code)
     formatted_result = spawn_clang_format(fp, lang_name, clang_format_file_path)
-    # os.remove(fp)
+    os.remove(fp)
 
     return formatted_result
 
