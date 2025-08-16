@@ -1,0 +1,15 @@
+pyproject.toml
+setup.py
+/home/matteo/dev/VuLLM/packages/tree-sitter-extended-c/src/tree_sitter_extended_c/tree-sitter-c/src/parser.c
+src/tree_sitter_extended_c/__init__.py
+src/tree_sitter_extended_c/_binding.py
+src/tree_sitter_extended_c.egg-info/PKG-INFO
+src/tree_sitter_extended_c.egg-info/SOURCES.txt
+src/tree_sitter_extended_c.egg-info/dependency_links.txt
+src/tree_sitter_extended_c.egg-info/requires.txt
+src/tree_sitter_extended_c.egg-info/top_level.txt
+src/tree_sitter_extended_c/tree-sitter-c/setup.py
+src/tree_sitter_extended_c/tree-sitter-c/bindings/python/tree_sitter_c/__init__.py
+src/tree_sitter_extended_c/tree-sitter-c/bindings/python/tree_sitter_c/__init__.pyi
+src/tree_sitter_extended_c/tree-sitter-c/bindings/python/tree_sitter_c/py.typed
+src/tree_sitter_extended_c/tree-sitter-c/src/parser.c
