@@ -3,7 +3,6 @@ from collections.abc import Generator
 from tree_sitter import Language, Parser, Tree, TreeCursor, Node, Query, QueryCursor
 import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
-from tree_sitter_extended_c import LANGUAGE as EXT_C_LANG
 
 TSNode = Node | None
 Nodes = list[Node]
@@ -13,30 +12,30 @@ CPP_LANGUAGE = Language(tscpp.language())
 
 c_parser = Parser(C_LANGUAGE)
 cpp_parser = Parser(CPP_LANGUAGE)
-extended_c_parser = Parser(language=EXT_C_LANG)
 
 class TreeSitterParser:
     def __init__(self, language_name: str = "c") -> None:
         self.language_name: str = language_name
-        match(language_name):
-            case "c": self.language = C_LANGUAGE
-            case "cpp": self.language = CPP_LANGUAGE
-            case _: self.language = EXT_C_LANG
-
+        self.language : Language = C_LANGUAGE if language_name == "c" else CPP_LANGUAGE
         self.parser = Parser(self.language)
+
+        self._is_encoded: bool = False
+        self._is_parsed: bool = False
 
     def parse(self, code: str|bytes) -> Tree:
         """Parse a codebase.
-        Parameters
-        ----------
-        code: str|bytes
-            Represents the string representation of the code to be parsed.
-        Returns
-        -------
+        Params:
+            code: str|bytes
+                Represents the string representation of the code to be parsed.
+        Returns:
             None
         """
 
-        src = (code.encode(encoding="utf-8") if isinstance(code, str) else code)
+        src = (
+            code.encode(encoding="utf-8") if isinstance(code, str)
+            else code
+        )
+
         tree: Tree = self.parser.parse(src)
 
         return tree
@@ -45,10 +44,8 @@ class TreeSitterParser:
         """Performs a DFS traversal of the syntax tree.
         Yields each node in the tree, starting from the root.
 
-        Yields
-        ------
-        Node
-            next node in the pre-order traversal.
+        Yields:
+            Node: next node in the pre-order traversal.
         """
 
         cursor: TreeCursor = tree.walk()
@@ -73,6 +70,17 @@ class TreeSitterParser:
 
         function_query:Query = Query(self.language, query_str)
         return QueryCursor(function_query).captures(self.parse(code).root_node)
+
+
+    def print_ast(self, node: TSNode, indent=""):
+        """Recursively prints the AST to reveal the true node types."""
+
+        assert node is not None
+        node_type = node.type
+        node_text = node.text.decode("utf-8").strip().split("\n")[0] if node.text else ""
+        print(f'{indent}Type: `{node_type}` --- Text: "{node_text}..."')
+        for child in node.children:
+            self.print_ast(child, indent + "  ")
 
     def has_error_nodes(self, tree: Tree) -> bool:
         return any(node.is_error for node in self.traverse_tree(tree))

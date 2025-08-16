@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: tree-sitter-extended-c
-Version: 0.0.1
-Summary: Extended Tree-sitter grammar for C with case ranges
-Author-email: Matteo Guglielmi <matteo.guglielmi.ma.gu@gmail.com>
-License-Expression: MIT
-Requires-Python: >=3.11
-Requires-Dist: tree-sitter>=0.25.1
-Requires-Dist: setuptools
