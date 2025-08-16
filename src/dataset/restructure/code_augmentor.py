@@ -180,8 +180,7 @@ class CodeAugmentor:
         snippets_to_describe = [ e["func"] for e in entries if "func" in e and not e["func"].startswith(("error:", "skipped:"))]
         cwes_to_describe = [e["cwe"] for e in entries if "cwe" in e and not e["func"].startswith(("error:", "skipped:"))]
 
-        if not snippets_to_describe:
-            return entries
+        if not snippets_to_describe: return entries
 
         # -- generate all descriptions in a single, efficient batch call. --
         func_descriptions = self._gen_batch_func_descr(snippets_to_describe=snippets_to_describe)

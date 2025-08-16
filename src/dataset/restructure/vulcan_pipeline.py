@@ -13,6 +13,7 @@ from .code_augmentor import CodeAugmentor
 
 from .shared.tree_sitter_parser import TreeSitterParser, C_LANGUAGE
 from .shared.log import logger
+from .shared.animate import Loader
 from .llm_clients.gemini_describer import GeminiClient
 from .llm_clients.llama_describer import LlamaCodeDescriber
 
@@ -148,13 +149,13 @@ class Vulcan:
     def run(self):
         """Executes the full preprocessing pipeline."""
         try:
-            lines:list[str] = read_lines(fp=self.config["default_input_path"])
+            with Loader(desc_msg="Reading dataset JSONL lines"):
+                lines:list[str] = read_lines(fp=self.config["default_input_path"])
         except FileNotFoundError:
             logger.error(f"The source file was not found at {self.config["default_input_path"]}")
             return
 
         processed_entries: list[dict[str,str]] = []
-        # with open(file=self.config["default_output_path"], mode="w", encoding="utf-8") as outfile:
         for i, line in enumerate(tqdm(iterable=lines, desc="Forging Code Snippets")):
             try:
                 data:dict[str,str] = json.loads(line)
