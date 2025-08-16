@@ -4,7 +4,7 @@ from time import sleep
 
 
 class Loader:
-    def __init__( self, desc_msg: str = "Loading...", end_msg: str = "✅ Done.", timeout: float = 0.1) -> None:
+    def __init__( self, desc_msg: str = "Loading...", end_msg: str = " -> ✅ Done.", timeout: float = 0.1) -> None:
         """A simple context manager to display a loader animation in the terminal.
 
         Args:

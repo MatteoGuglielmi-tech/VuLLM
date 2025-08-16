@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from tree_sitter import Language, Parser, Tree, TreeCursor, Node, Query, QueryCursor
+from tree_sitter import Language, Parser, Tree, Node, Query, QueryCursor
 import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
 from .stdout import MY_LOGGER_NAME
