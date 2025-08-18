@@ -1,5 +1,5 @@
-import os
 import re
+import subprocess
 from dataclasses import dataclass
 from tree_sitter import Node, Tree, Query, QueryCursor
 
@@ -20,10 +20,6 @@ class CodeSanitizer:
 
         self.processed_data: dict[int, dict] = {}
         self.last_used_language: str | None = None
-
-        os.makedirs("./misc", exist_ok=True)
-        self.tmp_c_file = "./misc/tmp.c"
-        self.tmp_cpp_file = "./misc/tmp.cpp"
 
     def remove_comments(self, code: str, tsp: TreeSitterParser) -> str:
         """Parses the code and removes all comment nodes.
@@ -106,79 +102,6 @@ class CodeSanitizer:
 
         return code[first_node.start_byte :]
 
-    def _preprocess_directives(self, code: str, tsp: TreeSitterParser) -> str:
-        """Recursively simplifies preprocessor directives like #if 1 and #if 0.
-
-        Params:
-            code: str
-                source code to be modified.
-        Returns:
-            str: the restructured code
-        """
-
-        tree = tsp.parse(code)
-
-        # find all possible #if blocks and iterate from innermost to outermost
-        # query: Query = parser.language.query("(preproc_if) @if")
-        query: Query = Query(tsp.language, "(preproc_if) @if")
-        query_cursor: QueryCursor = QueryCursor(query)
-        all_if_nodes: list[Node] = sorted(
-            query_cursor.captures(tree.root_node).get('if', []),
-            key=lambda n: n.start_byte, reverse=True
-        )
-
-        for node_to_replace in all_if_nodes:
-            condition_node:TSNode = node_to_replace.child_by_field_name('condition')
-            # if literal not 1 or 0
-            if not (condition_node and condition_node.type == 'number_literal'):
-                continue
-
-            assert condition_node.text is not None
-            condition_text:str = condition_node.text.decode()
-            replacement_text:str|None = None
-
-            # if 1
-            if condition_text == '1':
-                # the consequence is all nodes between the condition and the alternative/endif
-                consequence_nodes: Nodes = []
-                next_sibling: TSNode = condition_node.next_sibling
-                while next_sibling:
-                    if next_sibling.type in ['preproc_else', '#endif']:
-                        break
-                    consequence_nodes.append(next_sibling)
-                    next_sibling = next_sibling.next_sibling
-
-                if consequence_nodes:
-                    # reconstruct the code from the collected nodes
-                    start:int = consequence_nodes[0].start_byte
-                    end:int = consequence_nodes[-1].end_byte
-                    replacement_text = code[start:end]
-                else:
-                    replacement_text = ""
-
-            # if 0
-            elif condition_text == '0':
-                alternative_node:TSNode = node_to_replace.child_by_field_name('alternative')
-                if alternative_node and alternative_node.type == "preproc_else":
-                    if alternative_node.children:
-                        content_node = alternative_node.children[-1]
-                        replacement_text = content_node.text.decode("utf-8") if content_node.text else ""
-                    else:
-                        replacement_text = ""
-                else:
-                    replacement_text = ""
-
-            if replacement_text is not None:
-                new_code = (
-                    code[:node_to_replace.start_byte] +
-                    replacement_text +
-                    code[node_to_replace.end_byte:]
-                )
-                # On the first successful replacement, recurse immediately
-                return self._preprocess_directives(code=new_code, tsp=tsp)
-
-        return code
-
     def _balance_directives(self, code: str, tsp: TreeSitterParser) -> str:
         """Balances preprocessor directives using a text-based classification
         of fundamental `preproc_directive` nodes.
@@ -245,7 +168,11 @@ class CodeSanitizer:
                 (first_child.type in ["ERROR", "expression_statement"] and second_child.type == "compound_statement")
             )
         # case in which no type specifier and the function is parsed as macro_type_specifier
-        if root_node and root_node.children[0].type == "declaration" and root_node.children[0].named_children[0].type == "macro_type_specifier":
+        if (
+            root_node
+            and ((root_node.children[0].type == "declaration" and root_node.children[0].named_children[0].type == "macro_type_specifier")
+            or (root_node.children[0].type == "macro_type_specifier"))
+        ):
             is_broken_pattern = True
 
         if is_broken_pattern:
@@ -342,3 +269,51 @@ class CodeSanitizer:
             code_bytes[start:end] = text
 
         return code_bytes.decode("utf-8")
+
+
+    def preprocess_code_gcc_e(self, code: str, gcc_flags: list|None = None) -> str:
+        """Preprocesses a C code string using the external GCC preprocessor.
+
+        This method invokes the `gcc -E -P -` command to run the C
+        preprocessor on the input code string. It reads from stdin and
+        captures the preprocessed output from stdout.
+
+        Parameters
+        ----------
+        code : str
+            A string containing the C source code to be preprocessed.
+        gcc_flags : list of str, optional
+            A list of optional flags to pass to the GCC preprocessor,
+            e.g., `['-DDEBUG=1']` to define a macro. If None, no extra
+            flags are used.
+
+        Returns
+        -------
+        str
+            The preprocessed C code as a string.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the 'gcc' command is not found. Ensure GCC is installed and
+            accessible in the system's PATH.
+        subprocess.SubprocessError
+            If the preprocessing command fails (returns a non-zero exit code),
+            which can occur due to errors in the C code.
+        """
+
+        if gcc_flags is None: gcc_flags = []
+
+        # Command to execute: gcc -E -P -
+        # -E: run the preprocessor only.
+        # -P: inhibit generation of linemarkers
+        # -:  read from standard input.
+        command: list[str] = ['gcc', '-E', '-P', '-'] + gcc_flags
+
+        try:
+            process = subprocess.run(command, input=code, text=True, capture_output=True, check=True)
+            return process.stdout
+        except FileNotFoundError:
+            raise FileNotFoundError(" ❌ 'gcc' not found. Ensure it is installed and in Path")
+        except subprocess.CalledProcessError as e:
+            raise subprocess.SubprocessError(f" ❌ Error during preprocessing:\n{e.stderr}")

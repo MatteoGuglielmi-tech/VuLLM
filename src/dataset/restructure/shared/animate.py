@@ -23,7 +23,6 @@ class Loader:
         self.timeout: float = timeout
         self._thread: Thread = Thread(target=self._animate, daemon=True)
         self.steps = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
-        # self.steps = ['|', '/', '-', '\\']
         self.done = False
 
     def _animate(self):

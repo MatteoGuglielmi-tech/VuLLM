@@ -1,17 +1,17 @@
 import os
 import json
+# import re
 from dataclasses import dataclass
 from tqdm import tqdm
 from tree_sitter import Tree
 
-from .shared.proc_utils import ( load_config, is_cpp,
-    get_refactored_code, pause_exec, read_file, read_lines, write2file)
+from .shared.proc_utils import load_config, is_cpp, get_refactored_code, pause_exec, read_file, read_lines
 from .code_sanitizer import CodeSanitizer
-from .interleaved_block_fixer import InterleavedBlockFixer
+# from .interleaved_block_fixer import InterleavedBlockFixer
 from .code_foundry import CodeFoundry
 from .code_augmentor import CodeAugmentor
 
-from .shared.tree_sitter_parser import TreeSitterParser, C_LANGUAGE
+from .shared.tree_sitter_parser import TreeSitterParser, EXT_C_LANG # C_LANGUAGE
 from .shared.log import logger
 from .shared.animate import Loader
 from .llm_clients.gemini_describer import GeminiClient
@@ -34,8 +34,8 @@ class Vulcan:
 
         # Initialize the pipeline components
         self.sanitizer = CodeSanitizer()
-        self.interleaved_fixer = InterleavedBlockFixer()
-        self.foundry = CodeFoundry(ts_lang=C_LANGUAGE)
+        # self.interleaved_fixer = InterleavedBlockFixer()
+        self.foundry = CodeFoundry(ts_lang=EXT_C_LANG)
         self.augmentor = CodeAugmentor(
             metadata_filepath=self.config["default_metadata_path"],
             description_generator=LlamaCodeDescriber() if self.USE_LOCAL_MODEL else GeminiClient(),
@@ -46,19 +46,20 @@ class Vulcan:
         os.makedirs(name="./misc", exist_ok=True)
 
     def _setup_config(self):
-        # find the absolute path to this script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # define the project root 
-        project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
-        # build the absolute path to the config file.
-        config_path = os.path.join(project_root, "config.json")
-        # load config with relative paths 
-        self.config = load_config(fp=config_path)
-        # update paths in config file
-        for key, value in self.config.items():
-            if key.endswith("_path"):
-                self.config[key] = os.path.join(project_root, value)
-                # self.config[key] = os.path.abspath(os.path.join(project_root, value))
+        with Loader(desc_msg="⏳ Setting up paths ⏳"):
+            # find the absolute path to this script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            # define the project root
+            project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
+            # build the absolute path to the config file.
+            config_path = os.path.join(project_root, "config.json")
+            # load config with relative paths 
+            self.config = load_config(fp=config_path)
+            # update paths in config file
+            for key, value in self.config.items():
+                if key.endswith("_path"):
+                    self.config[key] = os.path.join(project_root, value)
+                    # self.config[key] = os.path.abspath(os.path.join(project_root, value))
 
 
     def _process_snippet(self, data: dict[str, str]) -> dict[str, str]:
@@ -73,7 +74,7 @@ class Vulcan:
 
         try:
             # --- premature removal of comments to avoid false C++ positives ---
-            lang:str="c"
+            lang:str="ext_c"
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
             code:str = self.sanitizer.remove_comments(code=raw_func_str, tsp=tsp)
             # filter out empty strings or comments only
@@ -89,17 +90,14 @@ class Vulcan:
             data["language"] = lang
 
             # --- PRELIMINARY SANITIZATION ---
-            code = self.sanitizer._preprocess_directives(code=code, tsp=tsp)
             code = self.sanitizer._balance_directives(code=code, tsp=tsp)
 
             # --- STRUCTURAL REPAIR (THE FORGE) ---
-            # Step 2a: Fix interleaved blocks with regex first.
-            code = self.interleaved_fixer.full_structural_refactor(c_code=code)
-            code = self.sanitizer.add_missing_braces(code=code)
-            # Step 2b: Run the tree-sitter based multi-pass repair.
-            code = self.foundry.run_multi_pass_fix(code=code)
+            code = self.foundry.fix_dangling_directives(code=code)
 
             # --- finish sanitizing ---
+            code = self.sanitizer.preprocess_code_gcc_e(code=code)
+            code = self.sanitizer.add_missing_braces(code=code)
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
             code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
 
@@ -112,7 +110,8 @@ class Vulcan:
 
             # --- FORMAT ---
             code = get_refactored_code(
-                code=code, lang_name=lang,
+                code=code, lang_name= "c", # for now I only deal with c functions.
+                # It'll be -> lang_name = re.findall(pattern=r"(c|cpp)", string=lang)[0]
                 fp=self.tmp_c_file, clang_format_file_path=self.config["clang_format_path"],
             )
             data["func"] = code
@@ -120,20 +119,17 @@ class Vulcan:
             # --- HEALTH CHECK & MANUAL FIX (Human-in-the-Loop) ---
             final_tree:Tree = tsp.parse(code=code)
             if tsp.is_broken_tree(tree=final_tree):
-                manual_fix_path:str = "./misc/manual_fix_required.c"
-                write2file(fp=manual_fix_path, content=code)
-
                 logger.warning("="*60)
                 logger.warning("🚨 BROKEN AST DETECTED 🚨")
                 logger.warning(f"Pipeline paused. Please manually fix the code in:")
-                logger.warning(f"==> {os.path.abspath(manual_fix_path)}")
+                logger.warning(f"==> {os.path.abspath(self.tmp_c_file)}")
                 logger.warning("After saving your changes, type 'continue' and press Enter to resume.")
                 logger.warning("="*60)
 
                 pause_exec()
 
                 # Read the manually fixed code back in
-                data["func"] = read_file(fp=manual_fix_path, strip=False)
+                data["func"] = read_file(fp=self.tmp_c_file, strip=False)
                 logger.info("✅ Resuming pipeline with manually fixed code. ✅")
 
             return data
