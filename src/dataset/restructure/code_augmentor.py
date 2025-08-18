@@ -43,7 +43,11 @@ class CodeAugmentor:
     def __post_init__(self):
         """Initializes TreeSitterParser for C and C++ languages."""
 
-        self.ts_parsers:dict[str,TreeSitterParser] = { "c": TreeSitterParser("c"), "cpp": TreeSitterParser("cpp") }
+        self.ts_parsers: dict[str, TreeSitterParser] = {
+            "c": TreeSitterParser("c"),
+            "cpp": TreeSitterParser("cpp"),
+            "ext_c": TreeSitterParser("ext_c"),
+        }
 
     def _get_code_metrics(self, code: str, lang: str) -> dict[str, int]:
         """Calculates code metrics for a given function using tree-sitter.
@@ -189,14 +193,19 @@ class CodeAugmentor:
         # -- merge --
         desc_iterator = iter(func_descriptions)
         cwe_desc_iterator = iter(cwe_descriptions)
+        keys_to_remove = {"commit_id", "hash", "message", "size"}
+
         for entry in entries:
             if "func" in entry and not entry["func"].startswith(("error:", "skipped:")):
                 # -- add other enrichments first --
-                metrics = self._get_code_metrics(code=entry["func"], lang=entry.get("language", "c"))
+                metrics = self._get_code_metrics(code=entry["func"], lang=entry.get("language", "ext_c"))
                 entry.update(metrics)
                 # -- add the generated description --
                 entry["function_description"] = next(desc_iterator, "N/A")
                 # -- add vulnerability description --
                 entry["vulnerability_description"] = next(cwe_desc_iterator, "N/A")
+
+                for key in keys_to_remove:
+                    entry.pop(key,None)
 
         return entries
