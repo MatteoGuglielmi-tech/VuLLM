@@ -4,6 +4,7 @@ import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline # type: ignore
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
+from src.dataset.restructure.shared.animate import Loader
 from src.dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
@@ -24,22 +25,20 @@ class LlamaCodeDescriber(DescriptionGenerator):
             Defaults to a 4-bit quantized Llama 3.1 8B model for memory efficiency.
         """
 
-        print(f"Loading model: {model_name}...")
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=False,
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=quantization_config,
-            torch_dtype=torch.bfloat16,
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        with Loader(desc_msg=f"Loading model: {model_name}..."):
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=False,
+            )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                quantization_config=quantization_config,
+                torch_dtype=torch.bfloat16,
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.desc_pipeline = pipeline("text-generation", model=self.model, tokenizer=self.tokenizer)
-
-        print("✅ Model loaded successfully.")
 
     def _clean_response(self, prompt: str, generated_text: str) -> str:
         assistant_token: str = "<|start_header_id|>assistant<|end_header_id|>\n\n"
