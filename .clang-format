@@ -23,7 +23,7 @@ BraceWrapping:
   SplitEmptyFunction: false
   SplitEmptyRecord: false
   AfterControlStatement: Never
-AllowShortLoopsOnASingleLine: true
+AllowShortLoopsOnASingleLine: false
 AllowShortBlocksOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortEnumsOnASingleLine: true
@@ -73,3 +73,14 @@ BreakBeforeConceptDeclarations: Never
 BreakTemplateDeclarations: false
 AllowShortNamespacesOnASingleLine: false
 FixNamespaceComments: false
+
+ForEachMacros:
+  - list_for_each_entry
+  - list_for_each_safe
+  - list_for_each_entry_safe
+  - list_for_each
+  - hlist_for_each_entry
+  - sk_for_each
+  - sctp_walk_params
+  - sctp_tsnmap_init
+  - receive_queue_for_each_sk
