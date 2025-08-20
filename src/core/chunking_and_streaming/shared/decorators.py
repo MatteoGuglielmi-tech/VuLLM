@@ -1,95 +1,13 @@
 import functools
 import inspect
+import logging
 from pathlib import Path
 from typing import Any, Callable
 from inspect import BoundArguments, Signature
 
 from .typedef import *
 
-import logging
-from .stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
-
-
-def prepare_sub_chunker_args(func: Callable) -> Callable:
-    """Validates parameters for a dynamic chunking function argument.
-
-    This decorator is designed to wrap a higher-level function that accepts
-    a user-provided chunking callable, `fn`. The decorator intercepts the call
-    to validate that all parameters required by `fn`'s signature are available.
-
-    Parameters
-    ----------
-    func : Callable
-        The function to decorate. This function must accept a callable `fn`
-        and its arguments `**fn_kwargs` among its parameters.
-
-    Returns
-    -------
-    Callable
-        The wrapped function with validation logic for the `fn` callable.
-
-    Raises
-    ------
-    ValueError
-        If a required parameter for the given `fn` is missing from the
-        available arguments.
-    """
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs) -> ASTChunks:
-        # -- bind arguments --
-        sig: Signature = inspect.signature(obj=func)
-        bound_args = sig.bind(*args, **kwargs)
-        bound_args.apply_defaults()
-
-        chunk = bound_args.arguments['chunk']
-        tokenizer = bound_args.arguments['tokenizer']
-        available_tokens = bound_args.arguments['available_tokens']
-        fn = bound_args.arguments['fn']
-        fn_kwargs = bound_args.arguments['fn_kwargs']
-
-        # -- prepare arguments for 'fn' --
-        callable_args = {
-            "chunk_metadata": {
-                "context": chunk.get("context", ""),
-                "text": chunk.get("text", ""),
-                "context_tcount": chunk.get("context_tcount", 0),
-                "text_tcount": chunk.get("text_tcount", 0),
-                "nodes": chunk.get("nodes", []),
-            },
-            "tokenizer": tokenizer,
-            "available_tokens": available_tokens,
-        }
-        # add any extra argument
-        callable_args.update(fn_kwargs)
-
-        # -- validate prepared arguments against function signature --
-        fn_sig = inspect.signature(fn)
-        fn_params: set[str] = set(fn_sig.parameters.keys())
-
-        # Define all parameter groups in one central place for easy maintenance
-        param_groups = {
-            "core": {"chunk_metadata", "tokenizer", "available_tokens"},
-            "ast": {"original_full_tree", "original_full_code_bytes", "parser", "c_language"},
-            "context": {"partial_context_lines"},
-        }
-
-        for group_name, required_params in param_groups.items():
-            if any(p in fn_params for p in required_params):
-                for param in required_params:
-                    if param in fn_params and param not in callable_args:
-                        raise ValueError(
-                            f"Chunking function '{fn.__name__}' is missing required parameter '{param}'. "
-                            f"This is a '{group_name}'-specific parameter and must be provided."
-                        )
-
-        # -- call the original function with the prepared arguments --
-        bound_args.arguments.update(callable_args)
-
-        return func(*bound_args.args, **bound_args.kwargs)
-
-    return wrapper
+logger = logging.getLogger(name=__name__)
 
 
 def validate_argument_value(arg_name: str, allowed_values: list[str]) -> Callable[[Callable], Callable]:

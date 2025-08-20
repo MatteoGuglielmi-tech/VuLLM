@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from dataclasses import dataclass
 from typing import Any
 from dotenv import load_dotenv
@@ -8,9 +9,9 @@ import google.generativeai as genai
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.types.generation_types import GenerationConfig
 
-from src.dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
+logger = logging.getLogger(name=__name__)
 
 @dataclass
 class GeminiClient(DescriptionGenerator):

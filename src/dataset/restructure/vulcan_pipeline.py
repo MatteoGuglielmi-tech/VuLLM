@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 # import re
@@ -11,12 +12,13 @@ from .code_sanitizer import CodeSanitizer
 from .code_foundry import CodeFoundry
 from .code_augmentor import CodeAugmentor
 
-from .shared.tree_sitter_parser import TreeSitterParser, EXT_C_LANG # C_LANGUAGE
-from .shared.log import logger
-from .shared.animate import Loader
 from .llm_clients.gemini_describer import GeminiClient
 from .llm_clients.llama_describer import LlamaCodeDescriber
 
+from ...common.tree_sitter_parser import TreeSitterParser, EXT_C_LANG
+from ...common.loading_config import Loader
+
+logger = logging.getLogger(name=__name__)
 
 @dataclass
 class Vulcan:

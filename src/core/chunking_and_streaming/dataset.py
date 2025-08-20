@@ -1,6 +1,7 @@
 import gc
 import random
 import shutil
+import logging
 from pathlib import Path
 from typing import Any
 from dataclasses import dataclass, field
@@ -11,14 +12,15 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 
 from .shared.utils import load_json_config, save_to_jsonl, load_from_jsonl
-from .shared.tree_sitter_parser import TreeSitterParser
 from .shared.typedef import DatasetEntry, StreamedSplit, FinalChunk, JsonlData
 from .prompt_strategies import PromptingStrategy, GenericStrategy
 from .chunking import generate_code_chunks
 
-import logging
-from .shared.stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
+from ...common.tree_sitter_parser import TreeSitterParser
+
+
+logger = logging.getLogger(name=__name__)
+
 
 @dataclass
 class DatasetHandler:

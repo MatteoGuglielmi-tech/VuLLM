@@ -1,13 +1,15 @@
-import torch
 import os
+import logging
 
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline # type: ignore
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from src.dataset.restructure.shared.animate import Loader
-from src.dataset.restructure.shared.log import logger
 from .base import DescriptionGenerator
 
+from ....common.loading_config import Loader
+
+logger = logging.getLogger(name=__name__)
 
 class LlamaCodeDescriber(DescriptionGenerator):
     """

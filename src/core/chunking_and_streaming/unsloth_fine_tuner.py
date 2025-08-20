@@ -1,5 +1,6 @@
 import os
 import gc
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -16,11 +17,10 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
 
-from .shared.animate import Loader
+from ...common.loading_config import Loader
 
-import logging
-from .shared.stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
+
+logger = logging.getLogger(name=__name__)
 
 # supported 4bit pre-quantized models for 4x faster downloading + no OOMs.
 # More models at https://huggingface.co/unsloth

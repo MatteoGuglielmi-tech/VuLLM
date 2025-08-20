@@ -1,11 +1,12 @@
 from argparse import Namespace
-from .shared.stdout import setup_logger
 
 from core.chunking_and_streaming.shared.argparser import get_parser
 from core.chunking_and_streaming.unsloth_fine_tuner import UnslothFineTunePipeline
 
 from core.chunking_and_streaming.dataset import DatasetHandler
 from transformers import AutoTokenizer
+
+from ...common.logging_config import setup_logger
 
 
 BASE_MODEL = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"

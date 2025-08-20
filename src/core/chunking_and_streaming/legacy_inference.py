@@ -1,10 +1,11 @@
 import os
 import json
+import logging
+import pandas as pd
+import torch
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
-import pandas as pd
-import torch
 from peft import AutoPeftModelForCausalLM
 from transformers import AutoTokenizer
 
@@ -15,9 +16,8 @@ from transformers.generation.logits_process import LogitsProcessor
 from .shared.typedef import ChatMsg
 from .logits_processor import EnforceSingleTokenGeneration
 
-import logging
-from .shared.stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
+logger = logging.getLogger(name=__name__)
+
 
 @dataclass
 class InferencePipeline:

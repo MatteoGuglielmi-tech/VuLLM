@@ -1,12 +1,6 @@
 from typing import Any, TypeAlias, TypedDict
-from tree_sitter import Node
 from datasets import IterableDataset
 
-
-# <---- tree_sitter_parser.py ---->
-TSNode: TypeAlias = Node | None
-Capture: TypeAlias = list[Node]|None
-Captures: TypeAlias = dict[str,list[Node]]
 
 # <---- chunking.py ---->
 class IntermediateChunk(TypedDict):

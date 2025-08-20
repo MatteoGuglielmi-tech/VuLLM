@@ -3,11 +3,11 @@ import subprocess
 from dataclasses import dataclass
 from tree_sitter import Node, Tree, Query, QueryCursor
 
-from .shared.tree_sitter_parser import TreeSitterParser
+from ...common.tree_sitter_parser import TreeSitterParser
 
 TSNode = Node | None
 Nodes = list[Node]
-Match = re.Match[str]|None
+Match = re.Match[str] | None
 
 
 @dataclass
@@ -35,7 +35,11 @@ class CodeSanitizer:
         """
 
         tree: Tree = tsp.parse(code)
-        comments: list[Node] = [node for node in tsp.traverse_tree(tree=tree) if node.type == "comment"]
+        comments: list[Node] = [
+            node
+            for node in tsp.traverse_tree(node=tree.root_node)
+            if node.type == "comment"
+        ]
 
         # Iterate backwards to avoid index shifting issues during replacement (in-place replacement)
         for comment_node in sorted(comments, key=lambda c: c.start_byte, reverse=True):
@@ -43,20 +47,22 @@ class CodeSanitizer:
 
         return code.lstrip()
 
-    def _validate_and_extract_body(self, code: str, tsp: TreeSitterParser) -> str | None:
+    def validate_and_extract_body(self, code: str, tsp: TreeSitterParser) -> str:
         """
         Validates the snippet contains a desirable compound statement and
         extracts the code from that point onward, discarding leading garbage.
 
-        Params:
-            code: str
-                source code to be modified.
-            parser: TreeSitter
-                class implementing Tree-Sitter based utilities.
+        Params
+        ------
+        code: str
+            source code to be modified.
+        parser: TreeSitter
+            class implementing Tree-Sitter based utilities.
 
-        Returns:
-            str|None:
-                the cleaned code string if valid, otherwise None.
+        Returns
+        -------
+        str:
+            the cleaned code string if valid, otherwise None.
         """
 
         tree = tsp.parse(code)
@@ -85,9 +91,8 @@ class CodeSanitizer:
         query: Query = Query(tsp.language, query_str)
         query_cursor: QueryCursor = QueryCursor(query)
         captures: dict[str, list[Node]] = query_cursor.captures(tree.root_node)
-        target_nodes: list[Node]|None = captures.get("target")
-        if not target_nodes:
-            return None
+        target_nodes: list[Node] | None = captures.get("target")
+        if not target_nodes: return ""
 
         # find the earliest valid construct
         first_node: Node = min(target_nodes, key=lambda n: n.start_byte)
@@ -96,9 +101,9 @@ class CodeSanitizer:
         # If we found a standalone compound_statement, check if its parent is
         # the root or an ERROR at the root. This confirms it's not a nested block.
         if first_node.type == "compound_statement":
-            parent: Node|None = first_node.parent
+            parent: Node | None = first_node.parent
             if parent and parent.type not in ["translation_unit", "ERROR"]:
-                return None
+                return ""
 
         return code[first_node.start_byte :]
 
@@ -116,30 +121,30 @@ class CodeSanitizer:
         all_directives: list[tuple[Node, str]] = []
         tree = tsp.parse(code)
 
-        for node in tsp.traverse_tree(tree=tree):
+        for node in tsp.traverse_tree(node=tree.root_node):
             # ignore zero-width "phantom" nodes
             if node.start_byte == node.end_byte:
                 continue
 
-            node_text: bytes|None = node.text
+            node_text: bytes | None = node.text
             if node.type in {"#if", "#ifdef", "#ifndef"}:
-                all_directives.append((node, 'opener'))
+                all_directives.append((node, "opener"))
             elif node.type in {"#endif", "preproc_directive"} and node_text:
-                if node_text.startswith(b'#endif'):
-                    all_directives.append((node, 'closer'))
+                if node_text.startswith(b"#endif"):
+                    all_directives.append((node, "closer"))
 
         all_directives.sort(key=lambda d: d[0].start_byte)
-        balance = sum(1 if name == 'opener' else -1 for _, name in all_directives)
+        balance = sum(1 if name == "opener" else -1 for _, name in all_directives)
 
         return code + ("\n#endif" * balance) if balance > 0 else code
 
     def add_missing_braces(self, code: str) -> str:
-        open_braces = code.count('{')
-        close_braces = code.count('}')
+        open_braces = code.count("{")
+        close_braces = code.count("}")
         missing_braces = open_braces - close_braces
 
         if missing_braces > 0:
-            return code + '\n' + '}' * missing_braces
+            return code + "\n" + "}" * missing_braces
 
         return code
 
@@ -151,9 +156,12 @@ class CodeSanitizer:
         is_broken_pattern: bool = False
 
         tree: Tree = tsp.parse(code=code)
-        root_node:Node = tree.root_node
+        root_node: Node = tree.root_node
 
-        if root_node.child_count > 0 and root_node.children[0].type == "function_definition":
+        if (
+            root_node.child_count > 0
+            and root_node.children[0].type == "function_definition"
+        ):
             return code
 
         if root_node.child_count >= 2:
@@ -165,13 +173,17 @@ class CodeSanitizer:
             # 1. (ERROR) followed by (compound_statement)
             # 2. (expression_statement) followed by (compound_statement)
             is_broken_pattern = (
-                (first_child.type in ["ERROR", "expression_statement"] and second_child.type == "compound_statement")
+                first_child.type in ["ERROR", "expression_statement"]
+                and second_child.type == "compound_statement"
             )
         # case in which no type specifier and the function is parsed as macro_type_specifier
-        if (
-            root_node
-            and ((root_node.children[0].type == "declaration" and root_node.children[0].named_children[0].type == "macro_type_specifier")
-            or (root_node.children[0].type == "macro_type_specifier"))
+        if root_node and (
+            (
+                root_node.children[0].type == "declaration"
+                and root_node.children[0].named_children[0].type
+                == "macro_type_specifier"
+            )
+            or (root_node.children[0].type == "macro_type_specifier")
         ):
             is_broken_pattern = True
 
@@ -180,10 +192,11 @@ class CodeSanitizer:
 
         return code
 
-    def _find_identifier_in_declarator(self, node: Node) -> Node|None:
+    def _find_identifier_in_declarator(self, node: Node) -> Node | None:
         """Recursively finds the base identifier node within a declarator."""
 
-        if node.type == "identifier": return node
+        if node.type == "identifier":
+            return node
         declarator_child = node.child_by_field_name("declarator")
         if declarator_child:
             return self._find_identifier_in_declarator(declarator_child)
@@ -221,19 +234,22 @@ class CodeSanitizer:
             ) @kr_function
         """
 
-        captures:dict[str,list[Node]] = tsp.query(code=code, query_str=kr_func_query_str)
+        captures: dict[str, list[Node]] = tsp.query(
+            code=code, query_str=kr_func_query_str
+        )
 
-        param_names_nodes:list[Node]|None = captures.get("param_names", [])
-        param_decl_nodes:list[Node]|None = captures.get("param_decls", [])
+        param_names_nodes: list[Node] | None = captures.get("param_names", [])
+        param_decl_nodes: list[Node] | None = captures.get("param_decls", [])
 
-        if not (param_names_nodes and param_decl_nodes): return code
+        if not (param_names_nodes and param_decl_nodes):
+            return code
 
-        param_names_node:Node = param_names_nodes[0]
+        param_names_node: Node = param_names_nodes[0]
 
         # --- Reconstruct the Parameter List ---
-        param_names:list[str] = [
-            p.text.decode('utf-8') for p in param_names_node.children 
-            if p.type == 'identifier' and p.text
+        param_names: list[str] = [
+            p.text.decode("utf-8") for p in param_names_node.children
+            if p.type == "identifier" and p.text
         ]
 
         param_decl_map: dict[str, str] = {}
@@ -241,28 +257,28 @@ class CodeSanitizer:
             type_node = decl_node.child_by_field_name("type")
             if not type_node or not type_node.text: continue
 
-            type_text = type_node.text.decode('utf-8')
+            type_text = type_node.text.decode("utf-8")
 
             for declarator_node in decl_node.children_by_field_name("declarator"):
                 if not declarator_node.text: continue
 
-                full_declarator_text = declarator_node.text.decode('utf-8')
+                full_declarator_text = declarator_node.text.decode("utf-8")
                 identifier_node = self._find_identifier_in_declarator(declarator_node)
 
                 if identifier_node and identifier_node.text:
-                    var_name = identifier_node.text.decode('utf-8')
+                    var_name = identifier_node.text.decode("utf-8")
                     param_decl_map[var_name] = f"{type_text} {full_declarator_text}"
 
         new_params = [param_decl_map.get(name, f"int {name}") for name in param_names]
 
         # --- Plan and Apply Edits ---
         edits = []
-        new_param_list_text = f"({', '.join(new_params)})".encode('utf-8')
+        new_param_list_text = f"({', '.join(new_params)})".encode("utf-8")
         edits.append((param_names_node.start_byte, param_names_node.end_byte, new_param_list_text))
 
         start_byte_to_remove = param_names_node.end_byte
         end_byte_to_remove = param_decl_nodes[-1].end_byte
-        edits.append((start_byte_to_remove, end_byte_to_remove, b''))
+        edits.append((start_byte_to_remove, end_byte_to_remove, b""))
 
         code_bytes = bytearray(code, "utf-8")
         for start, end, text in sorted(edits, key=lambda x: x[0], reverse=True):
@@ -270,8 +286,7 @@ class CodeSanitizer:
 
         return code_bytes.decode("utf-8")
 
-
-    def preprocess_code_gcc_e(self, code: str, gcc_flags: list|None = None) -> str:
+    def preprocess_code_gcc_e(self, code: str, gcc_flags: list | None = None) -> str:
         """Preprocesses a C code string using the external GCC preprocessor.
 
         This method invokes the `gcc -E -P -` command to run the C
@@ -308,7 +323,7 @@ class CodeSanitizer:
         # -E: run the preprocessor only.
         # -P: inhibit generation of linemarkers
         # -:  read from standard input.
-        command: list[str] = ['gcc', '-E', '-P', '-'] + gcc_flags
+        command: list[str] = ["gcc", "-E", "-P", "-"] + gcc_flags
 
         try:
             process = subprocess.run(command, input=code, text=True, capture_output=True, check=True)

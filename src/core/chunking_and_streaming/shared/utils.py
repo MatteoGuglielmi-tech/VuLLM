@@ -1,16 +1,16 @@
-from collections.abc import Generator
 import difflib
 import json
+import logging
+
 from typing import Any
 from pathlib import Path
+from collections.abc import Generator
 
 from .decorators import ensure_jsonl_extension
 from .typedef import JsonlData
 
 
-import logging
-from .stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
+logger = logging.getLogger(name=__name__)
 
 
 @ensure_jsonl_extension

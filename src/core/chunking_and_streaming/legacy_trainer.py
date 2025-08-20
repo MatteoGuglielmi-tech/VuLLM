@@ -1,7 +1,6 @@
-# src/core/chunking_and_streaming/legacy_trainer.py
-
 import os
 import gc
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Any
@@ -18,7 +17,8 @@ from transformers.utils.quantization_config import BitsAndBytesConfig
 from transformers.tokenization_utils import PreTrainedTokenizer
 from trl import SFTConfig, SFTTrainer
 
-from .stdout import logger
+
+logger = logging.getLogger(name=__name__)
 
 
 @dataclass

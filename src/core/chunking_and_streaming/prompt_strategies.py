@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class PromptingStrategy(ABC):
     """An abstract base class for different prompt formatting strategies.
 
@@ -26,6 +27,7 @@ class PromptingStrategy(ABC):
         """
         pass
 
+
 class GenericStrategy(PromptingStrategy):
     """A generic strategy that simply combines the system and user prompts.
 
@@ -39,6 +41,7 @@ class GenericStrategy(PromptingStrategy):
 
         return f"{system_prompt}\n{user_prompt}"
 
+
 class Llama3Strategy(PromptingStrategy):
     """A strategy that formats prompts for Llama 3 instruct models.
 
@@ -47,12 +50,13 @@ class Llama3Strategy(PromptingStrategy):
     to separate the user's query from the expected answer, using
     "Correct answer:" as a delimiter.
     """
+
     def format(self, system_prompt: str, user_prompt: str) -> str:
         """Formats prompts using the Llama 3 instruct model structure."""
 
-        parts:list[str] = user_prompt.split("Correct answer:")
-        user_content:str = parts[0].strip()
-        assistant_content:str = parts[1].strip() if len(parts) > 1 else ""
+        parts: list[str] = user_prompt.split("Correct answer:")
+        user_content: str = parts[0].strip()
+        assistant_content: str = parts[1].strip() if len(parts) > 1 else ""
 
         return (
             f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"

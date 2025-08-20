@@ -7,7 +7,8 @@ from tree_sitter import Node, Tree
 from .shared.decorators import ensure_jsonl_extension, validate_argument_value
 from .shared.utils import save_to_jsonl
 from .shared.typedef import *
-from .shared.tree_sitter_parser import TreeSitterParser
+from ...common.tree_sitter_parser import TreeSitterParser
+from ...common.common_typedef import TSNode, Capture, Captures
 
 
 BLOCK_TYPES: set[str] = {
@@ -127,6 +128,8 @@ def get_func_statements(body_node: TSNode, tsp: TreeSitterParser) -> list[Node]:
     """
 
     nodes: list[Node] = []
+
+    # TODO: remove PREPROCESSOR DIRECTIVES and add custom top level macros
 
     # Query for statements and preprocessor directives that can appear directly inside a compound_statement
     query_string: str = """

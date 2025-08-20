@@ -7,6 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 from pathlib import Path
@@ -20,9 +21,7 @@ from .shared.typedef import ChatMsg
 from .logits_processor import EnforceSingleTokenGeneration, LogitsProcessor
 
 
-import logging
-from .shared.stdout import MY_LOGGER_NAME
-logger = logging.getLogger(MY_LOGGER_NAME)
+logger = logging.getLogger(name=__name__)
 
 
 @dataclass

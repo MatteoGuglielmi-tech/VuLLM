@@ -6,7 +6,8 @@ from core.chunking_and_streaming.unsloth_test import UnslothTestPipeline
 from core.chunking_and_streaming.dataset import DatasetHandler
 from transformers import AutoTokenizer
 from .run_fine_tune import BASE_MODEL
-from .shared.stdout import setup_logger
+
+from ...common.logging_config import setup_logger
 
 
 if __name__ == "__main__":

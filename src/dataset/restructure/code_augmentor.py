@@ -1,9 +1,12 @@
+import logging
 from dataclasses import dataclass
 from tree_sitter import Tree, Node, Query, QueryCursor
 
-from .shared.log import logger
-from .shared.tree_sitter_parser import TreeSitterParser
 from .llm_clients.base import DescriptionGenerator
+
+from ...common.tree_sitter_parser import TreeSitterParser
+
+logger = logging.getLogger(name=__name__)
 
 
 @dataclass
@@ -76,14 +79,14 @@ class CodeAugmentor:
         of decision points (if, while, for, case statements).
         """
 
-        ts_parser:TreeSitterParser|None = self.ts_parsers.get(lang)
+        ts_parser: TreeSitterParser | None = self.ts_parsers.get(lang)
         if not ts_parser:
             return {"parameter_count": -1, "cyclomatic_complexity": -1}
 
-        tree:Tree = ts_parser.parse(code=code)
-        param_count:int = 0
+        tree: Tree = ts_parser.parse(code=code)
+        param_count: int = 0
 
-        query:Query = Query(
+        query: Query = Query(
             ts_parser.language,
             """
             (parameter_list) @params
@@ -93,17 +96,17 @@ class CodeAugmentor:
               (for_statement)
               (case_statement)
             ] @decision
-            """
+            """,
         )
-        captures:dict[str,list[Node]] = QueryCursor(query=query).captures(tree.root_node)
+        captures: dict[str,list[Node]] = QueryCursor(query=query).captures(tree.root_node)
 
-        params:list[Node] = captures.get("params", [])
-        decisions:list[Node] = captures.get("decision", [])
+        params: list[Node] = captures.get("params", [])
+        decisions: list[Node] = captures.get("decision", [])
 
         if params:
-            param_count:int = len([child for child in params[0].children if child.type == "parameter_declaration"])
+            param_count: int = len([child for child in params[0].children if child.type == "parameter_declaration"])
 
-        cyclomatic_complexity:int = 1 + len(decisions)
+        cyclomatic_complexity: int = 1 + len(decisions)
 
         return { "parameter_count": param_count, "cyclomatic_complexity": cyclomatic_complexity }
 
@@ -125,10 +128,10 @@ class CodeAugmentor:
         """
 
         try:
-            return self.description_generator.generate_batch_descriptions(snippets_to_describe)
+            return self.description_generator.generate_batch_descriptions(c_code_batch=snippets_to_describe)
         except Exception as e:
             logger.error(f"Batch LLM func generation failed: {e}")
-            descriptions = ["N/A"] * len(snippets_to_describe) # fallback
+            descriptions = ["N/A"] * len(snippets_to_describe)  # fallback
             return descriptions
 
     def _gen_batch_cwe_descr(self, cwes_to_describe: list[str]) -> list[str]:
@@ -149,10 +152,10 @@ class CodeAugmentor:
         """
 
         try:
-            return self.description_generator.generate_batch_cwe_descriptions(cwes_to_describe)
+            return self.description_generator.generate_batch_cwe_descriptions(cwe_ids_batch=cwes_to_describe)
         except Exception as e:
             logger.error(f"Batch LLM CWE generation failed: {e}")
-            descriptions = ["N/A"] * len(cwes_to_describe) # fallback
+            descriptions = ["N/A"] * len(cwes_to_describe)  # fallback
             return descriptions
 
     def enrich_dataset_batch(self, entries: list[dict]) -> list[dict]:
@@ -181,8 +184,14 @@ class CodeAugmentor:
         """
 
         # collect batch
-        snippets_to_describe = [ e["func"] for e in entries if "func" in e and not e["func"].startswith(("error:", "skipped:"))]
-        cwes_to_describe = [e["cwe"] for e in entries if "cwe" in e and not e["func"].startswith(("error:", "skipped:"))]
+        snippets_to_describe = [
+            e["func"] for e in entries
+            if "func" in e and not e["func"].startswith(("error:", "skipped:"))
+        ]
+        cwes_to_describe = [
+            e["cwe"] for e in entries
+            if "cwe" in e and not e["func"].startswith(("error:", "skipped:"))
+        ]
 
         if not snippets_to_describe: return entries
 
@@ -206,6 +215,6 @@ class CodeAugmentor:
                 entry["vulnerability_description"] = next(cwe_desc_iterator, "N/A")
 
                 for key in keys_to_remove:
-                    entry.pop(key,None)
+                    entry.pop(key, None)
 
         return entries
