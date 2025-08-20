@@ -1,12 +1,13 @@
 import csv
 import json
-from dataclasses import dataclass
-
+import logging
 import pandas as pd
+from dataclasses import dataclass
 from datasets import Dataset
 from tqdm import tqdm
 
-from log import logger
+
+logger = logging.getLogger(name=__name__)
 
 
 @dataclass
