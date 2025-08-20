@@ -79,6 +79,9 @@ class Vulcan:
             lang:str="ext_c"
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
             code:str = self.sanitizer.remove_comments(code=raw_func_str, tsp=tsp)
+            # clean from garbage
+            code = self.sanitizer.validate_and_extract_body(code=code, tsp=tsp)
+
             # filter out empty strings or comments only
             if not code.strip():
                 data["func"] = "error: non valid function (empty or comments only)"
