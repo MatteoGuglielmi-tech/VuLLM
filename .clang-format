@@ -84,3 +84,6 @@ ForEachMacros:
   - sctp_walk_params
   - sctp_tsnmap_init
   - receive_queue_for_each_sk
+
+IfMacros:
+  - IFDBG
