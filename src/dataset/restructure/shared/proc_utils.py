@@ -134,7 +134,7 @@ def is_cpp(code: str) -> bool:
     cpp_patterns: list[re.Pattern] = [
         re.compile(r"\bnamespace\b"),
         re.compile(r"\b(public|protected|private)\s*:"),
-        re.compile(r"\b\w+::\w+"),
+        re.compile(r"\b\w+(?:<[^>]*>)?::\w+"),
         re.compile(r"\b(template)\s*<"),
         re.compile(r"\b(class)\s+\w+\s*\{"),
         re.compile(r"\b(try|catch|throw|new|delete)\b"),
