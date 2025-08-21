@@ -1,14 +1,19 @@
 import logging
+import re
 import os
 import json
-# import re
+import shutil
+from pathlib import Path
+
 from dataclasses import dataclass
 from tqdm import tqdm
 from tree_sitter import Tree
 
-from .shared.proc_utils import load_config, is_cpp, get_refactored_code, pause_exec, read_file, read_lines
+from .shared.proc_utils import (
+    load_config, is_cpp, get_refactored_code, pause_exec,
+    read_file, read_lines, extract_function_signature
+)
 from .code_sanitizer import CodeSanitizer
-# from .interleaved_block_fixer import InterleavedBlockFixer
 from .code_foundry import CodeFoundry
 from .code_augmentor import CodeAugmentor
 
@@ -18,7 +23,9 @@ from .llm_clients.llama_describer import LlamaCodeDescriber
 from ...common.tree_sitter_parser import TreeSitterParser, EXT_C_LANG
 from ...common.loading_config import Loader
 
+
 logger = logging.getLogger(name=__name__)
+
 
 @dataclass
 class Vulcan:
@@ -29,7 +36,7 @@ class Vulcan:
     USE_LOCAL_MODEL: bool = True
 
     def __post_init__(self):
-        self.processed_data: dict[str,str]= {}
+        self.processed_data: dict[str, str] = {}
 
         # adjust paths
         self._setup_config()
@@ -40,12 +47,12 @@ class Vulcan:
         self.foundry = CodeFoundry(ts_lang=EXT_C_LANG)
         self.augmentor = CodeAugmentor(
             metadata_filepath=self.config["default_metadata_path"],
-            description_generator=LlamaCodeDescriber() if self.USE_LOCAL_MODEL else GeminiClient(),
+            description_generator=(LlamaCodeDescriber() if self.USE_LOCAL_MODEL else GeminiClient()),
         )
 
-        self.tmp_c_file = "./misc/tmp.c"
-        self.tmp_cpp_file = "./misc/tmp.cpp"
-        os.makedirs(name="./misc", exist_ok=True)
+        self.tmp_c_file: Path = Path("./misc/tmp.c")
+        self.tmp_cpp_file: Path = Path( "./misc/tmp.cpp" )
+        if self.tmp_c_file.parent.exists(): self.tmp_c_file.parent.mkdir(exist_ok=True)
 
     def _setup_config(self):
         with Loader(desc_msg="⏳ Setting up paths ⏳"):
@@ -55,7 +62,7 @@ class Vulcan:
             project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
             # build the absolute path to the config file.
             config_path = os.path.join(project_root, "config.json")
-            # load config with relative paths 
+            # load config with relative paths
             self.config = load_config(fp=config_path)
             # update paths in config file
             for key, value in self.config.items():
@@ -63,24 +70,22 @@ class Vulcan:
                     self.config[key] = os.path.join(project_root, value)
                     # self.config[key] = os.path.abspath(os.path.join(project_root, value))
 
-
     def _process_snippet(self, data: dict[str, str]) -> dict[str, str]:
         """Processes a single function snippet through the entire pipeline:
         Sanitize -> Repair -> Format -> Augment
         """
 
-        raw_func_str:str|None = data.get("func")
+        raw_func_str: str | None = data.get("func")
         if not raw_func_str:
             data["func"] = "error: empty function body"
             return data
 
         try:
             # --- premature removal of comments to avoid false C++ positives ---
-            lang:str="ext_c"
+            lang: str = "ext_c"
+            # --- PRELIMINARY SANITIZATION ---
             tsp: TreeSitterParser = TreeSitterParser(language_name=lang)
-            code:str = self.sanitizer.remove_comments(code=raw_func_str, tsp=tsp)
-            # clean from garbage
-            code = self.sanitizer.validate_and_extract_body(code=code, tsp=tsp)
+            code: str = self.sanitizer.remove_comments(code=raw_func_str, tsp=tsp)
 
             # filter out empty strings or comments only
             if not code.strip():
@@ -94,16 +99,20 @@ class Vulcan:
 
             data["language"] = lang
 
-            # --- PRELIMINARY SANITIZATION ---
-            code = self.sanitizer._balance_directives(code=code, tsp=tsp)
-
-            # --- STRUCTURAL REPAIR (THE FORGE) ---
-            code = self.foundry.fix_dangling_directives(code=code)
+            try:
+                # try calling gcc right away
+                code = self.sanitizer.preprocess_code_gcc_e(code=code)
+            except Exception:
+                # if problem, catch it and try fixing
+                code = self.foundry.fix_dangling_directives(code=code)
+                code = self.sanitizer._balance_directives(code=code, tsp=tsp)
+                # retry gcc preproc
+                code = self.sanitizer.preprocess_code_gcc_e(code=code)
 
             # --- finish sanitizing ---
-            code = self.sanitizer.preprocess_code_gcc_e(code=code)
             code = self.sanitizer.add_missing_braces(code=code)
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
+            code = self.sanitizer.validate_and_extract_body(code=code, tsp=tsp)
             code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
 
             # check to ensure a function-like structure exists
@@ -115,34 +124,38 @@ class Vulcan:
 
             # --- FORMAT ---
             code = get_refactored_code(
-                code=code, lang_name= "c", # for now I only deal with c functions.
-                # It'll be -> lang_name = re.findall(pattern=r"(c|cpp)", string=lang)[0]
-                fp=self.tmp_c_file, clang_format_file_path=self.config["clang_format_path"],
+                code=code,
+                lang_name=re.findall(pattern=r"(c|cpp)", string=lang)[0],
+                fp=str(self.tmp_c_file),
+                clang_format_file_path=self.config["clang_format_path"],
             )
             data["func"] = code
 
             # --- HEALTH CHECK & MANUAL FIX (Human-in-the-Loop) ---
-            final_tree:Tree = tsp.parse(code=code)
+            final_tree: Tree = tsp.parse(code=code)
             if tsp.is_broken_tree(tree=final_tree):
-                logger.warning("="*60)
+                logger.warning("=" * 60)
                 logger.warning("🚨 BROKEN AST DETECTED 🚨")
                 logger.warning(f"Pipeline paused. Please manually fix the code in:")
                 logger.warning(f"==> {os.path.abspath(self.tmp_c_file)}")
                 logger.warning("After saving your changes, type 'continue' and press Enter to resume.")
-                logger.warning("="*60)
+                logger.warning("=" * 60)
 
                 pause_exec()
 
                 # Read the manually fixed code back in
-                data["func"] = read_file(fp=self.tmp_c_file, strip=False)
+                data["func"] = read_file(fp=str(self.tmp_c_file), strip=False)
                 logger.info("✅ Resuming pipeline with manually fixed code. ✅")
 
             return data
-
         except Exception as e:
-            error_msg = str(e).replace("\n", " ").strip()
-            logger.error(f"Pipeline failed for a snippet. Details: {error_msg}")
-            data["func"] = f"error: pipeline failed. Details: {error_msg}"
+            logger.error("=" * 60)
+            logger.error("🆘 Pipeline failed: sample either corrupted or malformed 🆘")
+            logger.error(f"Reason:\n{e}")
+            logger.error(f"==> function: {extract_function_signature(code=data["func"], language_name="ext_c")}")
+            logger.error(f"==> hash: {data["hash"]}")
+            logger.error("=" * 60)
+            data["func"] = f"error: pipeline failed."
             data["original_func"] = raw_func_str
 
             return data
@@ -151,20 +164,22 @@ class Vulcan:
         """Executes the full preprocessing pipeline."""
         try:
             with Loader(desc_msg="Reading dataset JSONL lines"):
-                lines:list[str] = read_lines(fp=self.config["default_input_path"])
+                lines: list[str] = read_lines(fp=self.config["default_input_path"])
         except FileNotFoundError:
             logger.error(f"The source file was not found at {self.config["default_input_path"]}")
             return
 
-        processed_entries: list[dict[str,str]] = []
+        processed_entries: list[dict[str, str]] = []
         for i, line in enumerate(tqdm(iterable=lines, desc="Forging Code Snippets")):
             try:
-                data:dict[str,str] = json.loads(line)
-                processed_data:dict[str,str] = self._process_snippet(data=data)
+                data: dict[str, str] = json.loads(line)
+                processed_data: dict[str, str] = self._process_snippet(data=data)
                 processed_entries.append(processed_data)
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse line {i}. Skipping.")
-                error_entry:dict[str,str] = { "original_line": str(i), "func": "error: failed to parse line" }
+                error_entry: dict[str, str] = {
+                    "original_line": str(i), "func": "error: failed to parse line",
+                }
                 processed_entries.append(error_entry)
 
         # -- run augmentation on accumulated entries at once --
@@ -179,5 +194,5 @@ class Vulcan:
         logger.info(f"🗃️ Finished dataset saved to: {self.config["default_output_path"]} 🗃️")
 
         # clean up temporary files
-        if os.path.exists(self.tmp_c_file):
-            os.remove(self.tmp_c_file)
+        if self.tmp_c_file.exists():
+            shutil.rmtree(self.tmp_c_file.parent)
