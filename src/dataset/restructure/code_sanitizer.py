@@ -1,13 +1,8 @@
-import re
 import subprocess
 from dataclasses import dataclass
 from tree_sitter import Node, Tree, Query, QueryCursor
 
 from ...common.tree_sitter_parser import TreeSitterParser
-
-TSNode = Node | None
-Nodes = list[Node]
-Match = re.Match[str] | None
 
 
 @dataclass
