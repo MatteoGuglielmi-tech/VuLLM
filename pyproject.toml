@@ -1,16 +1,46 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vullm_pipeline"
-version = "0.1.0"
+name = "vullm"
+version = "0.0.1"
+authors = [ { name="Matteo Guglielmi", email="matteo.guglielmi.ma.gu@gmail.com" } ]
+description = "Complete vulnerability detection pipeline for C source code."
+license = "MIT"
+requires-python = "~=3.13" # for unsloth
+dependencies = [
+    "tree-sitter>=0.25.1",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-extended-c @ file:./libs/tree-sitter-extended-c", # local dep
+    "setuptools",
+    "datasets",
+    "trl",
+    "transformers",
+    "accelerate",
+    "wandb",
+    "python-dotenv",
+    "tqdm",
+    "matplotlib",
+    "seaborn",
+    "scikit-learn",
+    "liger-kernel",
+    "unsloth",
+    "google-generativeai"
+]
 
-# Tells setuptools that your packages are in the 'src' directory
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+dev = [ "pytest", "debugpy" ]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# Tells pytest to add the 'src' directory to the python path before running tests
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
@@ -19,14 +49,10 @@ markers = [
     "slow_api: marks tests as slow slow, requires an API Key"
 ]
 
-
 # [tool.pyright]
-# # Define the top-level directories that pyright should analyze.
-# include = ["src", "tests"]
-# reportUnusedVariable = "warning" # default level
-#
-# # --- configuration for diable rules ---
-# executionEnvironments = [
+# include = ["src", "tests"] # analyze these dirs
+# reportUnusedVariable = "warning"
+# executionEnvironments = [ # rules
 #   { root = "tests", reportUnusedVariable = false },
 #   { root = "src" }
 # ]
