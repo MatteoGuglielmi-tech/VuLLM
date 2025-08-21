@@ -109,6 +109,11 @@ class Vulcan:
                 # retry gcc preproc
                 code = self.sanitizer.preprocess_code_gcc_e(code=code)
 
+            # gcc may cause the removal of the entire function
+            if not code.strip():
+                data["func"] = "error: non valid function (empty or comments only)"
+                return data
+
             # --- finish sanitizing ---
             code = self.sanitizer.add_missing_braces(code=code)
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
