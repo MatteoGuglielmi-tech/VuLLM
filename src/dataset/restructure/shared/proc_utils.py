@@ -8,6 +8,7 @@ from typing import Any
 from tree_sitter import Language, Parser, Query, QueryCursor
 import tree_sitter_c as tsc
 import tree_sitter_cpp as tscpp
+from tree_sitter_extended_c import LANGUAGE as EXT_C_LANG
 
 C_LANGUAGE = Language(tsc.language())
 CPP_LANGUAGE = Language(tscpp.language())
@@ -57,7 +58,7 @@ def read_file(fp: str, encoding: str = "utf-8", strip: bool = True) -> str:
         return f.read().strip() if strip else f.read()
 
 
-def read_lines(fp: str, encoding:str="utf-8") -> list[str]:
+def read_lines(fp: str, encoding: str = "utf-8") -> list[str]:
     """Utility to read file content as string.
 
     Params:
@@ -73,9 +74,10 @@ def read_lines(fp: str, encoding:str="utf-8") -> list[str]:
         return f.readlines()
 
 
-def load_config(fp:str) -> dict[str,Any]:
+def load_config(fp: str) -> dict[str, Any]:
     with open(file=fp, mode="r") as f:
         return json.load(f)
+
 
 def update_language_clang_format(fp: str, language_to_set: str) -> None:
     """Utility to update `Language` field of .clang-format file.
@@ -180,7 +182,12 @@ def extract_function_signature(code: str, language_name: str) -> str | None:
         or None if no function definition is found.
     """
 
-    language : Language = C_LANGUAGE if language_name == "c" else CPP_LANGUAGE
+    SUPPORTED_LANGS = { "c": Language(tsc.language()), "cpp": Language(tscpp.language()), "ext_c": EXT_C_LANG }
+    match (language_name):
+        case "c": language = SUPPORTED_LANGS[language_name]
+        case "cpp": language = SUPPORTED_LANGS[language_name]
+        case _: language = EXT_C_LANG
+
     parser = Parser(language)
 
     tree = parser.parse(bytes(code, encoding="utf-8"))
@@ -221,11 +228,10 @@ def extract_function_signature(code: str, language_name: str) -> str | None:
             storage_class = " ".join([n.text.decode() for n in specifiers if n.text])
             signature = storage_class + " " + signature
 
-        cleaned_signature = ' '.join(signature.split())
+        cleaned_signature = " ".join(signature.split())
         return cleaned_signature
 
     return None
-
 
 
 def spawn_clang_format(filepath: str, lang_name: str, clang_format_config_file: str) -> str:
@@ -244,14 +250,14 @@ def spawn_clang_format(filepath: str, lang_name: str, clang_format_config_file: 
         str: The refactored code read from the file.
     """
 
-    current_language: str|None = ""
+    current_language: str | None = ""
 
     # 1. Check current language in .clang-format and update if necessary.
     try:
-        with open(file=clang_format_config_file, mode='r', encoding='utf-8') as f:
+        with open(file=clang_format_config_file, mode="r", encoding="utf-8") as f:
             current_config: str = f.read()
 
-        m: re.Match[str]|None = re.search(pattern=r"^\s*Language:\s*(\w+)", string=current_config, flags=re.MULTILINE)
+        m: re.Match[str] | None = re.search(pattern=r"^\s*Language:\s*(\w+)", string=current_config, flags=re.MULTILINE)
         current_language = m.group(1).lower() if m else None
 
         if current_language != lang_name.lower():
@@ -260,7 +266,7 @@ def spawn_clang_format(filepath: str, lang_name: str, clang_format_config_file: 
         print(f"Warning: Could not read or update .clang-format file: {e}")
 
     # 2. Execute clang-format command.
-    clang_format_exe = shutil.which("clang-format") # get command full path
+    clang_format_exe = shutil.which("clang-format")  # get command full path
     if not clang_format_exe:
         raise RuntimeError("`clang-format` not found. Please ensure it is in your PATH.")
 
@@ -291,7 +297,7 @@ def get_refactored_code(code: str, lang_name: str, fp: str, clang_format_file_pa
     return spawn_clang_format(fp, lang_name, clang_format_file_path)
 
 
-def pause_exec(keyword: str ="ok"):
+def pause_exec(keyword: str = "ok"):
     """Pauses execution and waits for the user to type a specific keyword."""
 
     # Print a newline to move the cursor off the tqdm progress bar line.
@@ -299,4 +305,3 @@ def pause_exec(keyword: str ="ok"):
     while True:
         if input(f"Type `{keyword}` when you're ready to proceed.  ").strip().lower() == keyword:
             break
-
