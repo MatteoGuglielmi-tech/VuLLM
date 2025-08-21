@@ -15,6 +15,7 @@ src/core/results/
 src/core/wandb/
 src/core/chunking_and_streaming/cpp_chunking.py
 src/core/chunking_and_streaming/misc/
+src/vullm.egg-info
 
 # initial experiments
 src/core/initial_exp/
