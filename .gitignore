@@ -34,7 +34,6 @@ src/core/chunking_and_streaming/visualize_chunks.py
 src/core/chunking_and_streaming/chunks.py
 src/core/chunking_and_streaming/datacollator.py
 
-setup/*
 src/core/chunking_and_streaming/checkpoints/
 src/core/chunking_and_streaming/lora_model/
 src/core/chunking_and_streaming/trainer/
