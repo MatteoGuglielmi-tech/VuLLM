@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 import sys
 from dataclasses import dataclass
 
@@ -44,6 +45,8 @@ def setup_logger(level: int = logging.DEBUG, log_file: str = "./misc/app.log"):
     level : int, optional
         The logging level threshold, by default `logging.DEBUG`.
     """
+
+    Path(log_file).parent.mkdir(exist_ok=True)
 
     # capture warnings from `warnings` built-in Python module
     logging.captureWarnings(True)
