@@ -134,7 +134,7 @@ class CodeSanitizer:
 
         return code + ("\n#endif" * balance) if balance > 0 else code
 
-    def add_missing_braces(self, code:str, tsp: TreeSitterParser) -> str:
+    def add_missing_braces(self, code: str, tsp: TreeSitterParser) -> str:
         """
         Appends missing closing braces to a code snippet using a syntax-aware
         parser (tree-sitter) to avoid incorrectly counting braces within
@@ -154,9 +154,14 @@ class CodeSanitizer:
             "}" @close
         """
         captures: Captures = tsp.run_query_on_tree(tree=tree, query_str=query_string)
+        openers = captures.get("open", [])
+        closers = captures.get("close", [])
 
-        open_braces: int = len(captures.get("open", []))
-        close_braces: int = len(captures.get("close", []))
+        def _filer_ghost_nodes(array: list[Node]):
+            return [n for n in array if n.start_byte != n.end_byte and not (n.is_missing or n.is_error)]
+
+        open_braces: int = len(_filer_ghost_nodes(openers))
+        close_braces: int = len(_filer_ghost_nodes(closers))
         balance = open_braces - close_braces
         if balance > 0:
             return code.rstrip() + "\n" + "}" * balance
