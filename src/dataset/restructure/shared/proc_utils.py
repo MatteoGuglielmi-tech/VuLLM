@@ -134,12 +134,21 @@ def is_cpp(code: str) -> bool:
     """
     # 1. Fast regex checks for unambiguous C++ keywords.
     cpp_patterns: list[re.Pattern] = [
-        re.compile(r"\bnamespace\b"),
+        # oop and access control
+        re.compile(r"\b(class)\s+\w+\s*(:)?.*\{"),
         re.compile(r"\b(public|protected|private)\s*:"),
-        re.compile(r"\b\w+(?:<[^>]*>)?::\w+"),
+
+        # templates and namespace
         re.compile(r"\b(template)\s*<"),
-        re.compile(r"\b(class)\s+\w+\s*\{"),
+        re.compile(r"\b(namespace)\b"),
+        re.compile(r"\b\w+(?:<[^>]*>)?::\w+"),
+
+        # exeption handling and memory
         re.compile(r"\b(try|catch|throw|new|delete)\b"),
+
+        # C++11 new feature
+        re.compile(r"\b(static_cast|dynamic_cast|reinterpret_cast|const_cast)\s*<"),
+        # re.compile(r"\b(nullptr)\b"),
     ]
     if any(pattern.search(code) for pattern in cpp_patterns):
         return True
@@ -151,12 +160,13 @@ def is_cpp(code: str) -> bool:
 
         if tree.root_node.has_error: return False
 
-        # Query for C++ specific features within function parameters.
-        # - `reference_declarator` is used for `&` and `&&` in types.
-        # - `optional_parameter_declaration` is used for `type name = value`.
+        # Query for C++ specific features.
         query_string = """ [ 
+          (field_initializer_list)
           (reference_declarator)
           (optional_parameter_declaration)
+          (lambda_expression)
+          (for_range_loop)
         ] @cpp_feature
         """
         query = Query(CPP_LANGUAGE, query_string)
