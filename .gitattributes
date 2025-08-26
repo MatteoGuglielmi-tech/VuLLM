@@ -1,2 +1,2 @@
-*.json filter=lfs diff=lfs merge=lfs -text
+DiverseVul/processed/balanced_c_diversevul.jsonl filter=lfs diff=lfs merge=lfs -text
 *.jsonl filter=lfs diff=lfs merge=lfs -text
