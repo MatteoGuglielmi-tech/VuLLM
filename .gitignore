@@ -1,5 +1,4 @@
-# Dataset folder
-DiverseVul/
+./DiverseVul/raw/
 misc/
 trainer/
 unsloth_compiled_cache/
