@@ -104,6 +104,7 @@ class Balancer:
             code: str = self.remove_comments(code=func_str)
             if not code.strip(): continue # empty or comments entry
             if is_cpp(code=code): continue # if cpp, skip
+            entry["func"] = code
 
             c_entries.append(entry) # if all checks passed
 
