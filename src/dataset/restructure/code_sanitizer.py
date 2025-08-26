@@ -1,5 +1,6 @@
 import subprocess
 from dataclasses import dataclass
+from common.common_typedef import Captures
 from tree_sitter import Node, Tree, Query, QueryCursor
 
 from ...common.tree_sitter_parser import TreeSitterParser
@@ -133,13 +134,32 @@ class CodeSanitizer:
 
         return code + ("\n#endif" * balance) if balance > 0 else code
 
-    def add_missing_braces(self, code: str) -> str:
-        open_braces = code.count("{")
-        close_braces = code.count("}")
-        missing_braces = open_braces - close_braces
+    def add_missing_braces(self, code:str, tsp: TreeSitterParser) -> str:
+        """
+        Appends missing closing braces to a code snippet using a syntax-aware
+        parser (tree-sitter) to avoid incorrectly counting braces within
+        strings or comments.
 
-        if missing_braces > 0:
-            return code + "\n" + "}" * missing_braces
+        Params:
+            code: The code snippet to check and fix.
+            language: The tree-sitter language grammar to use (e.g., C or C++).
+
+        Returns:
+            The code snippet with missing braces appended.
+        """
+
+        tree: Tree = tsp.parse(code=code)
+        query_string: str = """
+            "{" @open
+            "}" @close
+        """
+        captures: Captures = tsp.run_query_on_tree(tree=tree, query_str=query_string)
+
+        open_braces: int = len(captures.get("open", []))
+        close_braces: int = len(captures.get("close", []))
+        balance = open_braces - close_braces
+        if balance > 0:
+            return code.rstrip() + "\n" + "}" * balance
 
         return code
 

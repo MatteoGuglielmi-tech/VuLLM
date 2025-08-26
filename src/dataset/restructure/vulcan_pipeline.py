@@ -3,8 +3,8 @@ import re
 import os
 import json
 import shutil
-from pathlib import Path
 
+from pathlib import Path
 from dataclasses import dataclass
 from tqdm import tqdm
 from tree_sitter import Tree
@@ -115,7 +115,7 @@ class Vulcan:
                 return data
 
             # --- finish sanitizing ---
-            code = self.sanitizer.add_missing_braces(code=code)
+            code = self.sanitizer.add_missing_braces(code=code, tsp=tsp)
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
             code = self.sanitizer.validate_and_extract_body(code=code, tsp=tsp)
             code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
