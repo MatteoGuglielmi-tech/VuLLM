@@ -17,6 +17,10 @@ class CodeSanitizer:
         self.processed_data: dict[int, dict] = {}
         self.last_used_language: str | None = None
 
+    def remove_non_ascii(self, code: str) -> str:
+        """Removes all non-ASCII characters from a string."""
+        return code.encode("ascii", "ignore").decode("ascii")
+
     def remove_comments(self, code: str, tsp: TreeSitterParser) -> str:
         """Parses the code and removes all comment nodes.
 
@@ -31,6 +35,7 @@ class CodeSanitizer:
         """
 
         tree: Tree = tsp.parse(code)
+
         comments: list[Node] = [
             node
             for node in tsp.traverse_tree(node=tree.root_node)
@@ -39,7 +44,7 @@ class CodeSanitizer:
 
         # Iterate backwards to avoid index shifting issues during replacement (in-place replacement)
         for comment_node in sorted(comments, key=lambda c: c.start_byte, reverse=True):
-            code = code[: comment_node.start_byte] + code[comment_node.end_byte :]
+            code = code[:comment_node.start_byte] + code[comment_node.end_byte :]
 
         return code.lstrip()
 
