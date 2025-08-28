@@ -1,9 +1,14 @@
 import subprocess
+import logging
+import tree_sitter
+
 from dataclasses import dataclass
-from common.common_typedef import Captures
-from tree_sitter import Node, Tree, Query, QueryCursor
+from common.common_typedef import Captures, TSNode
+from tree_sitter import Node, QueryError, Tree, Query, QueryCursor
 
 from ...common.tree_sitter_parser import TreeSitterParser
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -44,7 +49,7 @@ class CodeSanitizer:
 
         # Iterate backwards to avoid index shifting issues during replacement (in-place replacement)
         for comment_node in sorted(comments, key=lambda c: c.start_byte, reverse=True):
-            code = code[:comment_node.start_byte] + code[comment_node.end_byte :]
+            code = code[: comment_node.start_byte] + code[comment_node.end_byte :]
 
         return code.lstrip()
 
@@ -87,12 +92,14 @@ class CodeSanitizer:
             """
         else:
             # C query is restricted to C constructs
-            query_str = "[ (function_definition) (compound_statement) ] @target"
+            query_str = """[ 
+                (function_definition)
+                (compound_statement)
+                (zend_vm_handler)
+            ] @target"""
 
-        query: Query = Query(tsp.language, query_str)
-        query_cursor: QueryCursor = QueryCursor(query)
-        captures: dict[str, list[Node]] = query_cursor.captures(tree.root_node)
-        target_nodes: list[Node] | None = captures.get("target")
+        captures: Captures = tsp.run_query_on_node(node=tree.root_node, query_str=query_str)
+        target_nodes: list[Node] = captures.get("target", [])
         if not target_nodes: return ""
 
         # find the earliest valid construct
@@ -102,13 +109,13 @@ class CodeSanitizer:
         # If we found a standalone compound_statement, check if its parent is
         # the root or an ERROR at the root. This confirms it's not a nested block.
         if first_node.type == "compound_statement":
-            parent: Node | None = first_node.parent
+            parent: TSNode = first_node.parent
             if parent and parent.type not in ["translation_unit", "ERROR"]:
                 return ""
 
-        return code[first_node.start_byte :]
+        return code[first_node.start_byte:]
 
-    def _balance_directives(self, code: str, tsp: TreeSitterParser) -> str:
+    def balance_directives(self, code: str, tsp: TreeSitterParser) -> str:
         """Balances preprocessor directives using a text-based classification
         of fundamental `preproc_directive` nodes.
 
@@ -163,7 +170,11 @@ class CodeSanitizer:
         closers = captures.get("close", [])
 
         def _filer_ghost_nodes(array: list[Node]):
-            return [n for n in array if n.start_byte != n.end_byte and not (n.is_missing or n.is_error)]
+            return [
+                n
+                for n in array
+                if n.start_byte != n.end_byte and not (n.is_missing or n.is_error)
+            ]
 
         open_braces: int = len(_filer_ghost_nodes(openers))
         close_braces: int = len(_filer_ghost_nodes(closers))
@@ -228,10 +239,31 @@ class CodeSanitizer:
 
         return None
 
-    def _kr_style_to_ansi(self, code: str, tsp: TreeSitterParser) -> str:
+    def is_php_zend(self, code: str, tsp: TreeSitterParser) -> bool:
+        tree: Tree = tsp.parse(code=code)
+        root_node: Node = tree.root_node
+
+        query_php_zend = """
+        (translation_unit
+            (zend_vm_handler) @zend
+        )
+        """
+        try:
+            captures: Captures = tsp.run_query_on_node(node=root_node, query_str=query_php_zend)
+            if captures: return True  # applying this fix to the PHP Zend virtual machine would break the code
+        except tree_sitter.QueryError as e: raise QueryError(f" ❌ Grammar is broken!\n {e} ")
+        except Exception as e: raise e
+
+        return False
+
+    def kr_style_to_ansi(self, code: str, tsp: TreeSitterParser) -> str:
         """Transforms a K&R C-style function into a modern ANSI C function using
         a robust, two-stage Tree-sitter approach.
         """
+
+        tree: Tree = tsp.parse(code=code)
+        root_node: Node = tree.root_node
+
 
         # --- Stage 1: Normalization Pass ---
         # check for the "broken" AST pattern of a K&R function
@@ -242,7 +274,7 @@ class CodeSanitizer:
               (compound_statement) @body
             )
         """
-        if tsp.query(code=code, query_str=broken_kr_query_str):
+        if tsp.run_query_on_node(node=root_node, query_str=broken_kr_query_str):
             code = "int " + code.strip()
 
         # --- Stage 2: Conversion Pass ---
@@ -259,21 +291,19 @@ class CodeSanitizer:
             ) @kr_function
         """
 
-        captures: dict[str, list[Node]] = tsp.query(
-            code=code, query_str=kr_func_query_str
-        )
+        captures: Captures = tsp.run_query_on_node(node=root_node, query_str=kr_func_query_str)
 
         param_names_nodes: list[Node] | None = captures.get("param_names", [])
         param_decl_nodes: list[Node] | None = captures.get("param_decls", [])
 
-        if not (param_names_nodes and param_decl_nodes):
-            return code
+        if not (param_names_nodes and param_decl_nodes): return code
 
         param_names_node: Node = param_names_nodes[0]
 
         # --- Reconstruct the Parameter List ---
         param_names: list[str] = [
-            p.text.decode("utf-8") for p in param_names_node.children
+            p.text.decode("utf-8")
+            for p in param_names_node.children
             if p.type == "identifier" and p.text
         ]
 
@@ -342,7 +372,8 @@ class CodeSanitizer:
             which can occur due to errors in the C code.
         """
 
-        if gcc_flags is None: gcc_flags = []
+        if gcc_flags is None:
+            gcc_flags = []
 
         # Command to execute: gcc -E -P -
         # -E: run the preprocessor only.
@@ -351,9 +382,15 @@ class CodeSanitizer:
         command: list[str] = ["gcc", "-E", "-P", "-"] + gcc_flags
 
         try:
-            process = subprocess.run(command, input=code, text=True, capture_output=True, check=True)
+            process = subprocess.run(
+                command, input=code, text=True, capture_output=True, check=True
+            )
             return process.stdout
         except FileNotFoundError:
-            raise FileNotFoundError(" ❌ 'gcc' not found. Ensure it is installed and in Path")
+            raise FileNotFoundError(
+                " ❌ 'gcc' not found. Ensure it is installed and in Path"
+            )
         except subprocess.CalledProcessError as e:
-            raise subprocess.SubprocessError(f" ❌ Error during preprocessing:\n{e.stderr}")
+            raise subprocess.SubprocessError(
+                f" ❌ Error during preprocessing:\n{e.stderr}"
+            )

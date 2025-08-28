@@ -106,7 +106,7 @@ class Vulcan:
             except Exception:
                 # if problem, catch it and try fixing
                 code = self.foundry.fix_dangling_directives(code=code)
-                code = self.sanitizer._balance_directives(code=code, tsp=tsp)
+                code = self.sanitizer.balance_directives(code=code, tsp=tsp)
                 # retry gcc preproc
                 code = self.sanitizer.preprocess_code_gcc_e(code=code)
 
@@ -119,14 +119,17 @@ class Vulcan:
             code = self.sanitizer.add_missing_braces(code=code, tsp=tsp)
             code = self.sanitizer.add_missing_return_types(code=code, tsp=tsp)
             code = self.sanitizer.validate_and_extract_body(code=code, tsp=tsp)
-            code = self.sanitizer._kr_style_to_ansi(code=code, tsp=tsp)
 
-            # check to ensure a function-like structure exists
-            function_query_str = "(function_definition) @function"
-            captures = tsp.query(code=code, query_str=function_query_str)
-            if not captures:
-                data["func"] = "error: non valid function (no function definition found)"
-                return data
+            # don't mess up with PHP ZEND Engine
+            if not self.sanitizer.is_php_zend(code=code, tsp=tsp):
+                code = self.sanitizer.kr_style_to_ansi(code=code, tsp=tsp)
+
+                # check to ensure a function-like structure exists
+                function_query_str = "(function_definition) @function"
+                captures = tsp.query(code=code, query_str=function_query_str)
+                if not captures:
+                    data["func"] = "error: non valid function (no function definition found)"
+                    return data
 
             # --- FORMAT ---
             code = get_refactored_code(
