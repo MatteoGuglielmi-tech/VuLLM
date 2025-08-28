@@ -13,13 +13,13 @@ from simple_loader import Loader
 from common.tree_sitter_parser import TreeSitterParser
 from dataset.restructure.shared.proc_utils import is_cpp
 
-JsonlEntry: TypeAlias = dict[str,Any]
+JsonlEntry: TypeAlias = dict[str, Any]
 
 
 def get_parser():
     parser = argparse.ArgumentParser(prog="Balance dataset")
-    parser.add_argument( "--input_file_path", type=str, help="Absolute path to the raw dataset.") 
-    parser.add_argument( "--output_file_path", type=str, help="Absolute path to the output location where to save the balanced dataset to.")
+    parser.add_argument("--input_file_path", type=str, help="Absolute path to the raw dataset.")
+    parser.add_argument("--output_file_path", type=str, help="Absolute path to the output location where to save the balanced dataset to.")
     parser.add_argument( "--debug", type=bool, action=argparse.BooleanOptionalAction, help="Activate debug CLI logs")
     return parser
 
@@ -42,7 +42,7 @@ class Balancer:
         metafile.mkdir(exist_ok=True)
         self.meta_file_path = metafile / "metadata_balancing.txt"
 
-    def _read_jsonl(self, input_file_path:Path) -> list[JsonlEntry]:
+    def _read_jsonl(self, input_file_path: Path) -> list[JsonlEntry]:
         jsonl_obj: list[JsonlEntry] = []
         if not input_file_path.exists(): raise FileNotFoundError(f"{input_file_path} does not exit.")
 
@@ -56,23 +56,23 @@ class Balancer:
 
     def _write_list_jsonl(self, output_file_path: Path, content: list[JsonlEntry]):
         with Loader(f"Writing file to '{output_file_path}'"):
-            with open(file=output_file_path, mode='w', encoding='utf-8') as f_out:
+            with open(file=output_file_path, mode="w", encoding="utf-8") as f_out:
                 for item in content:
-                    f_out.write(json.dumps(item) + '\n')
+                    f_out.write(json.dumps(item) + "\n")
 
-    def _write_dict_jsonl(self, output_file_path: Path, content: dict[str,list[JsonlEntry]]):
+    def _write_dict_jsonl(self, output_file_path: Path, content: dict[str, list[JsonlEntry]]):
         log_messages: list[str] = ["--- Data Balancing and Grouping Log ---\n\n"]
         with Loader(f"Writing file to '{output_file_path}'"):
-            with open(file=output_file_path, mode='w', encoding='utf-8') as f_out:
+            with open(file=output_file_path, mode="w", encoding="utf-8") as f_out:
                 for project, functions in content.items():
                     log_messages.append(f"  - Writing {len(functions)} functions for project '{project}'\n")
                     for item in functions:
-                        f_out.write(json.dumps(item) + '\n')
+                        f_out.write(json.dumps(item) + "\n")
 
         with open(file=self.meta_file_path, mode="w", encoding="utf-8") as fopen:
             fopen.writelines(log_messages)
 
-    def _write_jsonl(self, output_file_path: Path, content: list[JsonlEntry]|dict[str,list[JsonlEntry]]):
+    def _write_jsonl(self, output_file_path: Path, content: list[JsonlEntry] | dict[str, list[JsonlEntry]]):
         output_file_path.parent.mkdir(exist_ok=True)
         if isinstance(content, list): self._write_list_jsonl(output_file_path=output_file_path, content=content)
         if isinstance(content, dict): self._write_dict_jsonl(output_file_path=output_file_path, content=content)
@@ -81,32 +81,33 @@ class Balancer:
         with Loader(f"Grouping the data by project..."):
             grouped_by_project = defaultdict(list)
             for item in data:
-                project_name = item.get('project')
+                project_name = item.get("project")
                 if project_name: grouped_by_project[project_name].append(item)
 
         return grouped_by_project
 
     def remove_comments(self, code: str) -> str:
         tree: Tree = self.tsp.parse(code)
-        comments: list[Node] = [node
-            for node in self.tsp.traverse_tree(node=tree.root_node)
-            if node.type == "comment"]
+        comments: list[Node] = [
+            node for node in self.tsp.traverse_tree(node=tree.root_node)
+            if node.type == "comment"
+        ]
         for comment_node in sorted(comments, key=lambda c: c.start_byte, reverse=True):
-            code = code[:comment_node.start_byte] + code[comment_node.end_byte:]
+            code = code[: comment_node.start_byte] + code[comment_node.end_byte :]
 
         return code.lstrip()
 
     def _filter_cpp_out(self, data: list[JsonlEntry]):
         c_entries: list[JsonlEntry] = []
         for entry in tqdm(iterable=data, desc="🚧 Filtering Cpp functions out 🚧."):
-            func_str: str|None = entry.get("func")
+            func_str: str | None = entry.get("func")
             if not func_str: continue
             code: str = self.remove_comments(code=func_str)
-            if not code.strip(): continue # empty or comments entry
-            if is_cpp(code=code): continue # if cpp, skip
+            if not code.strip(): continue  # empty or comments entry
+            if is_cpp(code=code): continue  # if cpp, skip
             entry["func"] = code
 
-            c_entries.append(entry) # if all checks passed
+            c_entries.append(entry)  # if all checks passed
 
         return c_entries
 
@@ -158,4 +159,3 @@ if __name__ == "__main__":
     args = get_parser().parse_args()
     balancer = Balancer(input_file_path=Path(args.input_file_path), output_file_path=Path(args.output_file_path))
     balancer.balance_jsonl_data()
-
