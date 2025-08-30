@@ -2,13 +2,11 @@ import json
 import argparse
 import logging
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+import tiktoken
 
-from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 from collections import defaultdict
 from common.common_typedef import Captures
 from tree_sitter import Tree, Node
@@ -24,8 +22,6 @@ JsonlEntry: TypeAlias = dict[str, Any]
 setup_logger()
 logger = logging.getLogger(name=__name__)
 
-
-plt.style.use('fivethirtyeight')
 
 def get_parser():
     parser = argparse.ArgumentParser(prog="Balance dataset")
@@ -44,8 +40,15 @@ class Balancer:
 
     input_file_path: Path
     output_file_path: Path
+    balance_tolerance: float = .9
+    random_state: int = 42
+    n_bins: int = 20
     meta_file_path: Path = field(init=False)
     tsp: TreeSitterParser = TreeSitterParser(language_name="ext_c")
+    df: pd.DataFrame = field(init=False)
+
+    # tokenizer like gpt-4's to approximate LLM token count
+    tokenizer = tiktoken.get_encoding("cl100k_base")
 
     def __post_init__(self):
         log_file_prefix = self.output_file_path.parent
@@ -89,7 +92,7 @@ class Balancer:
         if isinstance(content, dict): self._write_dict_jsonl(output_file_path=output_file_path, content=content)
 
     def _group_by_project(self, data: list[JsonlEntry]) -> dict[str, list[JsonlEntry]]:
-        with Loader(f"Grouping the data by project..."):
+        with Loader(f"Grouping data by project..."):
             grouped_by_project = defaultdict(list)
             for item in data:
                 project_name = item.get("project")
@@ -97,7 +100,7 @@ class Balancer:
 
         return grouped_by_project
 
-    def remove_comments(self, code: str) -> str:
+    def _remove_comments(self, code: str) -> str:
         tree: Tree = self.tsp.parse(code)
         comments: list[Node] = [
             node for node in self.tsp.traverse_tree(node=tree.root_node)
@@ -113,7 +116,7 @@ class Balancer:
         for entry in tqdm(iterable=data, desc="🚧 Filtering Cpp functions out 🚧."):
             func_str: str | None = entry.get("func")
             if not func_str: continue
-            code: str = self.remove_comments(code=func_str)
+            code: str = self._remove_comments(code=func_str)
             if not code.strip(): continue  # empty or comments entry
             if is_cpp(code=code): continue  # if cpp, skip
             entry["func"] = code
@@ -122,7 +125,7 @@ class Balancer:
 
         return c_entries
 
-    def _get_cyclomatic_complexity(self, tree: Tree) -> int:
+    def _get_cyclomatic_complexity(self, code_string: str) -> int:
         query_str = """[
             (if_statement)
             (while_statement)
@@ -141,210 +144,123 @@ class Balancer:
           ] @decision
         """
 
+        tree = self.tsp.parse(code=code_string)
         captures: Captures = self.tsp.run_query_on_tree(tree=tree, query_str=query_str)
         decisions: list[Node] = captures.get("decision", [])
 
-        return (1 + len(decisions))
+        if not decisions: return 0
+        else: return (1 + len(decisions))
 
-    def _get_token_count(self, tree: Tree) -> int:
-        """Counts the number of tokens in the code by counting tree leaves."""
+    def _get_token_count(self, code_string: str) -> int:
+        return len(self.tokenizer.encode(code_string))
 
-        token_count: int = 0
-        for node in self.tsp.traverse_tree(node=tree.root_node):
-            if not node.children: token_count += 1
-
-        return token_count
-
-    def _extend_with_metadata(self, tree: Tree) -> dict[str, int]:
-        complexity: int = self._get_cyclomatic_complexity(tree=tree)
-        tokens: int = self._get_token_count(tree=tree)
+    def _extend_with_metadata(self, code_string: str) -> dict[str, int]:
+        complexity: int = self._get_cyclomatic_complexity(code_string=code_string)
+        tokens: int = self._get_token_count(code_string=code_string)
 
         return { "complexity": complexity, "tokens": tokens }
 
-    def analyze_and_select_by_token_count(
-        self,
-        non_vulnerable_entries: list[dict],
-        lower_quantile: float = 0.05,
-        upper_quantile: float = 0.95,
-    ) -> list[JsonlEntry]:
-
-
-        entries_with_metadata: list[JsonlEntry] = []
-        for entry in non_vulnerable_entries:
-            code: str = entry["func"]
-            tree: Tree = self.tsp.parse(code=code)
-            extended_entry: JsonlEntry = entry.copy() # self._extend_with_metadata(tree)
-            extended_entry["metrics"] = self._extend_with_metadata(tree=tree)
-            entries_with_metadata.append(extended_entry)
-
-        if not entries_with_metadata: raise ValueError("No entries to analyze")
-        token_counts = [e["metrics"]["tokens"] for e in entries_with_metadata]
-        s: pd.Series = pd.Series(data=token_counts, dtype=int)
-
-        # -- save collective stats --
-        stats_df: pd.DataFrame = s.describe().to_frame().round(3)
-        stats_df.columns = ['value'] # Rename column for clarity
-        target_location: Path = Path(__file__).parent.parent / "analysis/assets/token_count_distribution.csv"
-        for p in target_location.parts[1:-1]: Path(p).mkdir(exist_ok=True) # create "../analysis/assets/"
-        stats_df.to_csv(path_or_buf=target_location, encoding="utf-8", lineterminator="\n")
-
-        print("\n--- Distribution Statistics ---")
-        print(stats_df)
-        print("-----------------------------\n")
-
-        # -- plots --
-        df = pd.DataFrame({"Values": s, "Category": "Token count"})
-
-        fig, ax = plt.subplots(figsize=(10,15))
-        ax.set_facecolor(color='darkgray')
-
-        sns.boxplot(
-            x="Category", y="Values", data=df, ax=ax,
-            width=0.5,
-            color="#a9d6e5",
-            linewidth=1.5,
-            showfliers=False # outlayers will be reprsented by stripplot
-        )
-        sns.stripplot( x="Category", y="Values", data=df, ax=ax,
-            color="#456882",  # A darker, contrasting blue
-            alpha=.8,  # Use transparency to show density
-            jitter=0.2,  # Spread points horizontally
-            size=6,
-            edgecolor="black",
-            linewidth=0.4
-        )
-
-        # statistics
-        mean_val = df['Values'].mean()
-        median_val = df['Values'].median()
-        std_val = df['Values'].std()
-        max_val = df['Values'].max()
-        min_val = df['Values'].min()
-
-        # Plot Mean and Median with distinct, clear markers
-        ax.plot([0], [median_val], marker='o', color='#ff6b6b', markersize=10, linestyle='None', label='Median') # type: ignore
-        ax.plot([0], [mean_val], marker='D', color='#ff6b6b', markersize=8, linestyle='None', label='Mean') # type: ignore
-
-        # create title and subtitle
-        fig.text(0.1, 0.96, 'Distribution of Token Counts in Non-Vulnerable Functions',
-                fontsize=13, fontweight='bold', ha='left')
-        fig.text(0.1, 0.92, 'Analysis shows a right-skewed distribution with several high-value outliers',
-                fontsize=13, ha='left', color='gray')
-
-        stats_text = (f"Mean: {mean_val:.2f}\n"
-              f"Median: {median_val:.2f}\n"
-              f"Std Dev: {std_val:.2f}\n"
-              f"Max / Min: {max_val:.0f} / {min_val:.0f}")
-
-        # place text box
-        ax.text(0.95, 0.85, stats_text, transform=ax.transAxes, fontsize=13,
-        verticalalignment='top', horizontalalignment='right',
-        bbox=dict(boxstyle='round,pad=0.5', fc='white', ec='darkgray', lw=1, alpha=0.9))
-
-        ax.annotate('Mean', xy=(0, mean_val), xycoords='data', # type: ignore
-                    xytext=(0.35, mean_val), textcoords='data', # type: ignore
-                    arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=-0.1", color='black', lw=1.5),
-                    fontsize=10, ha='left', va='center')
-
-        ax.annotate('Median', xy=(0, median_val), xycoords='data', # type: ignore
-                    xytext=(0.35, median_val), textcoords='data', # type: ignore
-                    arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0.1", color='black', lw=1.5),
-                    fontsize=10, ha='left', va='center')
-
-        ax.set_xlabel('')
-        ax.set_ylabel('Token Count', fontsize=14, fontweight='bold')
-        ax.set_xticklabels([])
-        ax.tick_params(axis='x', length=0) # Remove x-axis tick marks
-        ax.set_ylim(min_val - (min_val * 0.1), max_val + (max_val * 0.1))
-
-        ax.yaxis.set_major_locator(MultipleLocator(100))
-        ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
-        ax.yaxis.set_minor_locator(MultipleLocator(50))
-
-        # Add a source line at the bottom
-        fig.text(0.1, 0.02, 'Source: Code analysis dataset',
-                 fontsize=9, color='gray', ha='left')
-
-        # refine grid and spines
-        ax.grid(True, which="minor", linestyle=":", alpha=0.6, axis="y", color="gray")
-        ax.grid(True, which="major", linestyle="-", alpha=0.8, axis="y", color="gray")
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_linewidth(0.8)
-        ax.spines['left'].set_linewidth(0.8)
-
-        plt.tight_layout(rect=[0, 0.05, 1, 0.9]) # type: ignore
-
-        target_location = Path(str(target_location).replace(".csv", ".png"))
-        plt.savefig(target_location)
-        plt.show()
-
-        logger.info("Distribution plot saved to token_distribution.png")
-
-        lower_bound: float = s.quantile(lower_quantile)
-        upper_bound: float = s.quantile(upper_quantile)
-
-        logger.info(f"Dynamic lower bound (quantile={lower_quantile}): {lower_bound:.0f} tokens")
-        logger.info(f"Dynamic upper bound (quantile={upper_quantile}): {upper_bound:.0f} tokens")
-
-        # filter outlayers
-        filtered_entries: list[JsonlEntry] = [e for e in entries_with_metadata if lower_bound <= e["metrics"]["tokens"] <= upper_bound]
-        # sort by complexity, token count as tie-breaker
-        filtered_entries.sort(key=lambda e: (e["metrics"]["complexity"], e["metrics"]["tokens"]))
-
-        logger.info(f"\nOriginal number of entries: {len(non_vulnerable_entries)}")
-        logger.info(f"Filtered number of entries: {len(filtered_entries)}")
-
-        return filtered_entries
-
-
-    def balance_jsonl_data(self):
-        print("🚀 Starting the build process...🚀")
-
-        non_vulnerable_func_list: list[JsonlEntry] = []
-        vulnerable_func_list: list[JsonlEntry] = []
-
-        # read in jsonl
+    def _extract_features(self):
         jsonl_obj: list[JsonlEntry] = self._read_jsonl(input_file_path=self.input_file_path)
-        # retain only c functions
-        c_entries: list[JsonlEntry] = self._filter_cpp_out(data=jsonl_obj)
-        # balance
-        for entry in c_entries:
-            if entry.get("target") is not None:
-                if entry["target"] == 1: vulnerable_func_list.append(entry)
-                else: non_vulnerable_func_list.append(entry)
+        c_entries: list[JsonlEntry] = self._filter_cpp_out(data=jsonl_obj) # filtering
+        self.df = pd.DataFrame(data=c_entries)
+        self.df = self.df.drop(labels=[ "hash", "size", "message"], axis=1)
 
-        logger.info(f"Found {len(vulnerable_func_list)} vulnerable functions (target: 1).")
-        logger.info(f"Found {len(non_vulnerable_func_list)} non-vulnerable functions (target: 0).")
+        # features computation
+        tqdm.pandas(desc="Calculating Cyclomatic Complexity")
+        self.df['complexity'] = self.df['func'].progress_apply(self._get_cyclomatic_complexity)
+        tqdm.pandas(desc="Calculating Token Count")
+        self.df['token_count'] = self.df['func'].progress_apply(self._get_token_count)
+        logger.info("Feature extraction complete.")
 
-        # check balance
-        num_vulnerable: int = len(vulnerable_func_list)
-        num_non_vulnerable: int = len(non_vulnerable_func_list)
+    def _perform_fallback_sampling(self, df_vuln: pd.DataFrame, df_non_vuln: pd.DataFrame):
+        logger.warning("\n⚠️  Distribution matching failed. Using fallback: selecting 'easiest' samples.")
+        num_to_sample = len(df_vuln)
+        df_non_vuln_sorted = df_non_vuln.sort_values(by=['complexity', 'token_count'])
+        df_non_vuln_sampled = df_non_vuln_sorted.head(num_to_sample)
+        self._assemble_final_df(df_vuln, df_non_vuln_sampled)
 
-        if num_vulnerable == 0:
-            print("No vulnerable functions found.")
-            return
-        if num_non_vulnerable < num_vulnerable:
-            print("Warning: Not enough non-vulnerable functions to create a balanced dataset.")
-            sampled_non_vulnerable_func_list = non_vulnerable_func_list
+    def _assemble_final_df(self, df_vuln: pd.DataFrame, df_non_vuln_sampled: pd.DataFrame):
+        combined_df = pd.concat([df_vuln, df_non_vuln_sampled])
+        cols_to_drop = ['complexity', 'token_count', 'complexity_bin', 'token_bin']
+        existing_cols_to_drop = [col for col in cols_to_drop if col in combined_df.columns]
+        self.df_balanced = cast(pd.DataFrame, combined_df.drop(columns=existing_cols_to_drop))
+        # self.df_balanced = self.df_balanced.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
+        self.df_balanced = self.df_balanced.sort_values(by='project').reset_index(drop=True)
+
+    def _perform_stratified_sampling(self):
+        """Performs the core balancing logic."""
+        if self.df is None: raise ValueError("Data not loaded. Run _extract_features() first.")
+
+        logger.info("Performing stratified sampling...")
+        df_vuln = cast(pd.DataFrame, self.df[self.df['target'] == 1].copy())
+        df_non_vuln = cast(pd.DataFrame, self.df[self.df['target'] == 0].copy())
+
+        logger.debug(f"Found {len(df_vuln)} vulnerable functions (target: 1).")
+        logger.debug(f"Found {len(df_non_vuln)} non-vulnerable functions (target: 0).")
+
+        try:
+            # quantile cut: divide into a set number of equal-sized groups.
+            df_vuln['complexity_bin'], complexity_bins = pd.qcut(df_vuln['complexity'], q=self.n_bins, labels=False, retbins=True, duplicates='drop')
+            df_vuln['token_bin'], token_bins = pd.qcut(df_vuln['token_count'], q=self.n_bins, labels=False, retbins=True, duplicates='drop')
+
+            # value cut: divides based on pre-defined bins
+            # apply same bin edges to non-vulnerable data
+            df_non_vuln['complexity_bin'] = pd.cut(df_non_vuln['complexity'], bins=complexity_bins, labels=False, include_lowest=True)
+            df_non_vuln['token_bin'] = pd.cut(df_non_vuln['token_count'], bins=token_bins, labels=False, include_lowest=True)
+
+            df_non_vuln = df_non_vuln.dropna(subset=['complexity_bin', 'token_bin']) # type: ignore
+            df_non_vuln['complexity_bin'] = df_non_vuln['complexity_bin'].astype(int)
+            df_non_vuln['token_bin'] = df_non_vuln['token_bin'].astype(int)
+            # count targets in each bin
+            target_counts = df_vuln.groupby(['complexity_bin', 'token_bin']).size()
+
+            sampled_indices = []
+            for (c_bin, t_bin), count in target_counts.items(): # type: ignore
+                non_vuln_in_bin = df_non_vuln[
+                    (df_non_vuln["complexity_bin"] == c_bin) & (df_non_vuln["token_bin"] == t_bin)
+                ]
+                num_to_sample = min(int(count), len(non_vuln_in_bin))
+                sampled_indices.extend(non_vuln_in_bin.sample(n=num_to_sample, random_state=self.random_state).index)
+
+            df_non_vuln_sampled = df_non_vuln.loc[sampled_indices]
+
+            # check if really balanced
+            num_vuln = len(df_vuln)
+            num_sampled = len(df_non_vuln_sampled)
+            if num_sampled < (num_vuln * self.balance_tolerance):
+                logger.warning(f"\n⚠️  Distribution matching produced a poorly balanced set ({num_sampled}/{num_vuln}).")
+                self._perform_fallback_sampling(df_vuln, df_non_vuln)
+            else:
+                # If the balance is acceptable, proceed as normal.
+                self._assemble_final_df(df_vuln=df_vuln, df_non_vuln_sampled=df_non_vuln_sampled)
+
+        except ValueError:
+            logger.warning("\n⚠️  Distribution matching failed due to incompatible data for binning.")
+            self._perform_fallback_sampling(df_vuln, df_non_vuln)
+
+        logger.info("Balancing complete.")
+        if self.df_balanced is not None:
+            print("Final balanced dataset distribution:")
+            print(self.df_balanced['target'].value_counts())
         else:
-            print(f"Randomly sampling {num_vulnerable} non-vulnerable functions...")
-            sampled_non_vulnerable_func_list = self.analyze_and_select_by_token_count(
-                non_vulnerable_entries=non_vulnerable_func_list,
-            )
+            print("Balancing resulted in an empty dataset.")
 
-        # full data
-        balanced_data: list[JsonlEntry] = vulnerable_func_list + sampled_non_vulnerable_func_list
-        print(f"🎉 Created a new balanced dataset with {len(balanced_data)} total functions. 🎉")
+    def save_balanced_dataset(self, output_path: str):
+        """Saves the balanced dataset to a new jsonl file."""
+        if self.df_balanced is None: raise ValueError("No balanced dataset to save. Run process() first.")
+        self.df_balanced.to_json(output_path, orient='records', lines=True) # to jsonl
 
-        # arrange by project and save it
-        balanced_by_project: dict[str, list[JsonlEntry]] = self._group_by_project(data=balanced_data)
-        self._write_jsonl(output_file_path=self.output_file_path, content=balanced_by_project)
+        logger.info(f"Balanced dataset saved to {output_path}")
 
-        print("✅ Process completed successfully! ✅")
+    def process(self):
+        """Runs the full pipeline: load, extract features, and balance."""
+        self._extract_features()
+        self._perform_stratified_sampling()
 
 
 if __name__ == "__main__":
     args = get_parser().parse_args()
-    balancer = Balancer(input_file_path=Path(args.input_file_path), output_file_path=Path(args.output_file_path))
-    balancer.balance_jsonl_data()
+    balancer = Balancer(input_file_path=Path(args.input_file_path), output_file_path=Path(args.output_file_path), n_bins=2)
+    balancer.process()
+
