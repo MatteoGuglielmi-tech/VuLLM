@@ -65,6 +65,7 @@ def setup_logger(level: int = logging.DEBUG):
     # == SILENCE NOISY LIBRARIES ==
     # =================================================================
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
     # =================================================================
 
