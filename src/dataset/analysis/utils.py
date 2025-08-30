@@ -1,17 +1,20 @@
 import json
-from typing import Any
+from typing import TypeAlias, Any
+from pathlib import Path
 
+from simple_loader import Loader
 
-def read_json(pth: str) -> dict:
-    with open(file=pth, mode="r") as file:
-        json_string: str = file.read()
+JsonlEntry: TypeAlias = dict[str, Any]
 
-    # Parse JSON data into a dictionary
-    json_data: dict = json.loads(json_string)
+def _read_jsonl(input_file_path: Path) -> list[JsonlEntry]:
+    jsonl_obj: list[JsonlEntry] = []
+    if isinstance(input_file_path, str): input_file_path = Path(input_file_path)
+    if not input_file_path.exists(): raise FileNotFoundError(f"{input_file_path} does not exit.")
 
-    return json_data
+    with Loader(f"Reading data from '{input_file_path}'"):
+        with open(file=input_file_path, mode="r", encoding="utf-8") as f_in:
+            for line in f_in:
+                try: jsonl_obj.append(json.loads(line))
+                except json.JSONDecodeError as e: raise e
 
-
-def UNUSED(var: Any) -> None:
-    _ = var
-    del _
+        return jsonl_obj
