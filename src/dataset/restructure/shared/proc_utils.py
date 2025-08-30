@@ -141,7 +141,7 @@ def is_cpp(code: str) -> bool:
         # templates and namespace
         re.compile(r"\b(template)\s*<"),
         re.compile(r"\b(namespace)\b"),
-        re.compile(r"\b\w+(?:<[^>]*>)?::\w+"),
+        re.compile(r"\b\w+(?:<[^>]*>)?::\S+"),
 
         # exeption handling and memory
         re.compile(r"\b(try|catch|throw|new|delete)\b"),
@@ -167,6 +167,7 @@ def is_cpp(code: str) -> bool:
           (optional_parameter_declaration)
           (lambda_expression)
           (for_range_loop)
+          (destructor_name)
         ] @cpp_feature
         """
         query = Query(CPP_LANGUAGE, query_string)
