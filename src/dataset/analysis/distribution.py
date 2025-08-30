@@ -88,7 +88,7 @@ class DataDistribution:
         )
 
         names = ["Non-Vulnerable", "Vulnerable"]
-        plt.legend(wedges, names, loc="upper right", facecolor="white")
+        plt.legend(wedges, names, loc="upper right", facecolor="white", font=prop)
         plt.tight_layout()
         plt.savefig("./assets/pie_target.png", dpi=300) # Save with high resolution
         plt.show()
@@ -151,8 +151,8 @@ class DataDistribution:
                 fontsize=15, ha="center", color='gray')
 
         ax.tick_params(axis="x", labelrotation=90)
-        ax.set_xlabel("CWE", fontsize=12, fontweight="bold")
-        ax.set_ylabel("Count", fontsize=12, fontweight="bold")
+        ax.set_xlabel("CWE IDs", font=fpath, fontsize=12)
+        ax.set_ylabel("Count", font=fpath, fontsize=12)
         ax.yaxis.set_major_locator(MultipleLocator(50))
         ax.yaxis.set_major_formatter("{x:.0f}")
         ax.yaxis.set_minor_locator(MultipleLocator(25))
