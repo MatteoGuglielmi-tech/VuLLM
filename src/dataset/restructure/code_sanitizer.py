@@ -387,10 +387,6 @@ class CodeSanitizer:
             )
             return process.stdout
         except FileNotFoundError:
-            raise FileNotFoundError(
-                " ❌ 'gcc' not found. Ensure it is installed and in Path"
-            )
+            raise FileNotFoundError(" ❌ 'gcc' not found. Ensure it is installed and in Path")
         except subprocess.CalledProcessError as e:
-            raise subprocess.SubprocessError(
-                f" ❌ Error during preprocessing:\n{e.stderr}"
-            )
+            raise subprocess.SubprocessError(f" ❌ Error during preprocessing:\n{e.stderr}")
