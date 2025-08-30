@@ -40,21 +40,24 @@ class Balancer:
 
     input_file_path: Path
     output_file_path: Path
+    df: pd.DataFrame = field(init=False)
+    meta_file_path: Path = field(init=False)
+    tsp: TreeSitterParser = field(init=False)
+    tokenizer: tiktoken.Encoding = field(init=False)
+
+    # defaults
     balance_tolerance: float = .9
     random_state: int = 42
     n_bins: int = 20
-    meta_file_path: Path = field(init=False)
-    tsp: TreeSitterParser = TreeSitterParser(language_name="ext_c")
-    df: pd.DataFrame = field(init=False)
-
-    # tokenizer like gpt-4's to approximate LLM token count
-    tokenizer = tiktoken.get_encoding("cl100k_base")
 
     def __post_init__(self):
         log_file_prefix = self.output_file_path.parent
         metafile = log_file_prefix / "metadata"
         metafile.mkdir(exist_ok=True)
         self.meta_file_path = metafile / "metadata_balancing.txt"
+        self.tsp: TreeSitterParser = TreeSitterParser(language_name="ext_c")
+        # tokenizer like gpt-4's to approximate LLM token count
+        self.tokenizer: tiktoken.Encoding = tiktoken.get_encoding("cl100k_base")
 
     def _read_jsonl(self, input_file_path: Path) -> list[JsonlEntry]:
         jsonl_obj: list[JsonlEntry] = []
