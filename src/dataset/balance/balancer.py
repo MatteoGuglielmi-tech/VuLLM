@@ -25,8 +25,8 @@ logger = logging.getLogger(name=__name__)
 
 def get_parser():
     parser = argparse.ArgumentParser(prog="Balance dataset")
-    parser.add_argument("--input_file_path", type=str, help="Absolute path to the raw dataset.")
-    parser.add_argument("--output_file_path", type=str, help="Absolute path to the output location where to save the balanced dataset to.")
+    parser.add_argument("--input_fp", type=str, help="Absolute path to the raw dataset.")
+    parser.add_argument("--output_fp", type=str, help="Absolute path to the output location where to save the balanced dataset to.")
     parser.add_argument( "--debug", type=bool, action=argparse.BooleanOptionalAction, help="Activate debug CLI logs")
     return parser
 
@@ -38,8 +38,8 @@ class Balancer:
     items, and then groups the result by the 'project' field in the output file.
     """
 
-    input_file_path: Path
-    output_file_path: Path
+    input_fp: Path
+    output_fp: Path
     df: pd.DataFrame = field(init=False)
     meta_file_path: Path = field(init=False)
     tsp: TreeSitterParser = field(init=False)
@@ -51,7 +51,7 @@ class Balancer:
     n_bins: int = 20
 
     def __post_init__(self):
-        log_file_prefix = self.output_file_path.parent
+        log_file_prefix = self.output_fp.parent
         metafile = log_file_prefix / "metadata"
         metafile.mkdir(exist_ok=True)
         self.meta_file_path = metafile / "metadata_balancing.txt"
@@ -157,15 +157,10 @@ class Balancer:
     def _get_token_count(self, code_string: str) -> int:
         return len(self.tokenizer.encode(code_string))
 
-    def _extend_with_metadata(self, code_string: str) -> dict[str, int]:
-        complexity: int = self._get_cyclomatic_complexity(code_string=code_string)
-        tokens: int = self._get_token_count(code_string=code_string)
-
-        return { "complexity": complexity, "tokens": tokens }
-
     def _extract_features(self):
-        jsonl_obj: list[JsonlEntry] = self._read_jsonl(input_file_path=self.input_file_path)
+        jsonl_obj: list[JsonlEntry] = self._read_jsonl(input_file_path=self.input_fp)
         c_entries: list[JsonlEntry] = self._filter_cpp_out(data=jsonl_obj) # filtering
+        if not c_entries: raise ValueError("No C functions in the dataset")
         self.df = pd.DataFrame(data=c_entries)
         self.df = self.df.drop(labels=[ "hash", "size", "message"], axis=1)
 
@@ -196,6 +191,7 @@ class Balancer:
         if self.df is None: raise ValueError("Data not loaded. Run _extract_features() first.")
 
         logger.info("Performing stratified sampling...")
+        self.df["target"] = self.df["target"].astype('int') # ensure type
         df_vuln = cast(pd.DataFrame, self.df[self.df['target'] == 1].copy())
         df_non_vuln = cast(pd.DataFrame, self.df[self.df['target'] == 0].copy())
 
@@ -236,6 +232,7 @@ class Balancer:
                 self._perform_fallback_sampling(df_vuln, df_non_vuln)
             else:
                 # If the balance is acceptable, proceed as normal.
+                logger.info(f"Distributions match >= 90%")
                 self._assemble_final_df(df_vuln=df_vuln, df_non_vuln_sampled=df_non_vuln_sampled)
 
         except ValueError:
@@ -247,23 +244,24 @@ class Balancer:
             print("Final balanced dataset distribution:")
             print(self.df_balanced['target'].value_counts())
         else:
-            print("Balancing resulted in an empty dataset.")
+            logger.warning("Balancing resulted in an empty dataset.")
 
-    def save_balanced_dataset(self, output_path: str):
+    def save_balanced_dataset(self):
         """Saves the balanced dataset to a new jsonl file."""
         if self.df_balanced is None: raise ValueError("No balanced dataset to save. Run process() first.")
-        self.df_balanced.to_json(output_path, orient='records', lines=True) # to jsonl
+        self.df_balanced.to_json(self.output_fp, orient='records', lines=True) # to jsonl
 
-        logger.info(f"Balanced dataset saved to {output_path}")
+        logger.info(f"Balanced dataset saved to {self.output_fp}")
 
     def process(self):
         """Runs the full pipeline: load, extract features, and balance."""
         self._extract_features()
         self._perform_stratified_sampling()
+        self.save_balanced_dataset()
 
 
 if __name__ == "__main__":
     args = get_parser().parse_args()
-    balancer = Balancer(input_file_path=Path(args.input_file_path), output_file_path=Path(args.output_file_path), n_bins=2)
+    balancer = Balancer(input_fp=Path(args.input_fp), output_fp=Path(args.output_fp), n_bins=2)
     balancer.process()
 
