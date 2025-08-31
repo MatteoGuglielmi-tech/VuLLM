@@ -132,7 +132,8 @@ def is_cpp(code: str) -> bool:
         bool:
             whether the function is written in C++.
     """
-    # 1. Fast regex checks for unambiguous C++ keywords.
+
+    # fast regex checks for unambiguous C++ keywords.
     cpp_patterns: list[re.Pattern] = [
         # oop and access control
         re.compile(r"\b(class)\s+\w+\s*(:)?.*\{"),
@@ -141,17 +142,15 @@ def is_cpp(code: str) -> bool:
         # templates and namespace
         re.compile(r"\b(template)\s*<"),
         re.compile(r"\b(namespace)\b"),
-        re.compile(r"\b\w+(?:<[^>]*>)?::(\S+)?"),
 
         # exeption handling and memory
         re.compile(r"\b(try|catch|throw|new|delete)\b"),
 
         # C++11 new feature
         re.compile(r"\b(static_cast|dynamic_cast|reinterpret_cast|const_cast)\s*<"),
-        # re.compile(r"\b(nullptr)\b"),
     ]
-    if any(pattern.search(code) for pattern in cpp_patterns):
-        return True
+
+    if any(pattern.search(code) for pattern in cpp_patterns): return True
 
     # 2. Slower, more accurate tree-sitter check for ambiguous syntax.
     try:
@@ -169,6 +168,7 @@ def is_cpp(code: str) -> bool:
 
           ; namespace
           (namespace_definition)
+          (namespace_identifier) ; scope
           ; template
           (template_type)
 
