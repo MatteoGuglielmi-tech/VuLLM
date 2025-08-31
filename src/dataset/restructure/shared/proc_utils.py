@@ -141,7 +141,7 @@ def is_cpp(code: str) -> bool:
         # templates and namespace
         re.compile(r"\b(template)\s*<"),
         re.compile(r"\b(namespace)\b"),
-        re.compile(r"\b\w+(?:<[^>]*>)?::\S+"),
+        re.compile(r"\b\w+(?:<[^>]*>)?::(\S+)?"),
 
         # exeption handling and memory
         re.compile(r"\b(try|catch|throw|new|delete)\b"),
@@ -158,16 +158,31 @@ def is_cpp(code: str) -> bool:
         parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code, encoding="utf-8"))
 
-        if tree.root_node.has_error: return False
+        # if tree.root_node.has_error: return False
 
         # Query for C++ specific features.
-        query_string = """ [ 
+        query_string = """ [
+          ; class
+          (class_specifier)
+          (access_specifier)
+          (destructor_name)
+
+          ; namespace
+          (namespace_definition)
+          ; template
+          (template_type)
+
+          ; statement
           (field_initializer_list)
           (reference_declarator)
           (optional_parameter_declaration)
           (lambda_expression)
           (for_range_loop)
-          (destructor_name)
+          (try_statement)
+          (throw_statement)
+          (catch_clause)
+          (new_expression)
+          (delete_expression)
         ] @cpp_feature
         """
         query = Query(CPP_LANGUAGE, query_string)
