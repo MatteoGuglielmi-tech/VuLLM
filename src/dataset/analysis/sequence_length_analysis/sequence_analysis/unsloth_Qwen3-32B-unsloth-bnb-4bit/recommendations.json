@@ -1,0 +1,33 @@
+{
+  "analysis_summary": {
+    "total_samples": 23836,
+    "mean_length": 1241.0497147172343,
+    "median_length": 1102.0,
+    "p95_length": 2308.5,
+    "p99_length": 2876.6500000000015,
+    "max_length": 4844
+  },
+  "recommendations": [
+    {
+      "strategy": "Conservative (cover 95%)",
+      "max_seq_length": 2560,
+      "samples_truncated_pct": 5.0,
+      "description": "Recommended for production. Only 5% of samples truncated.",
+      "recommended": true
+    },
+    {
+      "strategy": "Balanced (cover 99%)",
+      "max_seq_length": 3072,
+      "samples_truncated_pct": 1.0,
+      "description": "Good balance. Only 1% of samples truncated.",
+      "recommended": true
+    },
+    {
+      "strategy": "Comprehensive (cover 100%)",
+      "max_seq_length": 5120,
+      "samples_truncated_pct": 0.0,
+      "description": "No truncation. May be memory-intensive.",
+      "recommended": true
+    }
+  ]
+}
