@@ -42,4 +42,4 @@ src/dataset/balance/__pycache__/
 src/dataset/balance/assets/
 
 ####### RUST #######
-src_rust/target
+rusty/target
