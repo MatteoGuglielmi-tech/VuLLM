@@ -4,6 +4,7 @@ misc/
 trainer/
 unsloth_compiled_cache/
 checkpoints/
+unused/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -56,3 +57,8 @@ src/dataset/restructure/readme.md
 
 
 tests/dataset/restructure/ast_inspector.py
+
+
+src/dataset/analysis/txt.txt
+
+src_rust/target
