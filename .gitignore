@@ -36,6 +36,12 @@ src/core/cot/assessment/assets/
 src/core/cot/generation/__pycache__/
 src/core/cot/generation/llm_clients/__pycache__/
 
+# src/core/cot_training/
+src/core/cot_training/__pycache__/
+src/core/cot_training/todo.md
+src/core/cot_training/processing_lib/unused/
+
+
 # src/dataset/restructure
 # substituted by Rust pipeline
 src/dataset/restructure
