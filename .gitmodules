@@ -1,3 +1,0 @@
-[submodule "packages/tree-sitter-extended-c/src/tree_sitter_extended_c/tree-sitter-c"]
-	path = packages/tree-sitter-extended-c/src/tree_sitter_extended_c/tree-sitter-c
-	url = https://github.com/MatteoGuglielmi-tech/tree-sitter-c
