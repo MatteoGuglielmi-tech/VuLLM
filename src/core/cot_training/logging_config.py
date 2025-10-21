@@ -49,8 +49,8 @@ def setup_logger(level: int = logging.DEBUG):
 
     date: str = datetime.today().strftime("%Y-%m-%d")
     time: str = datetime.now().strftime("%H-%M-%S")
-    log_file = Path(__file__).parent / f"/run/{date}/{time}/app.log"
-    log_file.mkdir(exist_ok=True, parents=True)
+    log_file = Path(__file__).parent / f"run/{date}/{time}/app.log"
+    log_file.parent.mkdir(exist_ok=True, parents=True)
 
     # capture warnings from `warnings` built-in Python module
     logging.captureWarnings(True)
