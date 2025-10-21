@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 from typing import cast
 from datasets import Dataset
 
-from .logging_config import setup_logger
-from . import cli
+from src.core.cot_training.logging_config import setup_logger
+from src.core.cot_training import cli
 
 
 warnings.filterwarnings(

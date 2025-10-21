@@ -4,7 +4,7 @@ import time
 from threading import Thread
 from time import sleep
 
-from logging_config import BufferingHandler
+from src.core.cot_training.logging_config import BufferingHandler
 
 
 class Loader:
