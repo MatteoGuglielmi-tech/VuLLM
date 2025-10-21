@@ -1,58 +1,11 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
 
-[project]
-name = "vullm"
-version = "0.0.1"
-authors = [ { name="Matteo Guglielmi", email="matteo.guglielmi.ma.gu@gmail.com" } ]
-description = "Complete vulnerability detection pipeline for C source code."
-license = "MIT"
-requires-python = "~=3.13" # for unsloth
-dependencies = [
-    "tree-sitter>=0.25.1",
-    "tree-sitter-c",
-    "tree-sitter-cpp",
-    "tree-sitter-extended-c @ file:./libs/tree-sitter-extended-c", # local dep
-    "setuptools",
-    "datasets",
-    "trl",
-    "transformers",
-    "accelerate",
-    "wandb",
-    "python-dotenv",
-    "tqdm",
-    "matplotlib",
-    "seaborn",
-    "scikit-learn",
-    "liger-kernel",
-    "unsloth",
-    "google-generativeai"
-]
+[tool.pixi.pypi-dependencies]
+vullm = { path = ".", editable = true }
+# tree-sitter-extended-c = { path = "/Users/matteoguglielmi/dev/VuLLM/libs/tree-sitter-extended-c", editable = true }
 
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
-]
-
-[project.optional-dependencies]
-dev = [ "pytest", "debugpy" ]
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-
-markers = [
-    "slow_gpu: marks tests as slow to run, requires a GPU",
-    "slow_api: marks tests as slow slow, requires an API Key"
-]
-
-# [tool.pyright]
-# include = ["src", "tests"] # analyze these dirs
-# reportUnusedVariable = "warning"
-# executionEnvironments = [ # rules
-#   { root = "tests", reportUnusedVariable = false },
-#   { root = "src" }
-# ]
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
