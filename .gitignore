@@ -28,6 +28,13 @@ src/core/cot_training__
 src/core/baseline___
 src/core/scripts
 
+# src/core/cot/
+src/core/cot/assessment/__pycache__/
+src/core/cot/assessment/run/
+src/core/cot/assessment/assets/
+
+src/core/cot/generation/__pycache__/
+src/core/cot/generation/llm_clients/__pycache__/
 
 # src/dataset/restructure
 # substituted by Rust pipeline
@@ -41,6 +48,7 @@ src/dataset/analysis/sequence_length_analysis/__pycache__/
 # src/dataset/balance
 src/dataset/balance/__pycache__/
 src/dataset/balance/assets/
+
 
 ####### RUST #######
 rusty/target
