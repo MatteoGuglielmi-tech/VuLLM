@@ -21,6 +21,7 @@ misc/
 trainer/
 checkpoints/
 unused/
+tests/
 
 src/core/chunking_and_streaming
 src/core/cot_training__
