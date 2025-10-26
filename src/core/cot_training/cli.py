@@ -131,11 +131,6 @@ def get_parser():
         action="store_true",
         help="Enable DeepSpeed training",
     )
-    shared_training_group.add_argument(
-        "--path2dsconfig",
-        type=str,
-        help="Path to DeepSpeed configuration file (required when --deepspeed is enabled)",
-    )
 
     # ============================================================================
     # FINE-TUNING ARGUMENTS
@@ -268,7 +263,6 @@ def validate_args(args):
         "use_loftq",
         "use_weighted_trainer",
         "deepspeed",
-        "path2dsconfig"
     }
 
     if args.finetune:
@@ -355,13 +349,6 @@ def validate_args(args):
                 "--lora_weights is required for --inference mode"
             )
 
-        # Validate DeepSpeed arguments
-        if args.deepspeed and args.path2dsconfig is None:
-            raise argparse.ArgumentTypeError("--path2dsconfig is required when --deepspeed is enabled")
-
-        if not args.deepspeed and args.path2dsconfig is not None:
-            raise argparse.ArgumentTypeError("--path2dsconfig can only be used with --deepspeed")
-
     return args
 
 
@@ -381,7 +368,6 @@ def get_default_value(arg_name):
         "use_loftq": False,
         "use_weighted_trainer": False,
         "deepspeed": False,
-        "path2dsconfig": None,
         # Fine-tuning only
         "learning_rate": 2e-5,
         "weight_decay": 0,
