@@ -38,6 +38,7 @@ class ModelHandler:
     max_seq_length: int = 2048
     use_rslora: bool = True # smarter scaling for the LoRA weights (no lora_alpha needed)
     use_loftq: bool = False # smarter initialization for the LoRA weights (this requires loading the entire module in memory at first)
+    use_deepspeed: bool = False
 
     def __post_init__(self) -> None:
         self._validate_inputs()
@@ -116,7 +117,7 @@ class ModelHandler:
                 max_seq_length=self.max_seq_length,
                 dtype=(torch.bfloat16 if is_bfloat16_supported() else None),
                 load_in_4bit=not self.use_loftq,
-                device_map="auto",  # let accelerate handle device placement
+                device_map="auto" if not self.use_deepspeed else None,
                 attn_implementation="flash_attention_2",
             )
 
