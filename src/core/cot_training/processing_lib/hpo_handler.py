@@ -10,6 +10,7 @@ import optuna
 import pandas as pd
 import optuna.visualization as vis
 
+from typing import Any
 from pathlib import Path
 from trl.trainer.sft_trainer import SFTTrainer
 from trl.trainer.sft_config import SFTConfig
@@ -24,7 +25,7 @@ class LLMHyperparameterOptimizer:
         self,
         dataset_handler_class: type[DatasetHandler],
         dataset_path: str,
-        formatted_dataset_path: Path,
+        formatted_dataset_dir: Path,
         model_loader_class: type[ModelHandler],
         base_model_name: str,
         chat_template: str,
@@ -35,16 +36,18 @@ class LLMHyperparameterOptimizer:
         n_trials: int = 20,
         per_device_train_batch_size: int = 2,
         gradient_accumulation_steps: int = 4,
-        warmup_steps: int = 10,
+        warmup_steps: int|None = None,
         logging_steps: int = 10,
         eval_steps: float = 0.1,
-        num_train_epochs: int = 3,
+        epochs: int = 3,
         max_steps_per_trial: int = -1,
         num_cpus: int = 1,
+        use_deepspeed: bool = False,
+        ds_config_path: str|None = None
     ):
         self.dataset_handler_class = dataset_handler_class
         self.dataset_path = dataset_path
-        self.formatted_dataset_path = formatted_dataset_path
+        self.formatted_dataset_dir = formatted_dataset_dir
         self.model_loader_class = model_loader_class
         self.base_model_name = base_model_name
         self.chat_template = chat_template
@@ -61,12 +64,18 @@ class LLMHyperparameterOptimizer:
         self.warmup_steps = warmup_steps
         self.logging_steps = logging_steps
         self.eval_steps = eval_steps
-        self.num_train_epochs = num_train_epochs
+        self.epochs = epochs
         self.max_steps_per_trial = max_steps_per_trial
+        self.use_deepspeed = use_deepspeed
+        self.ds_config_path = ds_config_path
 
         # Cache for dataset - will be populated on first trial
         self._dataset_dict = None
         self._base_tokenizer = None
+
+    def preliminary_params_validation(self):
+        if self.use_deepspeed and self.ds_config_path is None:
+            raise ValueError("DeepSpeed is enabled but no configuration file has been provided.")
 
     def _prepare_dataset_with_tokenizer(self, tokenizer):
         """Prepare dataset using the provided tokenizer (only once)."""
@@ -77,7 +86,7 @@ class LLMHyperparameterOptimizer:
         logger.info("📚 Preparing dataset with tokenizer...")
         dataset_handler = self.dataset_handler_class(
             dataset_path=self.dataset_path,
-            formatted_dataset_path=self.formatted_dataset_path,
+            formatted_dataset_dir=self.formatted_dataset_dir,
             tokenizer=tokenizer,
             num_cpus=self.num_cpus
         )
@@ -139,34 +148,46 @@ class LLMHyperparameterOptimizer:
             model.print_trainable_parameters() # type: ignore
 
         is_bf16_supported: bool = is_bfloat16_supported()
-        training_args = SFTConfig(
-            assistant_only_loss=True,
-            use_liger_kernel=True,
-            # full_finetuning=False, # Full fine-tuning or PEFT
-            output_dir=f"{self.output_dir}/trial_{trial_params['trial_number']}",
-            num_train_epochs=self.num_train_epochs,
-            max_steps=self.max_steps_per_trial,
-            per_device_train_batch_size=self.per_device_train_batch_size,
-            gradient_accumulation_steps=self.gradient_accumulation_steps,
-            warmup_steps=self.warmup_steps,
-            learning_rate=trial_params["learning_rate"],
-            weight_decay=trial_params["weight_decay"],
-            max_grad_norm=trial_params.get("max_grad_norm", 1.0),
-            logging_steps=self.logging_steps,
-            eval_strategy="steps",
-            eval_steps=self.eval_steps,
-            save_strategy="no",  # Don't save checkpoints during HPO
-            fp16=not is_bf16_supported,
-            bf16=is_bf16_supported,
-            optim=trial_params.get("optimizer", "paged_adamw_8bit"),
-            lr_scheduler_type=trial_params.get("lr_scheduler", "cosine"),
-            max_length=self.max_seq_length,
-            dataset_text_field="text",
-            packing=False,
-            report_to=["wandb"],
-            gradient_checkpointing=True,
-        )
 
+        if self.warmup_steps is None:
+            # Rule of thumb: 3-10% of total steps
+            total_steps = (
+                len(self._dataset_dict["train"])
+                // (self.per_device_train_batch_size * self.gradient_accumulation_steps)
+                * self.epochs
+            )
+            self.warmup_steps = int(0.05 * total_steps)  # 5% warmup
+
+        sft_config_params: dict[str, Any] = {
+            "assistant_only_loss": True,
+            "use_liger_kernel": True,
+            "output_dir": f"{self.output_dir}/trial_{trial_params['trial_number']}",
+            "num_train_epochs": self.epochs,
+            "max_steps": self.max_steps_per_trial,
+            "per_device_train_batch_size": self.per_device_train_batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "warmup_steps": self.warmup_steps,
+            "learning_rate": trial_params["learning_rate"],
+            "weight_decay": trial_params["weight_decay"],
+            "max_grad_norm": trial_params.get("max_grad_norm", 1.0),
+            "logging_steps": self.logging_steps,
+            "eval_strategy": "steps",
+            "eval_steps": self.eval_steps,
+            "save_strategy": "no",  # Don't save checkpoints during HPO
+            "fp16": not is_bf16_supported,
+            "bf16": is_bf16_supported,
+            "optim": trial_params.get("optimizer", "paged_adamw_8bit"),
+            "lr_scheduler_type": trial_params.get("lr_scheduler", "cosine"),
+            "max_length": self.max_seq_length,
+            # "dataset_text_field":"text",
+            "packing": False,
+            "report_to": ["wandb"],
+            "gradient_checkpointing": True,
+        }
+        if self.use_deepspeed:
+            sft_config_params["deepspeed"] = self.ds_config_path
+
+        training_args = SFTConfig(**sft_config_params)
         trainer = SFTTrainer(
             model=model, # type: ignore
             processing_class=tokenizer,
@@ -536,6 +557,7 @@ class LLMHyperparameterOptimizer:
 
     def hpo(self):
         """Run hyperparameter optimization."""
+        self.preliminary_params_validation()
 
         logger.info("🔧 Pre-processing: Loading base tokenizer and preparing dataset...")
         base_tokenizer = self._get_base_tokenizer()
@@ -626,9 +648,9 @@ class LLMHyperparameterOptimizer:
 #     from pathlib import Path
 #     from dotenv import load_dotenv
 #     from your_module import ModelHandler, DatasetHandler  # Import your existing classes
-#     
+#
 #     load_dotenv()
-#     
+#
 #     # Initialize optimizer - now matches your pipeline structure!
 #     optimizer = LLMHyperparameterOptimizer(
 #         # Dataset parameters
@@ -636,7 +658,7 @@ class LLMHyperparameterOptimizer:
 #         dataset_path="path/to/your/dataset",
 #         formatted_dataset_path=Path("./tokenized_dataset_hpo"),
 #         num_cpus=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)),
-#         
+#
 #         # Model parameters
 #         model_loader_class=ModelHandler,  # Pass the class itself
 #         base_model_name="unsloth/llama-3-8b-bnb-4bit",
@@ -644,13 +666,13 @@ class LLMHyperparameterOptimizer:
 #         max_seq_length=2048,
 #         use_rslora=True,
 #         use_loftq=False,
-#         
+#
 #         # HPO parameters
 #         n_trials=20,
 #         num_train_epochs=2,
 #         max_steps_per_trial=100,  # Limit steps for faster HPO
 #         output_dir="./hpo_results",
-#         
+#
 #         # Training parameters (fixed across trials)
 #         per_device_train_batch_size=2,
 #         gradient_accumulation_steps=4,
@@ -658,10 +680,10 @@ class LLMHyperparameterOptimizer:
 #         logging_steps=10,
 #         eval_steps=0.1,
 #     )
-#     
+#
 #     # Run HPO
 #     best_params, best_score = optimizer.hpo()
-#     
+#
 #     print(f"\n🎯 Best hyperparameters found:")
 #     for key, value in best_params.items():
 #         print(f"  {key}: {value}")
