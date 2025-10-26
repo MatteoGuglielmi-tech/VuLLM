@@ -52,9 +52,9 @@ class FineTuningHandler:
         logging_steps: int = 100,
         use_weighted_cot_trainer: bool = False,
         use_deepspeed: bool = False,
-        ds_config_path: str|None = None,
         # -- general --
-        debug: bool = False
+        debug: bool = False,
+        is_main_process: bool=False
     ):
 
         self.dataset_handler_class = dataset_handler_class
@@ -82,15 +82,11 @@ class FineTuningHandler:
         self.wd = weight_decay
         self.use_weighted_trainer = use_weighted_cot_trainer
         self.use_deepspeed = use_deepspeed
-        self.ds_config_path = ds_config_path
 
         self.debug = debug
+        self.is_main_process = is_main_process
         self._dataset_dict = None
         self._base_tokenizer = None
-
-    def preliminary_params_validation(self):
-        if self.use_deepspeed and self.ds_config_path is None:
-            raise ValueError("DeepSpeed is enabled but no configuration file has been provided.")
 
     def setup_paths(self) -> None:
         provider, model_id = self.base_model_name.split("/")
@@ -215,6 +211,7 @@ class FineTuningHandler:
             lora_dropout=self.lora_dropout,
             use_rslora=self.use_rslora,
             use_loftq=self.use_loftq,
+            use_deepspeed=self.use_deepspeed
         )
 
         model_loader._load_base_model()
@@ -309,9 +306,6 @@ class FineTuningHandler:
             "save_total_limit": 3,
         }
 
-        if self.use_deepspeed:
-            sft_config_params["deepspeed"] = self.ds_config_path
-
         return SFTConfig(**sft_config_params)
 
     def debug_trainer(self, trainer):
@@ -382,7 +376,6 @@ class FineTuningHandler:
         print("=" * 50)
 
     def fine_tune(self):
-        self.preliminary_params_validation()
         self.setup_paths()
         trainer = self.create_trainer_with_params()
 
