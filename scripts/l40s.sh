@@ -4,8 +4,8 @@
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:l40s:2
-##SBATCH --output=stdout/%x-%j.out
-##SBATCH --error=stderr/%x-%j.err
+#SBATCH --output=stdout/%x-%j.out
+#SBATCH --error=stderr/%x-%j.err
 #SBATCH --time=1-00:00:00
 #SBATCH --partition edu-thesis
 
