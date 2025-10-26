@@ -16,5 +16,4 @@ source vullm/bin/activate
 
 nvidia-smi
 
-python DoneBot/src/notify.py --cmd accelerate launch --config_file accelerate/4gpus.yaml -m src.core.cot_training.main --finetune --dataset_path ./DiverseVul/processed/gpt_reasoning.jsonl --formatted_dataset_dir ./DiverseVul/formatted/reasonings --max_seq_length 4096 --epochs 3 --batch_size 4 --grad_acc_steps 8 --use_rslora
-
+python DoneBot/src/notify.py --cmd accelerate launch --config_file accelerate/4gpus.yaml -m src.core.cot_training.main --finetune --dataset_path ./DiverseVul/processed/gpt_reasoning.jsonl --formatted_dataset_dir ./DiverseVul/formatted/reasonings --max_seq_length 4096 --epochs 3 --batch_size 4 --grad_acc_steps 8 --use_rslora --deepspeed
