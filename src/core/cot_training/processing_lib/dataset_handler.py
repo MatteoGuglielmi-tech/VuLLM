@@ -2,7 +2,7 @@ import logging
 import random
 
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict, Dataset, load_from_disk
 from collections import defaultdict
@@ -16,30 +16,38 @@ class DatasetHandler:
     """Handles loading, preprocessing, and formatting of the vulnerability dataset."""
 
     dataset_path: str
-    formatted_dataset_path: Path
+    formatted_dataset_dir: Path
     tokenizer: PreTrainedTokenizer
     num_cpus: int
 
-    SYSTEM_PROMPT = (
-        "You are an expert cybersecurity analyst specializing in C static code analysis. "
-        "Your task is to analyze the provided code and produce a step-by-step reasoning "
-        "chain explaining whether it contains a vulnerability."
+    SYSTEM_PROMPT: str = field(
+        init=False,
+        default=(
+            "You are an expert cybersecurity analyst specializing in C static code analysis. "
+            "Your task is to analyze the provided code and produce a step-by-step reasoning "
+            "chain explaining whether it contains a vulnerability."
+        ),
+        repr=False,
     )
 
-    PROMPT_SKELETON = (
-        "**Analysis Instructions:**\n"
-        "1.  **Trace Data Flow:** Analyze the flow of any external or user-controlled input.\n"
-        "2.  **Pinpoint Dangerous Functions:** Identify the use of functions known to be risky (e.g., `strcpy`, `gets`, `sprintf`, `memcpy`) for each specified weakness.\n"
-        "3.  **Check for Safeguards:** Look for any bounds checking, sanitization, or defensive programming that might mitigate risks.\n"
-        "4.  **Conclude:** State your conclusion based on the analysis.\n\n"
-        "**Output Format:**\n"
-        "Produce a step-by-step list of your reasoning. After the list, your final answer must be "
-        "prefixed with 'Final Answer:' and be in the format 'YES (CWE-XXX, ...)' or 'NO'.\n"
-        "--- CODE START ---\n"
-        "{func_code}\n"
-        "--- CODE END ---\n\n"
-        "**Reasoning:**\n"
-    ).strip()
+    PROMPT_SKELETON: str = field(
+        init=False,
+        default=(
+            "**Analysis Instructions:**\n"
+            "1. **Trace Data Flow:** Analyze the flow of any external or user-controlled input.\n"
+            "2. **Pinpoint Dangerous Functions:** Identify the use of functions known to be risky (e.g., `strcpy`, `gets`, `sprintf`, `memcpy`) for each specified weakness.\n"
+            "3. **Check for Safeguards:** Look for any bounds checking, sanitization, or defensive programming that might mitigate risks.\n"
+            "4. **Conclude:** State your conclusion based on the analysis.\n\n"
+            "**Output Format:**\n"
+            "Produce a step-by-step list of your reasoning. After the list, your final answer must be "
+            "prefixed with 'Final Answer:' and be in the format 'YES (CWE-XXX, ...)' or 'NO'.\n"
+            "--- CODE START ---\n"
+            "{func_code}\n"
+            "--- CODE END ---\n\n"
+            "**Reasoning:**\n"
+        ).strip(),
+        repr=False,
+    )
 
     def load_and_split_dataset(
         self, test_size: float = 0.1, val_size: float = 0.1, seed: int = 42
@@ -74,7 +82,9 @@ class DatasetHandler:
         logger.info("⚙️ Loading dataset... ⚙️")
         full_dataset = load_dataset("json", data_files=self.dataset_path, split="train")
 
-        logger.info("📊 Analyzing label distribution per project for stratification... 📊")
+        logger.info(
+            "📊 Analyzing label distribution per project for stratification... 📊"
+        )
         project_stats = defaultdict(lambda: {"vulnerable": 0, "clean": 0})
         for example in full_dataset:
             project = example["project"]
@@ -83,53 +93,145 @@ class DatasetHandler:
             else:
                 project_stats[project]["clean"] += 1
 
-        mixed_projects, vulnerable_only_projects, clean_only_projects = [], [], []
-        for project, stats in project_stats.items():
-            if stats["vulnerable"] > 0 and stats["clean"] > 0:
-                mixed_projects.append(project)
-            elif stats["vulnerable"] > 0:
-                vulnerable_only_projects.append(project)
-            else:
-                clean_only_projects.append(project)
+        # Calculate total samples
+        total_vulnerable = sum(stats["vulnerable"] for stats in project_stats.values())
+        total_clean = sum(stats["clean"] for stats in project_stats.values())
+        total_samples = total_vulnerable + total_clean
+
+        # Target counts for each split
+        target_test_vulnerable = int(total_vulnerable * test_size)
+        target_test_clean = int(total_clean * test_size)
+        target_val_vulnerable = int(total_vulnerable * val_size)
+        target_val_clean = int(total_clean * val_size)
 
         logger.info(
-            f"Found {len(mixed_projects)} mixed, "
-            f"{len(vulnerable_only_projects)} vulnerable-only, and "
-            f"{len(clean_only_projects)} clean-only projects."
+            f"Total: {total_samples} samples ({total_vulnerable} vulnerable, {total_clean} clean)\n"
+            f"Target test: {target_test_vulnerable + target_test_clean} samples "
+            f"({target_test_vulnerable} vulnerable, {target_test_clean} clean)\n"
+            f"Target val: {target_val_vulnerable + target_val_clean} samples "
+            f"({target_val_vulnerable} vulnerable, {target_val_clean} clean)"
         )
 
+        # Create list of (project, vulnerable_count, clean_count) and shuffle
+        projects_with_stats = [
+            (project, stats["vulnerable"], stats["clean"])
+            for project, stats in project_stats.items()
+        ]
         rng = random.Random(seed)
-        rng.shuffle(mixed_projects)
-        rng.shuffle(vulnerable_only_projects)
-        rng.shuffle(clean_only_projects)
+        rng.shuffle(projects_with_stats)
 
-        test_projects, val_projects, train_projects = set(), set(), set()
+        # Greedy assignment to balance labels
+        test_projects = set()
+        val_projects = set()
+        train_projects = set()
 
-        def _distribute_projects(project_list: list[str]):
-            """Helper to split a list of projects and add to the main sets."""
-            num_projects = len(project_list)
-            # Ensure at least one project goes to train if list is not empty
-            num_test = int(num_projects * test_size)
-            num_val = int(num_projects * val_size)
+        test_vulnerable, test_clean = 0, 0
+        val_vulnerable, val_clean = 0, 0
 
-            test_projects.update(project_list[:num_test])
-            val_projects.update(project_list[num_test : num_test + num_val])
-            train_projects.update(project_list[num_test + num_val :])
+        def _calculate_imbalance(
+            current_vuln, current_clean, target_vuln, target_clean, add_vuln, add_clean
+        ):
+            """Calculate how much this assignment would deviate from target proportions."""
+            new_vuln = current_vuln + add_vuln
+            new_clean = current_clean + add_clean
 
-        logger.info("✂️ Performing stratified project-based split... ✂️")
-        _distribute_projects(mixed_projects)
-        _distribute_projects(vulnerable_only_projects)
-        _distribute_projects(clean_only_projects)
+            # absolute deviation from target
+            vuln_diff = abs(new_vuln - target_vuln)
+            clean_diff = abs(new_clean - target_clean)
 
-        train_dataset = full_dataset.filter(lambda example: example["project"] in train_projects)
-        val_dataset = full_dataset.filter(lambda example: example["project"] in val_projects)
-        test_dataset = full_dataset.filter(lambda example: example["project"] in test_projects)
+            return vuln_diff + clean_diff
+
+        logger.info("✂️ Performing label-balanced project-based split... ✂️")
+
+        for project, vuln_count, clean_count in projects_with_stats:
+            # Calculate imbalance for each split if we add this project
+            test_imbalance = _calculate_imbalance(
+                test_vulnerable,
+                test_clean,
+                target_test_vulnerable,
+                target_test_clean,
+                vuln_count,
+                clean_count,
+            )
+            val_imbalance = _calculate_imbalance(
+                val_vulnerable,
+                val_clean,
+                target_val_vulnerable,
+                target_val_clean,
+                vuln_count,
+                clean_count,
+            )
+
+            test_would_exceed = (
+                test_vulnerable + vuln_count > target_test_vulnerable * 1.5
+                or test_clean + clean_count > target_test_clean * 1.5
+            )
+            val_would_exceed = (
+                val_vulnerable + vuln_count > target_val_vulnerable * 1.5
+                or val_clean + clean_count > target_val_clean * 1.5
+            )
+
+            # Assign to the split that minimizes imbalance and hasn't exceeded limits
+            if test_would_exceed and val_would_exceed:
+                # Both exceeded, assign to train
+                train_projects.add(project)
+            elif test_would_exceed:
+                # Test exceeded, choose between val and train
+                if val_vulnerable + val_clean < (total_samples * val_size * 1.2):
+                    val_projects.add(project)
+                    val_vulnerable += vuln_count
+                    val_clean += clean_count
+                else:
+                    train_projects.add(project)
+            elif val_would_exceed:
+                # Val exceeded, choose between test and train
+                if test_vulnerable + test_clean < (total_samples * test_size * 1.2):
+                    test_projects.add(project)
+                    test_vulnerable += vuln_count
+                    test_clean += clean_count
+                else:
+                    train_projects.add(project)
+            else:
+                # Neither exceeded, choose split with minimum imbalance
+                if test_imbalance <= val_imbalance and test_vulnerable + test_clean < (
+                    total_samples * test_size * 1.2
+                ):
+                    test_projects.add(project)
+                    test_vulnerable += vuln_count
+                    test_clean += clean_count
+                elif val_vulnerable + val_clean < (total_samples * val_size * 1.2):
+                    val_projects.add(project)
+                    val_vulnerable += vuln_count
+                    val_clean += clean_count
+                else:
+                    train_projects.add(project)
+
+        # Filter the dataset
+        train_dataset = full_dataset.filter(
+            lambda example: example["project"] in train_projects
+        )
+        val_dataset = full_dataset.filter(
+            lambda example: example["project"] in val_projects
+        )
+        test_dataset = full_dataset.filter(
+            lambda example: example["project"] in test_projects
+        )
+
+        # Log actual distributions
+        def _count_labels(dataset):
+            vuln = sum(1 for ex in dataset if ex["target"] == 1)
+            clean = len(dataset) - vuln
+            return vuln, clean
+
+        train_vuln, train_clean = _count_labels(train_dataset)
+        val_vuln, val_clean = _count_labels(val_dataset)
+        test_vuln, test_clean = _count_labels(test_dataset)
 
         logger.info(
-            "✅ Stratified project-based split done.\n"
-            f"  Train samples: {len(train_dataset)}\n" # type: ignore
-            f"  Eval samples: {len(val_dataset)}\n" # type: ignore
-            f"  Test samples: {len(test_dataset)}" # type: ignore
+            "✅ Label-balanced project-based split done.\n"
+            f"  Train: {len(train_dataset)} samples ({train_vuln} vulnerable, {train_clean} clean)\n"
+            f"  Val:   {len(val_dataset)} samples ({val_vuln} vulnerable, {val_clean} clean)\n"
+            f"  Test:  {len(test_dataset)} samples ({test_vuln} vulnerable, {test_clean} clean)"
         )
 
         return DatasetDict(
@@ -170,7 +272,8 @@ class DatasetHandler:
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": ground_truth},
             ]
-            return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
+            # return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
+            return {"messages": messages}
 
         formatted_splits = DatasetDict()
 
@@ -221,7 +324,7 @@ class DatasetHandler:
         dataset_dict: DatasetDict = self.load_and_split_dataset()
         formatted_dataset_dict = self.format_dataset(dataset_dict=dataset_dict)
 
-        self.formatted_dataset_path.mkdir(exist_ok=True)
-        self.save_to_disk(formatted_dataset_dict, fp=self.formatted_dataset_path)
+        self.formatted_dataset_dir.mkdir(exist_ok=True)
+        self.save_to_disk(formatted_dataset_dict, fp=self.formatted_dataset_dir)
 
         return formatted_dataset_dict
