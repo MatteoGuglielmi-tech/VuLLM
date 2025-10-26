@@ -43,7 +43,6 @@ class LLMHyperparameterOptimizer:
         max_steps_per_trial: int = -1,
         num_cpus: int = 1,
         use_deepspeed: bool = False,
-        ds_config_path: str|None = None
     ):
         self.dataset_handler_class = dataset_handler_class
         self.dataset_path = dataset_path
@@ -67,15 +66,10 @@ class LLMHyperparameterOptimizer:
         self.epochs = epochs
         self.max_steps_per_trial = max_steps_per_trial
         self.use_deepspeed = use_deepspeed
-        self.ds_config_path = ds_config_path
 
         # Cache for dataset - will be populated on first trial
         self._dataset_dict = None
         self._base_tokenizer = None
-
-    def preliminary_params_validation(self):
-        if self.use_deepspeed and self.ds_config_path is None:
-            raise ValueError("DeepSpeed is enabled but no configuration file has been provided.")
 
     def _prepare_dataset_with_tokenizer(self, tokenizer):
         """Prepare dataset using the provided tokenizer (only once)."""
@@ -184,8 +178,6 @@ class LLMHyperparameterOptimizer:
             "report_to": ["wandb"],
             "gradient_checkpointing": True,
         }
-        if self.use_deepspeed:
-            sft_config_params["deepspeed"] = self.ds_config_path
 
         training_args = SFTConfig(**sft_config_params)
         trainer = SFTTrainer(

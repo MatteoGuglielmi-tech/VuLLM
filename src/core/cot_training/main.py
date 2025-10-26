@@ -99,9 +99,10 @@ if __name__ == "__main__":
             eval_steps=args.eval_steps,
             logging_steps=args.logging_steps,
             use_deepspeed=args.deepspeed,
-            ds_config_path=args.path2dsconfig,
 
-            debug=args.debug
+            # -- flags --
+            debug=args.debug,
+            is_main_process=accelerator.is_main_process
         )
         fine_tuner.fine_tune()
     elif args.hpo:
@@ -132,7 +133,6 @@ if __name__ == "__main__":
             logging_steps=args.logging_steps,
             eval_steps=args.eval_steps,
             use_deepspeed=args.deepspeed,
-            ds_config_path=args.path2dsconfig
         )
 
         # Run HPO

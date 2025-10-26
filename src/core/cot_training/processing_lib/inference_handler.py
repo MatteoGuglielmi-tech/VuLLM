@@ -11,7 +11,6 @@ from tqdm import tqdm
 
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
-# from transformers.utils.quantization_config import BitsAndBytesConfig
 
 
 logger = logging.getLogger(name=__name__)
