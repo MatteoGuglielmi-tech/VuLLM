@@ -20,13 +20,13 @@ logger = logging.getLogger(name=__name__)
 @dataclass
 class ModelHandler:
 
-    base_model_name: str = "unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit"
-    chat_template: str = field(init=True, default="qwen-2.5")
+    base_model_name: str
+    chat_template: str|None = None
 
     lora_model_dir: str = field(init=False)
-    base_model: FastLanguageModel | None = field(init=False, default=None)
-    patched_model: FastLanguageModel | None = field(init=False, default=None)
-    tokenizer: PreTrainedTokenizer | None = field(init=False, default=None)
+    base_model: FastLanguageModel|None = field(init=False, default=None, repr=False)
+    patched_model: FastLanguageModel|None = field(init=False, default=None, repr=False)
+    tokenizer: PreTrainedTokenizer|None = field(init=False, default=None, repr=False)
 
     # --- LoRA Hyperparameters ---
     # LoRA update is scaled by the formula alpha / r
@@ -40,12 +40,72 @@ class ModelHandler:
     use_loftq: bool = False # smarter initialization for the LoRA weights (this requires loading the entire module in memory at first)
 
     def __post_init__(self) -> None:
-        # immediately check on `lora_r` value
+        self._validate_inputs()
+
+        logger.info(f"🔧 Initializing {self.base_model_name} with:")
+        logger.info(f"   Max sequence length: {self.max_seq_length}")
+        logger.info(f"   RsLoRA: {self.use_rslora}")
+        logger.info(f"   LoftQ: {self.use_loftq}")
+
+        logger.info(f"🩹 Patching model with:")
+        logger.info(f"   LoRA rank: {self.lora_r}")
+        logger.info(f"   LoRA alpha: {self.lora_alpha}")
+        logger.info(f"   LoRA dropout: {self.lora_dropout}")
+        logger.info(f"   Custom chat template: {self.chat_template is not None}")
+
+    def _validate_inputs(self):
+        """Validate constructor inputs."""
+
+        if self.max_seq_length <= 0:
+            raise ValueError(f"max_seq_length must be positive, got {self.max_seq_length}")
         if self.lora_r <= 0:
-            logger.warning("⚠️ You've specified an invalid value for LoRA rank. Falling back to default.")
+            logger.warning("⚠️ You've specified an invalid value for LoRA rank. Falling back to default (16).")
             self.lora_r = 16
-        if (self.lora_r != self.lora_alpha) and (self.lora_alpha / self.lora_r != 2):
-            logger.warning("⚠️ It's suggested to set the value for `lora_alpha` to: `lora_r` or `2*lora_r`")
+        if self.lora_alpha <= 0:
+            logger.warning(f"⚠️ You've specified an invalid value for LoRA alpha. Falling back to default ({2*self.lora_r}).")
+            self.lora_alpha = 2*self.lora_r
+        if self.lora_alpha < 0:
+            logger.warning(f"⚠️ You've specified an invalid value for LoRA dropout. Falling back to default (0.0).")
+            self.lora_dropout = 0.
+
+    def _set_padding_strategy(self):
+        """Set padding side based on model architecture.
+
+        - Decoder-only (GPT, Llama): Left padding (for batch generation)
+        - Encoder-decoder (T5, BART): Right padding
+        """
+
+        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"}
+        model_type = getattr(self.base_model.config, "model_type", "").lower()
+
+        if any(arch in model_type for arch in decoder_only_models):
+            self.tokenizer.padding_side = "left"
+            logger.info(f"📍 Set padding_side='left' for decoder-only model ({model_type})")
+        else:
+            self.tokenizer.padding_side = "right"
+            logger.info(f"📍 Set padding_side='right' for encoder-decoder model ({model_type})")
+
+        # ensure pad token exists
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            logger.info(f"🔧 Set pad_token to eos_token: {self.tokenizer.eos_token}")
+
+    def _configure_tokenizer(self):
+        """Configure tokenizer settings (chat template, padding, special tokens)."""
+
+        if self.chat_template is not None:
+            logger.info(f"🎨 Applying custom chat template: {self.chat_template}")
+            try:
+                self.tokenizer = get_chat_template(
+                    self.tokenizer, 
+                    chat_template=self.chat_template
+                )
+            except ValueError as e:
+                logger.error(f"Invalid chat template: {self.chat_template}")
+                logger.error(f"Available templates: {list(CHAT_TEMPLATES.keys())}")
+                raise ValueError(f"Chat template '{self.chat_template}' not found") from e
+
+        self._set_padding_strategy()
 
     def _load_base_model(self):
         logger.info(f"Initializing base model and tokenizer for '{self.base_model_name}'...")
@@ -60,34 +120,32 @@ class ModelHandler:
                 attn_implementation="flash_attention_2",
             )
 
-            try:
-                self.tokenizer = get_chat_template(
-                    self.tokenizer,
-                    chat_template=self.chat_template
-                )
-            except ValueError:
-                raise ValueError(f"available chat templates are: {print(list(CHAT_TEMPLATES.keys()))}")
+            if self.base_model is None or self.tokenizer is None:
+                raise RuntimeError("Model or tokenizer failed to load")
 
-            if "llama" in self.chat_template:
-                if self.tokenizer is not None: # redundant but this is to silence the linter
-                    self.tokenizer.padding_side = "left"
-                    if self.tokenizer.pad_token is None:
-                        self.tokenizer.pad_token = self.tokenizer.eos_token
+            logger.info("✅ Base model and tokenizer loaded successfully")
+            self._configure_tokenizer()
 
-            logger.info("✅ Model and tokenizer loaded successfully.")
         except torch.cuda.OutOfMemoryError as oom:
-            logger.critical("⚠️ OOM Error: Model does not fit entirely on GPU.")
+            logger.critical("💥 OUT OF MEMORY!")
+            logger.critical(f"Model requires more VRAM than available.")
+            logger.critical(f"Solutions:")
+            logger.critical(f"  1. Use a smaller model")
+            logger.critical(f"  2. Reduce max_seq_length (current: {self.max_seq_length})")
+            logger.critical(f"  3. Use 8-bit quantization instead of 4-bit")
             torch.cuda.empty_cache()
             raise oom
+
         except Exception as e:
             logger.critical(f"❌ Failed to load model: {e}")
-            raise e
+            raise
 
         if getattr(self.base_model, "is_loaded_in_4bit", False):
             logger.info("✅ Verification successful: Model is loaded in 4-bit.")
         else:
             logger.warning(
                 "⚠️ Verification warning: Model does not appear to be loaded in 4-bit."
+                "This is normal since LoftQ is in use" if self.use_loftq else "Anomaly"
             )
 
     def patch_model(self) -> None:
