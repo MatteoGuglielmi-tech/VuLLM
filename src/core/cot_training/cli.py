@@ -4,6 +4,15 @@ from datetime import datetime
 from pathlib import Path
 
 
+class PathEncoder(json.JSONEncoder):
+    """Custom JSON encoder that converts Path objects to strings."""
+
+    def default(self, o):
+        if isinstance(o, Path):
+            return str(o)
+        return super().default(o)
+
+
 def get_parser():
     """Creates and returns the argument parser."""
 
@@ -17,18 +26,11 @@ def get_parser():
     # ============================================================================
     common_group = parser.add_argument_group("Common Arguments")
     common_group.add_argument(
-        "--dataset_path",
-        "-i",
-        type=str,
-        required=True,
-        help="Path to the source dataset",
-    )
-    common_group.add_argument(
-        "--formatted_dataset_path",
+        "--formatted_dataset_dir",
         "-o",
-        type=str,
+        type=Path,
         required=True,
-        help="Path wherein saving the tokenized dataset",
+        help="Directory path wherein saving the formatted dataset (not tokenzied)",
     )
     common_group.add_argument(
         "--max_seq_length",
@@ -42,7 +44,6 @@ def get_parser():
         action="store_true",
         help="Activate debug CLI logs",
     )
-
     # ============================================================================
     # MODE SELECTION (Mutually Exclusive)
     # ============================================================================
@@ -60,6 +61,13 @@ def get_parser():
         "Shared Training Arguments (Fine-tuning & HPO)"
     )
     shared_training_group.add_argument(
+        "--dataset_path",
+        "-i",
+        type=str,
+        # required=True,
+        help="Path to the source dataset (required for fine-tuning and HPO)"
+    )
+    shared_training_group.add_argument(
         "--base_model_name",
         "-n",
         type=str,
@@ -70,7 +78,6 @@ def get_parser():
         "--chat_template",
         "-c",
         type=str,
-        default="llama-3.1",
         help="Chat template to use",
     )
     shared_training_group.add_argument(
@@ -119,6 +126,16 @@ def get_parser():
         default=False,
         help="Use WeightedCoTTrainer (fine-tuning only)",
     )
+    shared_training_group.add_argument(
+        "--deepspeed",
+        action="store_true",
+        help="Enable DeepSpeed training",
+    )
+    shared_training_group.add_argument(
+        "--path2dsconfig",
+        type=str,
+        help="Path to DeepSpeed configuration file (required when --deepspeed is enabled)",
+    )
 
     # ============================================================================
     # FINE-TUNING ARGUMENTS
@@ -143,6 +160,9 @@ def get_parser():
     )
     finetune_group.add_argument(
         "--lora_alpha", "-a", type=int, default=32, help="LoRA alpha (fine-tuning only)"
+    )
+    finetune_group.add_argument(
+        "--lora_dropout", "-d", type=float, default=0, help="LoRa dropout (fine-tuning only)"
     )
 
     # ============================================================================
@@ -187,6 +207,22 @@ def get_parser():
         type=str,
         help="Chat template of the model used for inference",
     )
+    inference_group.add_argument(
+        "--assets_dir",
+        "-ad",
+        type=Path,
+        help="Directory where to save the generated plots and reports to (inference only)",
+    )
+    inference_group.add_argument(
+        "--include_code_in_reports",
+        action="store_true",
+        help="Include full function code in misclassification reports",
+    )
+    inference_group.add_argument(
+        "--save_summary",
+        action="store_true",
+        help="Save consolidated evaluation summary JSON",
+    )
 
     return parser
 
@@ -214,10 +250,14 @@ def validate_args(args):
         "lora_weights",
         "max_tokens_per_answer",
         "chat_template_inference",
+        "assets_dir",
+        "include_code_in_reports",
+        "save_summary"
     }
 
-    # args shared between fine-tuning and HPO (not allowed in inference)
+    # args shared between fine-tuning and HPO (not allowed/unnecessary in inference)
     training_shared = {
+        "dataset_path",
         "base_model_name",
         "epochs",
         "batch_size",
@@ -227,9 +267,14 @@ def validate_args(args):
         "use_rslora",
         "use_loftq",
         "use_weighted_trainer",
+        "deepspeed",
+        "path2dsconfig"
     }
 
     if args.finetune:
+        if args.dataset_path is None: # needs dataset path
+            raise argparse.ArgumentTypeError("--dataset_path is required for --finetune mode")
+
         invalid_args = []
 
         # Check HPO-only arguments
@@ -250,6 +295,9 @@ def validate_args(args):
             )
 
     elif args.hpo:
+        if args.dataset_path is None: # needs dataset path
+            raise argparse.ArgumentTypeError("--dataset_path is required for --hpo mode")
+
         invalid_args = []
 
         # Check fine-tuning-only arguments
@@ -286,10 +334,13 @@ def validate_args(args):
             if getattr(args, arg) != get_default_value(arg):
                 invalid_args.append(f"--{arg}")
 
-        # Check training-shared arguments (not allowed in inference except chat_template)
+        # Check training-shared arguments
         for arg in training_shared:
             value = getattr(args, arg)
             default = get_default_value(arg)
+            if arg == 'dataset_path':
+                if value is not None:
+                    invalid_args.append(f"--{arg}")
             if value != default:
                 invalid_args.append(f"--{arg}")
 
@@ -303,10 +354,13 @@ def validate_args(args):
             raise argparse.ArgumentTypeError(
                 "--lora_weights is required for --inference mode"
             )
-        elif args.chat_template_inference is None:
-            raise argparse.ArgumentTypeError(
-                "--chat_template_inference is required for --inference mode"
-            )
+
+        # Validate DeepSpeed arguments
+        if args.deepspeed and args.path2dsconfig is None:
+            raise argparse.ArgumentTypeError("--path2dsconfig is required when --deepspeed is enabled")
+
+        if not args.deepspeed and args.path2dsconfig is not None:
+            raise argparse.ArgumentTypeError("--path2dsconfig can only be used with --deepspeed")
 
     return args
 
@@ -315,8 +369,9 @@ def get_default_value(arg_name):
     """Returns the default value for a given argument."""
     defaults = {
         # Shared training arguments
+        "dataset_path": None,
         "base_model_name": "unsloth/llama-3.1-8b-instruct-bnb-4bit",
-        "chat_template": "llama-3.1",
+        "chat_template": None,
         "epochs": 3,
         "batch_size": 2,
         "grad_acc_steps": 4,
@@ -324,10 +379,12 @@ def get_default_value(arg_name):
         "eval_steps": 100,
         "use_rslora": True,
         "use_loftq": False,
+        "use_weighted_trainer": False,
+        "deepspeed": False,
+        "path2dsconfig": None,
         # Fine-tuning only
         "learning_rate": 2e-5,
         "weight_decay": 0,
-        "use_weighted_trainer": False,
         "lora_rank": 16,
         "lora_alpha": 32,
         "lora_dropout": 0,
@@ -338,6 +395,9 @@ def get_default_value(arg_name):
         "lora_weights": None,
         "max_tokens_per_answer": 2048,
         "chat_template_inference": None,
+        "assets_dir": None,
+        "include_code_in_reports": False,
+        "save_summary": False
     }
     return defaults.get(arg_name)
 
@@ -348,4 +408,4 @@ def save_running_args(args: argparse.Namespace):
     fp = Path(__file__).parent / f"run/{date}/{time}/cli_args.json"
     fp.parent.mkdir(exist_ok=True, parents=True)
     with open(file=fp, mode="w", encoding="utf-8") as file:
-        json.dump(vars(args), file, indent=4)
+        json.dump(vars(args), file, indent=2, cls=PathEncoder)
