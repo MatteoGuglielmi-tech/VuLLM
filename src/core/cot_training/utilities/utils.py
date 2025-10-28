@@ -94,6 +94,7 @@ def rich_rule(
     is_main_process: bool | None = None,
 ):
     """Print a horizontal rule (main process only)."""
+    print("\n")
     _console.rule(title, style=style, align="center")
 
 
