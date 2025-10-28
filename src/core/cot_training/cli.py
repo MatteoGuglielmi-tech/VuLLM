@@ -40,26 +40,30 @@ def get_parser():
         help="Maximum sequence length for deep model",
     )
     common_group.add_argument(
+        "--batch_size",
+        "-b",
+        type=int,
+        default=2,
+        help="How many samples in a per device batch",
+    )
+    common_group.add_argument(
         "--debug",
         action="store_true",
         help="Activate debug CLI logs",
     )
+
     # ============================================================================
     # MODE SELECTION (Mutually Exclusive)
     # ============================================================================
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument("--finetune", action="store_true", help="Fine-tuning mode")
-    mode_group.add_argument(
-        "--hpo", action="store_true", help="Hyperparameter optimization mode"
-    )
+    mode_group.add_argument("--hpo", action="store_true", help="Hyperparameter optimization mode")
     mode_group.add_argument("--inference", action="store_true", help="Inference mode")
 
     # ============================================================================
     # SHARED: FINE-TUNING & HPO ARGUMENTS
     # ============================================================================
-    shared_training_group = parser.add_argument_group(
-        "Shared Training Arguments (Fine-tuning & HPO)"
-    )
+    shared_training_group = parser.add_argument_group("Shared Training Arguments (Fine-tuning & HPO)")
     shared_training_group.add_argument(
         "--dataset_path",
         "-i",
@@ -82,13 +86,6 @@ def get_parser():
     )
     shared_training_group.add_argument(
         "--epochs", "-e", type=int, default=3, help="Training epochs"
-    )
-    shared_training_group.add_argument(
-        "--batch_size",
-        "-b",
-        type=int,
-        default=2,
-        help="How many samples in a per device batch",
     )
     shared_training_group.add_argument(
         "--grad_acc_steps",
@@ -209,6 +206,11 @@ def get_parser():
         help="Directory where to save the generated plots and reports to (inference only)",
     )
     inference_group.add_argument(
+        "--use_batching",
+        action="store_true",
+        help="Use batching in inference",
+    )
+    inference_group.add_argument(
         "--include_code_in_reports",
         action="store_true",
         help="Include full function code in misclassification reports",
@@ -246,6 +248,7 @@ def validate_args(args):
         "max_tokens_per_answer",
         "chat_template_inference",
         "assets_dir",
+        "use_batching",
         "include_code_in_reports",
         "save_summary"
     }
@@ -254,8 +257,8 @@ def validate_args(args):
     training_shared = {
         "dataset_path",
         "base_model_name",
+        "chat_template",
         "epochs",
-        "batch_size",
         "grad_acc_steps",
         "logging_steps",
         "eval_steps",
@@ -268,6 +271,8 @@ def validate_args(args):
     if args.finetune:
         if args.dataset_path is None: # needs dataset path
             raise argparse.ArgumentTypeError("--dataset_path is required for --finetune mode")
+        if args.chat_template is None: # enforce chat_template for clarity
+            raise argparse.ArgumentTypeError("--chat_tempalte is required for --finetune mode")
 
         invalid_args = []
 
@@ -360,7 +365,6 @@ def get_default_value(arg_name):
         "base_model_name": "unsloth/llama-3.1-8b-instruct-bnb-4bit",
         "chat_template": None,
         "epochs": 3,
-        "batch_size": 2,
         "grad_acc_steps": 4,
         "logging_steps": 50,
         "eval_steps": 100,
@@ -382,6 +386,7 @@ def get_default_value(arg_name):
         "max_tokens_per_answer": 2048,
         "chat_template_inference": None,
         "assets_dir": None,
+        "use_batching": False,
         "include_code_in_reports": False,
         "save_summary": False
     }
