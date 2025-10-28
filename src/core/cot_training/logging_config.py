@@ -1,8 +1,11 @@
-import logging
 import sys
+import logging
+
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
+
+from src.core.cot_training.utilities.detection import detect_main_process
 
 
 MY_PENCIL: dict[str,str] = {
@@ -38,13 +41,18 @@ class LogFMT(logging.Formatter):
         return self.FORMATTERS.get(record.levelno, self.default_formatter).format(record=record)
 
 
-def setup_logger(level: int = logging.DEBUG):
+def setup_logger(level: int = logging.DEBUG, is_main_process: bool|None=None):
     """Configures and returns a logger for the module.
 
     Parameters
     ----------
     level : int, optional
         The logging level threshold, by default `logging.DEBUG`.
+    is_main_process : bool | None, optional
+        Whether this is the main process (for multi-GPU training).
+        - If None (default): Auto-detects from environment
+        - If True: Force main process behavior
+        - If False: Force non-main process behavior
     """
 
     date: str = datetime.today().strftime("%Y-%m-%d")
@@ -52,29 +60,37 @@ def setup_logger(level: int = logging.DEBUG):
     log_file = Path(__file__).parent / f"run/{date}/{time}/app.log"
     log_file.parent.mkdir(exist_ok=True, parents=True)
 
-    # capture warnings from `warnings` built-in Python module
     logging.captureWarnings(True)
 
+    # AUTO-DETECT MULTI-GPU ENVIRONMENT
+    if is_main_process is None:
+        is_main_process = detect_main_process()
+
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+
+    if is_main_process:
+        root_logger.setLevel(level)
+    else:
+        # Non-main processes: only show warnings and errors
+        root_logger.setLevel(logging.WARNING)
+
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
-    # handler for console log
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(level)
-    sh.setFormatter(LogFMT())
+    # MULTI-GPU HANDLING: Only add console handler on main process
+    if is_main_process:
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setLevel(level)
+        sh.setFormatter(LogFMT())
+        root_logger.addHandler(sh)
 
-    # handler for file log
-    fh = logging.FileHandler(log_file, mode="w")
-    fh.setLevel(logging.DEBUG)
-    # File handler should use a standard, non-colored formatter
-    file_formatter = logging.Formatter('| %(levelname)-8s | %(asctime)s | %(name)s:%(lineno)d | "%(message)s"')
-    fh.setFormatter(file_formatter)
-
-    # add handlers
-    root_logger.addHandler(sh)
-    root_logger.addHandler(fh)
+        # handler for file log
+        fh = logging.FileHandler(log_file, mode="w")
+        fh.setLevel(logging.DEBUG)
+        # File handler should use a standard, non-colored formatter
+        file_formatter = logging.Formatter('| %(levelname)-8s | %(asctime)s | %(name)s:%(lineno)d | "%(message)s"')
+        fh.setFormatter(file_formatter)
+        root_logger.addHandler(fh)
 
     # =================================================================
     # == SILENCE NOISY LIBRARIES ==
@@ -97,7 +113,19 @@ def setup_logger(level: int = logging.DEBUG):
     logging.getLogger("browser_proc").setLevel(logging.WARNING)
     # =================================================================
 
-    logging.info(f"Logging configured. Outputting to console and '{log_file}'.")
+    # MULTI-GPU HANDLING: Extra silencing for non-main processes
+    if not is_main_process:
+        logging.getLogger("datasets").setLevel(logging.ERROR)
+        logging.getLogger("torch").setLevel(logging.ERROR)
+        logging.getLogger("unsloth").setLevel(logging.ERROR)
+        logging.getLogger("root").setLevel(logging.ERROR)
+
+        # Suppress Python warnings on non-main processes
+        import warnings
+        warnings.filterwarnings("ignore")
+
+    if is_main_process:
+        logging.info(f"Logging configured. Outputting to console and '{log_file}'.")
 
 
 class BufferingHandler(logging.Handler):
