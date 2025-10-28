@@ -1,6 +1,6 @@
 from unsloth import is_bfloat16_supported
-from src.core.cot_training.processing_lib.model_handler import ModelHandler
-from src.core.cot_training.processing_lib.dataset_handler import DatasetHandler
+from .dataset_handler import DatasetHandler
+from .model_handler import ModelHandler
 
 import logging
 import json
@@ -43,6 +43,7 @@ class LLMHyperparameterOptimizer:
         max_steps_per_trial: int = -1,
         num_cpus: int = 1,
         use_deepspeed: bool = False,
+        debug: bool = False
     ):
         self.dataset_handler_class = dataset_handler_class
         self.dataset_path = dataset_path
@@ -66,6 +67,7 @@ class LLMHyperparameterOptimizer:
         self.epochs = epochs
         self.max_steps_per_trial = max_steps_per_trial
         self.use_deepspeed = use_deepspeed
+        self.debug_mode = debug
 
         # Cache for dataset - will be populated on first trial
         self._dataset_dict = None
@@ -82,7 +84,8 @@ class LLMHyperparameterOptimizer:
             dataset_path=self.dataset_path,
             formatted_dataset_dir=self.formatted_dataset_dir,
             tokenizer=tokenizer,
-            num_cpus=self.num_cpus
+            num_cpus=self.num_cpus,
+            debug_mode=self.debug_mode
         )
         self._dataset_dict = dataset_handler.run_pipeline()
         logger.info("✅ Dataset prepared and cached for reuse")
@@ -549,7 +552,6 @@ class LLMHyperparameterOptimizer:
 
     def hpo(self):
         """Run hyperparameter optimization."""
-        self.preliminary_params_validation()
 
         logger.info("🔧 Pre-processing: Loading base tokenizer and preparing dataset...")
         base_tokenizer = self._get_base_tokenizer()

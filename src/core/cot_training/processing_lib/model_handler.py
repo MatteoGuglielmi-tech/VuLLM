@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from transformers import PreTrainedTokenizer
 from peft import LoftQConfig
 
-from src.core.cot_training.loader_config import Loader
+from ..loader_config import Loader
+from ..utilities import rich_table
 
 logger = logging.getLogger(name=__name__)
 
@@ -43,16 +44,30 @@ class ModelHandler:
     def __post_init__(self) -> None:
         self._validate_inputs()
 
-        logger.info(f"🔧 Initializing {self.base_model_name} with:")
-        logger.info(f"   Max sequence length: {self.max_seq_length}")
-        logger.info(f"   RsLoRA: {self.use_rslora}")
-        logger.info(f"   LoftQ: {self.use_loftq}")
+        data = {
+            "Max sequence length": self.max_seq_length,
+            "RsLoRA enabled?" : self.use_rslora,
+            "LoftQ enabled?" : self.use_loftq,
+        }
+        rich_table(
+            data=data,
+            title=f"🔧 Initializing {self.base_model_name} with:",
+            columns=["Hyperparameter", "Value"],
+        )
 
-        logger.info(f"🩹 Patching model with:")
-        logger.info(f"   LoRA rank: {self.lora_r}")
-        logger.info(f"   LoRA alpha: {self.lora_alpha}")
-        logger.info(f"   LoRA dropout: {self.lora_dropout}")
-        logger.info(f"   Custom chat template: {self.chat_template is not None}")
+        data = {
+            "LoRA rank": self.lora_r,
+            "LoRA alpha": self.lora_alpha,
+            "LoRA dropout": self.lora_dropout,
+            "Chat template": self.chat_template
+        }
+        rich_table(
+            data=data,
+            title="🩹 Patching model with:",
+            columns=["Hyperparameter", "Value"],
+        )
+
+        del data
 
     def _validate_inputs(self):
         """Validate constructor inputs."""
@@ -95,7 +110,7 @@ class ModelHandler:
         """Configure tokenizer settings (chat template, padding, special tokens)."""
 
         if self.chat_template is not None:
-            logger.info(f"🎨 Applying custom chat template: {self.chat_template}")
+            logger.info(f"🎨 Applying chat template: {self.chat_template}")
             try:
                 self.tokenizer = get_chat_template(
                     self.tokenizer, 
@@ -142,7 +157,7 @@ class ModelHandler:
             raise
 
         if getattr(self.base_model, "is_loaded_in_4bit", False):
-            logger.info("✅ Verification successful: Model is loaded in 4-bit.")
+                logger.info("✅ Verification successful: Model is loaded in 4-bit.")
         else:
             logger.warning(
                 "⚠️ Verification warning: Model does not appear to be loaded in 4-bit."

@@ -462,9 +462,7 @@ class Evaluator:
             Per-CWE metrics and aggregated scores.
         """
 
-        logger.info("\n" + "=" * 60)
         logger.info("CWE CLASSIFICATION EVALUATION")
-        logger.info("=" * 60)
 
         cwe_data = self._collect_cwe_pairs(predictions)
         all_cwes = self._build_cwe_vocabulary(cwe_data)
@@ -734,7 +732,7 @@ class Evaluator:
         self,
         predictions: list[str],
         save_artifacts: bool = True,
-        include_code: bool = True,
+        include_code: bool = False,
         max_response_length: int = 1000,
     ) -> MisclassificationAnalysisResults:
         """Identify and analyze misclassified samples (False Positives & False Negatives).
@@ -756,9 +754,7 @@ class Evaluator:
             Detailed breakdown of misclassifications.
         """
 
-        logger.info("\n" + "=" * 60)
         logger.info("MISCLASSIFICATION ANALYSIS")
-        logger.info("=" * 60)
 
         fp_samples, fn_samples = self._collect_misclassifications(
             predictions=predictions,

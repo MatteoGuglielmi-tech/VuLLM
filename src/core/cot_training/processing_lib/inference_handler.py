@@ -1,3 +1,4 @@
+from ..utilities import is_main_process
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
@@ -198,10 +199,11 @@ class TestHandler:
         except torch.cuda.OutOfMemoryError as oom:
             logger.critical("💥 OUT OF MEMORY!")
             logger.critical(f"Model requires more VRAM than available.")
-            print(f"Solutions:")
-            print(f"  1. Use a smaller model")
-            print(f"  2. Reduce max_seq_length (current: {self.max_seq_length})")
-            print(f"  3. Use 8-bit quantization instead of 4-bit")
+            if is_main_process():
+                print(f"Solutions:")
+                print(f"  1. Use a smaller model")
+                print(f"  2. Reduce max_seq_length (current: {self.max_seq_length})")
+                print(f"  3. Use 8-bit quantization instead of 4-bit")
             torch.cuda.empty_cache()
             raise oom
 
@@ -292,11 +294,11 @@ class TestHandler:
     def evaluate_on_test_set(
         self,
         test_dataset: Dataset,
-        batch_size: int = 16,
+        batch_size: int,
         use_batching: bool = True,
     ) -> tuple[Dataset, list[str]]:
         """Run inference on test dataset and return predictions.
-        
+
         Parameters
         ----------
         test_dataset : Dataset
@@ -305,7 +307,7 @@ class TestHandler:
             Batch size for inference.
         use_batching : bool, default=True
             Whether to use batched inference (faster) or sequential (debugging).
-        
+
         Returns
         -------
         tuple[Dataset, list[str]]
