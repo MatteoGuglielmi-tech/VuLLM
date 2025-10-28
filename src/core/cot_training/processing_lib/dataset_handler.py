@@ -8,6 +8,8 @@ from datasets import load_dataset, DatasetDict, Dataset, load_from_disk
 from collections import defaultdict
 
 
+from ..utilities import rich_table, is_main_process
+
 logger = logging.getLogger(name=__name__)
 
 
@@ -19,6 +21,7 @@ class DatasetHandler:
     formatted_dataset_dir: Path
     tokenizer: PreTrainedTokenizer
     num_cpus: int
+    debug_mode: bool
 
     SYSTEM_PROMPT: str = field(
         init=False,
@@ -82,9 +85,8 @@ class DatasetHandler:
         logger.info("⚙️ Loading dataset... ⚙️")
         full_dataset = load_dataset("json", data_files=self.dataset_path, split="train")
 
-        logger.info(
-            "📊 Analyzing label distribution per project for stratification... 📊"
-        )
+        logger.info("📊 Analyzing label distribution per project for stratification... 📊")
+
         project_stats = defaultdict(lambda: {"vulnerable": 0, "clean": 0})
         for example in full_dataset:
             project = example["project"]
@@ -103,15 +105,7 @@ class DatasetHandler:
         target_test_clean = int(total_clean * test_size)
         target_val_vulnerable = int(total_vulnerable * val_size)
         target_val_clean = int(total_clean * val_size)
-
-        logger.info(
-            f"Total: {total_samples} samples ({total_vulnerable} vulnerable, {total_clean} clean)\n"
-            f"Target test: {target_test_vulnerable + target_test_clean} samples "
-            f"({target_test_vulnerable} vulnerable, {target_test_clean} clean)\n"
-            f"Target val: {target_val_vulnerable + target_val_clean} samples "
-            f"({target_val_vulnerable} vulnerable, {target_val_clean} clean)"
-        )
-
+  
         # Create list of (project, vulnerable_count, clean_count) and shuffle
         projects_with_stats = [
             (project, stats["vulnerable"], stats["clean"])
@@ -129,7 +123,12 @@ class DatasetHandler:
         val_vulnerable, val_clean = 0, 0
 
         def _calculate_imbalance(
-            current_vuln, current_clean, target_vuln, target_clean, add_vuln, add_clean
+            current_vuln: int,
+            current_clean: int,
+            target_vuln: int,
+            target_clean: int,
+            add_vuln: int,
+            add_clean: int,
         ):
             """Calculate how much this assignment would deviate from target proportions."""
             new_vuln = current_vuln + add_vuln
@@ -146,20 +145,20 @@ class DatasetHandler:
         for project, vuln_count, clean_count in projects_with_stats:
             # Calculate imbalance for each split if we add this project
             test_imbalance = _calculate_imbalance(
-                test_vulnerable,
-                test_clean,
-                target_test_vulnerable,
-                target_test_clean,
-                vuln_count,
-                clean_count,
+                current_vuln=test_vulnerable,
+                current_clean=test_clean,
+                target_vuln=target_test_vulnerable,
+                target_clean=target_test_clean,
+                add_vuln=vuln_count,
+                add_clean=clean_count,
             )
             val_imbalance = _calculate_imbalance(
-                val_vulnerable,
-                val_clean,
-                target_val_vulnerable,
-                target_val_clean,
-                vuln_count,
-                clean_count,
+                current_vuln=val_vulnerable,
+                current_clean=val_clean,
+                target_vuln=target_val_vulnerable,
+                target_clean=target_val_clean,
+                add_vuln=vuln_count,
+                add_clean=clean_count,
             )
 
             test_would_exceed = (
@@ -227,11 +226,30 @@ class DatasetHandler:
         val_vuln, val_clean = _count_labels(val_dataset)
         test_vuln, test_clean = _count_labels(test_dataset)
 
-        logger.info(
-            "✅ Label-balanced project-based split done.\n"
-            f"  Train: {len(train_dataset)} samples ({train_vuln} vulnerable, {train_clean} clean)\n"
-            f"  Val:   {len(val_dataset)} samples ({val_vuln} vulnerable, {val_clean} clean)\n"
-            f"  Test:  {len(test_dataset)} samples ({test_vuln} vulnerable, {test_clean} clean)"
+        train_split_len = len(train_dataset)
+        val_split_len = len(val_dataset)
+        test_split_len = len(test_dataset)
+        data = {
+            "Training": [
+                train_split_len, train_vuln, train_clean,
+                train_vuln / train_split_len * 100,
+                train_clean / train_split_len * 100,
+            ],
+            "Validation": [
+                val_split_len, val_vuln, val_clean,
+                val_vuln / val_split_len * 100,
+                val_clean / val_split_len * 100,
+            ],
+            "Test": [
+                test_split_len, test_vuln, test_clean,
+                test_vuln / test_split_len * 100,
+                test_clean / test_split_len * 100,
+            ],
+        }
+        rich_table(
+            data=data,
+            title="✅ Label-balanced project-based split done.",
+            columns=["Split", "Total", "Vulnerable", "Clean", "Vulnerable(%)", "Clean (%)"],
         )
 
         return DatasetDict(
@@ -272,8 +290,8 @@ class DatasetHandler:
                 {"role": "user", "content": prompt},
                 {"role": "assistant", "content": ground_truth},
             ]
-            # return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
-            return {"messages": messages}
+            return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
+            # return {"messages": messages}
 
         formatted_splits = DatasetDict()
 
@@ -285,6 +303,10 @@ class DatasetHandler:
                     remove_columns=list(dataset_dict[split_name].features),
                     num_proc=self.num_cpus
                 )
+
+        if self.debug_mode and is_main_process():
+            print(f"5th training sample: \n {formatted_splits["train"][5]["text"]}")
+            print(f"5th validation sample: \n {formatted_splits["validation"][5]["text"]}")
 
         # keep the test split in its original, unformatted state
         if "test" in dataset_dict:

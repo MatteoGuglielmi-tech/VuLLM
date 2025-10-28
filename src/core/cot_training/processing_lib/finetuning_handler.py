@@ -1,8 +1,11 @@
 from unsloth import is_bfloat16_supported
-from src.core.cot_training.processing_lib.dataset_handler import DatasetHandler
-from src.core.cot_training.processing_lib.model_handler import ModelHandler
+from unsloth.chat_templates import train_on_responses_only
+
 from src.core.cot_training.loader_config import Loader
-from src.core.cot_training.processing_lib.custom.weighted_cot_trainer import WeightedCoTTrainer
+from .dataset_handler import DatasetHandler
+from .model_handler import ModelHandler
+from .custom import WeightedCoTTrainer
+from ..utilities import get_instruction_response_parts, is_main_process
 
 import logging
 import os
@@ -10,6 +13,7 @@ import gc
 import torch
 
 from transformers.tokenization_utils import PreTrainedTokenizer
+# from transformers import DataCollatorForSeq2Seq
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
@@ -54,7 +58,6 @@ class FineTuningHandler:
         use_deepspeed: bool = False,
         # -- general --
         debug: bool = False,
-        is_main_process: bool=False
     ):
 
         self.dataset_handler_class = dataset_handler_class
@@ -84,7 +87,6 @@ class FineTuningHandler:
         self.use_deepspeed = use_deepspeed
 
         self.debug = debug
-        self.is_main_process = is_main_process
         self._dataset_dict = None
         self._base_tokenizer = None
 
@@ -120,6 +122,7 @@ class FineTuningHandler:
                 formatted_dataset_dir=self.formatted_dataset_dir,
                 tokenizer=tokenizer,
                 num_cpus=self.num_cpus,
+                debug_mode=self.debug,
             )
             self._dataset_dict = dataset_handler.run_pipeline()
         return self._dataset_dict
@@ -163,6 +166,7 @@ class FineTuningHandler:
         return texts
 
     def debug_fmt_dataset_structure(self, dataset_dict: DatasetDict):
+        if is_main_process():
             print("=" * 50)
             print("DEBUGGING DATASET STRUCTURE")
             print("=" * 50)
@@ -233,6 +237,8 @@ class FineTuningHandler:
 
         if self.debug:
             self.debug_fmt_dataset_structure(dataset_dict)
+
+        if is_main_process():
             print(f"📊 Model trainable parameters:")
             if hasattr(model, "print_trainable_parameters"):
                 model.print_trainable_parameters()
@@ -246,7 +252,8 @@ class FineTuningHandler:
                 train_dataset=dataset_dict["train"],
                 eval_dataset=dataset_dict["validation"],
                 args=sft_args,
-                formatting_func=self.formatting_prompts_func,
+                # data_collator = DataCollatorForSeq2Seq(tokenizer = tokenizer),
+                # formatting_func=self.formatting_prompts_func,
             )
         else:
             trainer = WeightedCoTTrainer(
@@ -260,6 +267,15 @@ class FineTuningHandler:
                 answer_marker="Final Answer:",  # prompt-specific!
             )
 
+        instruction_part, response_part = get_instruction_response_parts(tokenizer=self.tokenizer)
+        trainer = train_on_responses_only(
+            trainer, instruction_part=instruction_part, response_part=response_part
+        )
+
+        logger.info(f"✅ Trainer configured with response-only training")
+        logger.info(f"   Instruction marker: {instruction_part}")
+        logger.info(f"   Response marker: {response_part}")
+
         return trainer
 
     def _ft_args(self) -> SFTConfig:
@@ -272,7 +288,7 @@ class FineTuningHandler:
         bfloat16_supported: bool = is_bfloat16_supported()
 
         sft_config_params: dict[str, Any] = {
-            "assistant_only_loss": True,  # only on assistant generated tokens
+            # "assistant_only_loss": True,  # only on assistant generated tokens
             "use_liger_kernel": True,
             "output_dir": self.checkpoint_dir,
             "run_name": f"{self.base_model_name.split('/')[-1]}-epochs-{self.epochs}",
@@ -291,11 +307,8 @@ class FineTuningHandler:
             "save_steps": self.eval_steps,
             "fp16": not bfloat16_supported,
             "bf16": bfloat16_supported,
-            "optim": "paged_adamw_8bit",
-            "lr_scheduler_type": "cosine",
             "max_length": self.max_seq_length,
-            # Don't specify dataset_text_field - will use "messages" by default
-            # "dataset_text_field": "text",
+            "dataset_text_field": "text",
             "packing": False,
             "report_to": "wandb",
             "gradient_checkpointing": True,
@@ -306,74 +319,84 @@ class FineTuningHandler:
             "save_total_limit": 3,
         }
 
+        if not self.use_deepspeed:
+            sft_config_params["optim"] = "paged_adamw_8bit"
+            sft_config_params["lr_scheduler_type"] = "cosine"
+
         return SFTConfig(**sft_config_params)
 
     def debug_trainer(self, trainer):
-        print("\n" + "=" * 50)
-        print("TESTING TRAINER DATA LOADING")
-        print("=" * 50)
 
-        # Get one batch from the trainer's dataloader
-        try:
-            # This will trigger the actual data processing pipeline
-            train_dataloader = trainer.get_train_dataloader()
-            first_batch = next(iter(train_dataloader))
+        if is_main_process():
+            print("\n" + "=" * 50)
+            print("TESTING TRAINER DATA LOADING")
+            print("=" * 50)
 
-            print(f"✓ Successfully loaded first batch!")
-            print(f"Batch keys: {first_batch.keys()}")
-            print(f"Input IDs shape: {first_batch['input_ids'].shape}")
-            print(f"Labels shape: {first_batch['labels'].shape}")
+            # Get one batch from the trainer's dataloader
+            try:
+                # This will trigger the actual data processing pipeline
+                train_dataloader = trainer.get_train_dataloader()
+                first_batch = next(iter(train_dataloader))
 
-            # Check if labels are properly masked for assistant-only loss
-            # -100 tokens should be present for system/user parts
-            labels = first_batch["labels"][0]
-            num_masked = (labels == -100).sum().item()
-            num_unmasked = (labels != -100).sum().item()
-            print(f"✓ Masked tokens (system/user): {num_masked}")
-            print(f"✓ Unmasked tokens (assistant): {num_unmasked}")
+                print(f"✓ Successfully loaded first batch!")
+                print(f"Batch keys: {first_batch.keys()}")
+                print(f"Input IDs shape: {first_batch['input_ids'].shape}")
+                print(f"Labels shape: {first_batch['labels'].shape}")
 
-            # Sequence length check
-            print(f"\nMax sequence length setting: {trainer.args.max_length}")
-            print(f"Actual batch max length: {first_batch['input_ids'].shape[1]}")
+                # Check if labels are properly masked for assistant-only loss
+                # -100 tokens should be present for system/user parts
+                labels = first_batch["labels"][0]
+                num_masked = (labels == -100).sum().item()
+                num_unmasked = (labels != -100).sum().item()
+                print(f"✓ Masked tokens (system/user): {num_masked}")
+                print(f"✓ Unmasked tokens (assistant): {num_unmasked}")
 
-            # Check for padding
-            padding_mask = first_batch['attention_mask'][0]
-            num_padding_tokens = (padding_mask == 0).sum().item()
-            num_real_tokens = (padding_mask == 1).sum().item()
+                print(self.tokenizer.decode(first_batch["input_ids"][0]))
+                space = self.tokenizer(" ", add_special_tokens = False).input_ids[0]
+                print(self.tokenizer.decode([space if x == -100 else x for x in first_batch["labels"]]))
 
-            print(f"Real tokens: {num_real_tokens}")
-            print(f"Padding tokens: {num_padding_tokens}")
+                # Sequence length check
+                print(f"\nMax sequence length setting: {trainer.args.max_length}")
+                print(f"Actual batch max length: {first_batch['input_ids'].shape[1]}")
 
-            # Check if any sequences are truncated
-            if first_batch['input_ids'].shape[1] >= trainer.args.max_length:
-                print("⚠️  Warning: Sequences may be truncated at max_length")
-            else:
-                print(f"✓ Sequences fit within max_seq_length ({trainer.args.max_length})")
+                # Check for padding
+                padding_mask = first_batch['attention_mask'][0]
+                num_padding_tokens = (padding_mask == 0).sum().item()
+                num_real_tokens = (padding_mask == 1).sum().item()
 
-            # Final pre-training checklist
-            print("\n" + "=" * 60)
-            print("FINAL PRE-TRAINING CHECKLIST")
-            print("=" * 60)
+                print(f"Real tokens: {num_real_tokens}")
+                print(f"Padding tokens: {num_padding_tokens}")
 
-            print(f"✓ Batch loading successful: shape {first_batch['input_ids'].shape}")
-            print(f"✓ Assistant-only loss active: {num_masked} masked, {num_unmasked} unmasked tokens")
-            print(f"✓ Masking ratio: {num_masked/(num_masked+num_unmasked)*100:.1f}% masked")
-            print(f"✓ Training for {self.epochs} epochs")
-            print(f"✓ Batch size: {self.per_device_train_batch_size}")
-            print(f"✓ Gradient accumulation: {self.gradient_accumulation_steps}")
-            print(f"✓ Effective batch size: {self.per_device_train_batch_size * self.gradient_accumulation_steps}")
-            print(f"✓ Learning rate: {self.lr}")
+                # Check if any sequences are truncated
+                if first_batch['input_ids'].shape[1] >= trainer.args.max_length:
+                    print("⚠️  Warning: Sequences may be truncated at max_length")
+                else:
+                    print(f"✓ Sequences fit within max_seq_length ({trainer.args.max_length})")
 
-            print("\n🚀 Ready to start training!")
-            print("=" * 60)
+                # Final pre-training checklist
+                print("\n" + "=" * 60)
+                print("FINAL PRE-TRAINING CHECKLIST")
+                print("=" * 60)
 
-        except Exception as e:
-            print(f"✗ Error loading batch: {e}")
-            import traceback
+                print(f"✓ Batch loading successful: shape {first_batch['input_ids'].shape}")
+                print(f"✓ Assistant-only loss active: {num_masked} masked, {num_unmasked} unmasked tokens")
+                print(f"✓ Masking ratio: {num_masked/(num_masked+num_unmasked)*100:.1f}% masked")
+                print(f"✓ Training for {self.epochs} epochs")
+                print(f"✓ Batch size: {self.per_device_train_batch_size}")
+                print(f"✓ Gradient accumulation: {self.gradient_accumulation_steps}")
+                print(f"✓ Effective batch size: {self.per_device_train_batch_size * self.gradient_accumulation_steps}")
+                print(f"✓ Learning rate: {self.lr}")
 
-            traceback.print_exc()
+                print("\n🚀 Ready to start training!")
+                print("=" * 60)
 
-        print("=" * 50)
+            except Exception as e:
+                print(f"✗ Error loading batch: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+            print("=" * 50)
 
     def fine_tune(self):
         self.setup_paths()
