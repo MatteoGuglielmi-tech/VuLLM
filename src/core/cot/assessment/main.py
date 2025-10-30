@@ -1,38 +1,137 @@
-from argparse import ArgumentError
+import os
+import gc
+import argparse
+import json
 import logging
-from dotenv import load_dotenv
+from pathlib import Path
 
-from src.core.cot.logging_config import setup_logger
-from src.core.cot.assessment.cli import get_parser, save_running_args
-from src.core.cot.generation.llm_clients.gpt import AzureCoTGenerator
-from src.core.cot.assessment.quality_check import QualityAssessor
+from accelerate import Accelerator
+
+from .logging_config import setup_logger
+from .judges import JudgeConfig, JudgeEnsemble
+from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
+
+from rich.traceback import install
+install(show_locals=True)
 
 setup_logger()
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(name=__name__)
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        prog="Chain of thougths quality assessment",
+        description="A jury that judges the quality of CoTs",
+    )
+
+    path_group = parser.add_argument_group("Path mandatory arguments")
+    path_group.add_argument("--input", "-i", type=Path, required=True, help="Path to the source dataset.")
+    path_group.add_argument("--output", "-o", type=Path, required=True, help="Output folder.")
+
+    # -- Generation --
+    model_group = parser.add_argument_group("Model arguments")
+    model_group.add_argument("--max_new_tokens", "-m", type=int, default=512, help="Maximum tokens for generation completion.")
+
+    # -- Assessment --
+    assessment_group = parser.add_argument_group("Metrics arguments")
+    assessment_group.add_argument(
+        "--quality_threshold", "-q",
+        type=float, default=0.60,
+        help="Minimum average quality (0-1).",
+    )
+    assessment_group.add_argument(
+        "--agreement_threshold", "-a",
+        type=float, default=0.75,
+        help="Minimum judge agreement (0-1, higher=stricter). Reject if judges differ by more than (1-agreement_threshold)",
+    )
+    assessment_group.add_argument(
+        "--score_type", "-t",
+        type=str, default="hybrid", choices=["range", "std", "hybrid"],
+        help="Type of agreement to compute",
+    )
+
+    args = parser.parse_args()
+    accelerator = Accelerator()
+    try:
+
+        cpus_allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
+
+        if is_main_process():
+            data = {
+                "Distributed type": accelerator.distributed_type,
+                "Num processes": accelerator.num_processes,
+                "Mixed precision": accelerator.mixed_precision,
+                "Num SLURM CPUs": cpus_allocated,
+            }
+            if accelerator.state.deepspeed_plugin is not None:
+                data["DEEPSPEED"] = "ENABLED"
+                data["ZeRO Stage"] = accelerator.state.deepspeed_plugin.zero_stage
+                data["Offload optimizer"]=accelerator.state.deepspeed_plugin.offload_optimizer_device
+                data["Offload params"]=accelerator.state.deepspeed_plugin.offload_param_device
+            else:
+                data["DEEPSPEED"] = "DISABLED"
+
+            table=build_table(data=data, title="", columns=["Parameter", "Value"])
+            rich_panel(table, panel_title="Environment configuration", subtitle="", align="center")
+
+            del data, table
+            gc.collect()
+        rich_rule()
+
+        paths = setup_paths(parser)
+
+        judge_configs = [
+            JudgeConfig(
+                model_name="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
+                chat_template="qwen-2.5",
+                specialization="code",
+                description="Specialized in C/C++ vulnerability patterns and code analysis"
+            ),
+            JudgeConfig(
+                model_name="unsloth/QwQ-32B-unsloth-bnb-4bit",
+                specialization="reasoning",
+                temperature=0.6,
+                top_k=30,
+                top_p=0.95,
+                min_p=0.05,
+                description="Deep reasoning model for logical flow and completeness"
+            ),
+            JudgeConfig(
+                model_name="unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
+                chat_template="qwen-2.5",
+                temperature=0.7,
+                top_p=0.95,
+                min_p=0.05,
+                specialization="logic",
+                description="Mathematical and logical reasoning specialist"
+            ),
+        ]
+
+        # =========================================================================
+        # Run Filtering
+        # =========================================================================
+        ensemble = JudgeEnsemble(judge_configs)
+        ensemble_info = ensemble.get_ensemble_info()
+        with open(file=paths["metadata"], mode="w", encoding="utf-8") as f:
+            json.dump(ensemble_info, f, indent=2)
+
+        stats = ensemble.filter_dataset_streaming(
+            input_jsonl_path=args.input,
+            output_jsonl_path=paths["filtered"],
+            rejected_jsonl_path=paths["rejected"],
+            stats_json_path=paths["filtering_stats"],
+            quality_threshold=args.quality_threshold,
+            agreement_threshold=args.agreement_threshold,
+            save_interval=15
+        )
+
+        return stats
+    except Exception:
+        rich_exception()
+    finally:
+        cleanup_resources(accelerator=accelerator)
+
 
 if __name__ == "__main__":
-    logger.debug("🚀 Starting baseline... 🚀")
-
-    args = get_parser().parse_args()
-    save_running_args(args)
-
-    cot_backend = None
-
-    match args.engine_name:
-        case "gpt-4.1":
-            cot_backend = AzureCoTGenerator(deployment_name=args.deployment_name)
-        case _:
-            raise ArgumentError(argument=None, message="Invalid proprietary model specified")
-
-    if cot_backend is None:
-        raise RuntimeError("CoT assessor could not be initialized. Check model_type and engine_name arguments.")
-
-    qa = QualityAssessor(
-        deployment_name=args.deployment_name,
-        client = cot_backend,
-        max_completion_tokens=args.max_completion_tokens
-
-    )
-    qa.run_assessment(input_fp=args.source, output_dir=args.target, sample_size=args.sample_size)
+    main()
