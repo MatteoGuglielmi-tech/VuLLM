@@ -40,6 +40,7 @@ src/core/cot/generation/llm_clients/__pycache__/
 src/core/cot_training/__pycache__/
 src/core/cot_training/todo.md
 src/core/cot_training/processing_lib/unused/
+src/core/cot_training/run/
 
 
 # src/dataset/restructure
