@@ -79,21 +79,6 @@ class LLMJudge:
     def __post_init__(self):
         self._validate_inputs()
 
-        # data = self.judge_config.__dict__.copy()
-        # del data["specialization"]
-        # del data["description"]
-        #
-        # rich_table(
-        #     data=data,
-        #     columns=["Parameter", "Value"],
-        #     title=f"⚙️ {self.model_name.split('/')[1]} configuration ⚙️",
-        # )
-        #
-        # rich_rule()
-        #
-        # del data
-        # gc.collect()
-
     def _validate_inputs(self):
         """Validate constructor inputs."""
 

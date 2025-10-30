@@ -61,7 +61,6 @@ class JudgeEnsemble:
         del tables, table, data
         gc.collect()
 
-        exit()
     def get_ensemble_info(self) -> dict:
         """Get information about the ensemble composition."""
         return {
