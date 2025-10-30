@@ -14,7 +14,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .judge_types import JudgeConfig
 from ..types import ReasoningSample
-from ..utilities import is_main_process, rich_table, rich_rule
+from ..utilities import is_main_process
 
 
 logger = logging.getLogger(name=__name__)
@@ -124,17 +124,17 @@ class LLMJudge:
     def _configure_tokenizer(self):
         """Configure tokenizer settings (chat template, padding, special tokens)."""
 
-        if self.chat_template is not None:
-            logger.info(f"🎨 Applying chat template: {self.chat_template}")
+        chat_template = self.judge_config.chat_template
+        if chat_template is not None:
+            logger.info(f"🎨 Applying chat template: {chat_template}")
             try:
                 self.tokenizer = get_chat_template(
-                    self.tokenizer, 
-                    chat_template=self.chat_template
+                    self.tokenizer, chat_template=chat_template
                 )
             except ValueError as e:
-                logger.error(f"Invalid chat template: {self.chat_template}")
+                logger.error(f"Invalid chat template: {chat_template}")
                 logger.error(f"Available templates: {list(CHAT_TEMPLATES.keys())}")
-                raise ValueError(f"Chat template '{self.chat_template}' not found") from e
+                raise ValueError(f"Chat template '{chat_template}' not found") from e
 
         self._set_padding_strategy()
 
