@@ -341,15 +341,14 @@ class JudgeEnsemble:
             "Mean quality score": [f"{stats['mean_score']:.3f} ± {stats['std_score']:.3f}", "/"],
             "Mean quality score": [f"{stats['mean_agreement']:.3f} ± {stats['std_agreement']:.3f}", "/"],
         }
-        rich_table(data=data, title="FILTERING RESULTS", columns=["Metric", "Value", "Rate"])
+        res_table=build_table(data=data, title="FILTERING RESULTS", columns=["Metric", "Value", "Rate"])
         data = {
             "Total": stats["rejected"],
             "Low quality only": stats["low_quality"] - stats["both_issues"],
             "Low agreement only": stats["low_agreement"] - stats["both_issues"],
             "Both issues": stats["both_issues"],
         }
-        rich_table(data=data, title="REJECTED ANALYSIS", columns=["Support", "Value"])
-        del data
+        rejected_table = build_table(data=data, title="REJECTED ANALYSIS", columns=["Support", "Value"])
 
         with open(file=stats_json_path, mode="w") as f:
             json.dump(
@@ -357,5 +356,15 @@ class JudgeEnsemble:
                 f,
                 indent=2,
             )
-        logger.info(f"\n✓ Statistics saved to: {stats_json_path}")
+
+        rich_panel(
+            tables=[res_table, rejected_table],
+            panel_title="🏁 Experiment outcome 🏁",
+            subtitle=f"\n✓ Statistics saved to: {stats_json_path}",
+            border_style="dim purple",
+            padding=(1, 35),
+        )
+
+
+        del data, res_table, rejected_table
         return stats
