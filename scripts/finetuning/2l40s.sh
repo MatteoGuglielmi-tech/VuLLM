@@ -26,4 +26,4 @@ echo "✅ Triton cache: $TRITON_CACHE_DIR"
 #"unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit",
 #"unsloth/QwQ-32B-unsloth-bnb-4bit"
 
-python DoneBot/src/notify.py --cmd accelerate launch --config_file accelerate/2gpus.yaml -m src.core.cot_training.main --finetune --dataset_path ./DiverseVul/processed/gpt_reasoning.jsonl --formatted_dataset_dir ./DiverseVul/formatted/reasonings --base_model_name unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit --max_seq_length 4096 --epochs 3 --batch_size 2 --grad_acc_steps 4 --use_rslora --deepspeed
+python DoneBot/src/notify.py --cmd accelerate launch --config_file accelerate/2gpus.yaml -m src.core.cot_training.main --finetune --dataset_path ./DiverseVul/processed/gpt_reasoning.jsonl --formatted_dataset_dir ./DiverseVul/formatted/reasonings --base_model_name unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit --chat_template qwen-2.5 --max_seq_length 5120 --epochs 3 --batch_size 2 --grad_acc_steps 4 --learning_rate 5e-5 --use_rslora --deepspeed
