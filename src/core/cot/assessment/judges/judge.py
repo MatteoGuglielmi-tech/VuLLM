@@ -83,7 +83,7 @@ class LLMJudge:
         """Validate constructor inputs."""
 
         self.model_name = self.judge_config.model_name
-        self.max_seq_length = self.judge_config.max_new_tokens
+        self.max_seq_length = self.judge_config.max_seq_length
         self.max_new_tokens = self.judge_config.max_new_tokens
 
         # Validate numeric parameters
