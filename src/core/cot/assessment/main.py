@@ -10,6 +10,7 @@ from accelerate import Accelerator
 from .logging_config import setup_logger
 from .judges import JudgeConfig, JudgeEnsemble
 from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
+from .plots import visualize_results
 
 from rich.traceback import install
 install(show_locals=True)
@@ -28,6 +29,7 @@ def main():
     path_group = parser.add_argument_group("Path mandatory arguments")
     path_group.add_argument("--input", "-i", type=Path, required=True, help="Path to the source dataset.")
     path_group.add_argument("--output", "-o", type=Path, required=True, help="Output folder.")
+    path_group.add_argument("--assets", "-p", type=Path, required=True, help="Assets folder.")
 
     # -- Generation --
     model_group = parser.add_argument_group("Model arguments")
@@ -126,7 +128,13 @@ def main():
             save_interval=15
         )
 
-        return stats
+        visualize_results(
+            stats=stats,
+            output_dir=args.assets,
+            quality_threshold=args.quality_threshold,
+            agreements_threshold=args.agreement_threshold,
+        )
+
     except Exception:
         rich_exception()
     finally:
