@@ -91,18 +91,15 @@ def main():
                 description="Specialized in C/C++ vulnerability patterns and code analysis"
             ),
             JudgeConfig(
-                model_name="unsloth/QwQ-32B-unsloth-bnb-4bit",
+                model_name="unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit",
+                chat_template="llama-3.1",
                 specialization="reasoning",
-                temperature=0.6,
-                top_k=30,
-                top_p=0.95,
-                min_p=0.05,
                 description="Deep reasoning model for logical flow and completeness"
             ),
             JudgeConfig(
                 model_name="unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
                 chat_template="qwen-2.5",
-                temperature=0.7,
+                temperature=0.6,
                 top_p=0.95,
                 min_p=0.05,
                 specialization="logic",
