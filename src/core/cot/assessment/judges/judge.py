@@ -286,7 +286,6 @@ class LLMJudge:
             messages,
             tokenize=False,
             add_generation_prompt=True, # mandatory for generation
-            enable_thinking=False
         )
 
         inputs = self.tokenizer(
