@@ -4,14 +4,15 @@ import jsonlines
 import logging
 import numpy as np
 
+from collections import defaultdict
 from tqdm import tqdm
 from pathlib import Path
-from typing import Any
+from scipy.spatial.distance import pdist
 
 from .judge import LLMJudge
 from .judge_types import JudgeConfig
-from ..types import ReasoningSample
-from ..utilities import iter_jsonl_samples, rich_table, rich_rule, rich_panel, build_table
+from ..datatypes import EvaluationResult, ReasoningSample
+from ..utilities import iter_jsonl_samples, rich_table, rich_rule, rich_panel, build_table, progress_bar
 
 
 logger = logging.getLogger(__name__)
@@ -20,11 +21,25 @@ logger = logging.getLogger(__name__)
 class JudgeEnsemble:
     """Ensemble of LLM judges with equal-weighted voting"""
 
-    def __init__(self, judge_configs: list[JudgeConfig]):
+    def __init__(self, judge_configs: list[JudgeConfig], criterion_weights: dict[str, float]|None=None):
         self.judge_configs = judge_configs
         self.judges: list[LLMJudge] = [LLMJudge(config) for config in judge_configs]
         self.weights = np.ones(len(judge_configs)) / len(judge_configs) # equal weights for all judges
-        self._scores_cache = None
+
+        if criterion_weights is not None:
+            self.criterion_weights = criterion_weights
+        else: #default
+            self.criterion_weights = {
+                "correctness": 0.35,
+                "completeness": 0.25,
+                "technical_accuracy": 0.20,
+                "clarity": 0.10,
+                "logical_flow": 0.10,
+            }
+
+        self.criterion_weights_vector = np.array(
+            [self.criterion_weights[c] for c in EvaluationResult.get_criteria_names()]
+        )
 
         data = {
             f"{config.model_name}": [
@@ -58,6 +73,14 @@ class JudgeEnsemble:
             border_style="green",
             padding=(1, 20),
         )
+
+        table = build_table(
+            data=self.criterion_weights,
+            title=f"Weights for computing overall quality from criteria",
+            columns=["Criterion", "Weight"],
+        )
+        rich_table(data=table)
+        rich_rule()
         del tables, table, data
         gc.collect()
 
@@ -77,114 +100,183 @@ class JudgeEnsemble:
             "weighting_strategy": "equal",
         }
 
-    def evaluate_sample(
-        self,
-        sample: ReasoningSample,
-        method: str = "range",
-        hybrid_weight: float = 0.75,
-    ) -> dict:
-        """Get evaluations from all judges for a single sample.
-        Loads/unloads each judge sequentially.
+    def evaluate_sample(self, sample: ReasoningSample, method: str ="weighted_multidimensional") -> dict:
+        """
+        Evaluate sample with all judges and compute ensemble metrics.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - sample_id: Sample identifier
+            - evaluations: List of EvaluationResult dicts from each judge
+            - ensemble_score: Final weighted quality score
+            - ensemble_criteria: Average score for each criterion
+            - agreement: Agreement score between judges
         """
 
-        evaluations = []
+        evaluations: list[EvaluationResult] = []
         for _, judge in enumerate(self.judges):
             judge.load()
             eval_result = judge.evaluate(sample)
             evaluations.append(eval_result)
             judge.unload()
 
-        return {
-            "sample_id": sample.sample_id,
-            "evaluations": evaluations,
-            "ensemble_score": self._compute_weighted_score(evaluations),
-            "agreement": self._compute_agreement(evaluations, method=method, hybrid_weight=hybrid_weight),
+        ensemble_score = self._compute_weighted_score(evaluations)
+        agreement = self._compute_agreement(evaluations, method=method)
+
+        ensemble_criteria = {
+            "correctness": float(np.mean([e.correctness for e in evaluations])),
+            "completeness": float(np.mean([e.completeness for e in evaluations])),
+            "clarity": float(np.mean([e.clarity for e in evaluations])),
+            "technical_accuracy": float(np.mean([e.technical_accuracy for e in evaluations])),
+            "logical_flow": float(np.mean([e.logical_flow for e in evaluations])),
         }
 
-    def _compute_weighted_score(self, evaluations: list[dict[str, Any]]) -> float:
-        """Compute weighted ensemble score"""
+        return {
+            "sample_id": sample.sample_id,
+            "evaluations": [e.to_dict() for e in evaluations],
+            "ensemble_score": ensemble_score,
+            "ensemble_criteria": ensemble_criteria,
+            "agreement": agreement,
+            "agreement_method": "weighted_multidimensional",
+        }
 
-        if self._scores_cache is None:
-            self._scores_cache = [e["quality_score"] for e in evaluations]
-        confidences = np.array([e.get("confidence", 1.0) for e in evaluations])
-
-        # Combine equal weights with confidence
-        combined_weights = self.weights * confidences
-        combined_weights = combined_weights / combined_weights.sum()
-
-        weighted_score = np.dot(np.array(self._scores_cache), combined_weights)
-
-        return float(weighted_score)
-
-    def _compute_agreement(
-        self,
-        evaluations: list[dict[str, Any]],
-        method: str,
-        hybrid_weight: float,
-    ) -> dict:
-        """Compute inter-judge agreement.
+    def _compute_weighted_score(self, evaluations: list[EvaluationResult]) -> float:
+        """
+        Compute weighted ensemble score using ALL criteria.
 
         Parameters
         ----------
-        evaluations : list[dict]
-            Judge evaluations
-        method : str
-            Agreement method: "range" (intuitive), "std" (sensitive), or "hybrid"
-        hybrid_range_weight : float
-            Weight for range component in hybrid mode (default 0.75)
+        evaluations : List[EvaluationResult]
+            List of evaluation results from all judges
 
         Returns
         -------
-        float: Agreement score [0, 1]
+        float
+            Weighted ensemble quality score [0, 1]
         """
 
-        if self._scores_cache is None:
-            self._scores_cache = [e["quality_score"] for e in evaluations]
+        criterion_vectors = np.array([eval_result.get_criteria_vector() for eval_result in evaluations])
+        confidences = np.array([eval_result.confidence for eval_result in evaluations])
 
-        if len(self._scores_cache) < 2:
-            return {"agreement": 1.0, "method": "single_judge"}
+        # Weight judges by their confidence
+        judge_weights = self.weights * confidences
+        judge_weights = judge_weights / judge_weights.sum()
 
-        scores = np.array(self._scores_cache)
+        # Compute ensemble average for each criterion
+        ensemble_criteria = np.dot(judge_weights, criterion_vectors)  # Shape: (n_criteria,)
 
-        match method:
-            case "range":
-                score_range = np.max(scores) - np.min(scores)
-                range_agreement = float(np.clip(1.0 - score_range, 0, 1))
-                return {
-                    "agreement": range_agreement,
-                    "method": method,
-                    "range": score_range,
-                    "scores": scores.tolist(),
+        # Final weighted score
+        final_score = np.dot(ensemble_criteria, self.criterion_weights_vector)
+
+        return float(final_score)
+
+    def _compute_agreement(self, evaluations: list[EvaluationResult], method: str) -> float:
+        """
+        Compute agreement between judges using criterion vectors.
+
+        Parameters
+        ----------
+        evaluations : List[EvaluationResult]
+            List of evaluation results from all judges
+        method : str
+            Agreement calculation method:
+            - 'multidimensional': All criteria, equal weight
+            - 'weighted_multidimensional': All criteria, weighted by importance
+
+        Returns
+        -------
+        float
+            Agreement score [0, 1], where 1 = perfect agreement
+        """
+        if len(evaluations) < 2:
+            return 1.0
+
+        if method == "multidimensional":
+            # All criteria, equal weight
+            criterion_vectors = np.array([e.get_criteria_vector() for e in evaluations])
+
+            distances = pdist(criterion_vectors, metric="euclidean")
+
+            # Normalize by max possible distance in 5D unit hypercube
+            max_distance = np.sqrt(5)
+            mean_distance = np.mean(distances)
+            agreement = 1.0 - (mean_distance / max_distance)
+
+            return float(np.clip(agreement, 0, 1))
+
+        elif method == "weighted_multidimensional":
+            # All criteria, weighted by importance
+            criterion_vectors = np.array([e.get_criteria_vector() for e in evaluations])
+
+            # Weight each dimension
+            weighted_vectors = criterion_vectors * self.criterion_weights_vector[np.newaxis, :]
+
+            distances = pdist(weighted_vectors, metric="euclidean")
+
+            # max distance --> opposite corners in WEIGHTED space
+            # point_1 = [0, 0, 0, 0, 0] * weights = [0, 0, 0, 0, 0]
+            # point_2 = [1, 1, 1, 1, 1] * weights = [w₁, w₂, w₃, w₄, w₅]
+            max_weighted_distance = np.linalg.norm(self.criterion_weights_vector)
+
+            mean_distance = np.mean(distances)
+            agreement = 1.0 - (mean_distance / max_weighted_distance)
+
+            return float(np.clip(agreement, 0, 1))
+
+        else:
+            raise ValueError(f"Unknown agreement method: {method}")
+
+    def aggregate_judge_evaluations(
+        self, all_records: list[dict]
+    ) -> dict[str, dict[str, float]]:
+        """
+        Aggregate per-judge criteria scores across all samples using median.
+
+        Parameters
+        ----------
+        all_records : list[dict]
+            List of all output records containing 'per_judge_evaluations'
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            Nested dict: {judge_name: {criterion: median_score}}
+            Example: {'Qwen-Coder': {'correctness': 0.82, 'completeness': 0.78, ...}}
+        """
+
+        # Collect all scores per judge per criterion
+        # Structure: {judge_name: {criterion: [score1, score2, ...]}}
+        judge_scores = defaultdict(lambda: defaultdict(list))
+
+        criteria_names = EvaluationResult.get_criteria_names()
+        criteria_names.append("quality_score")
+
+        with progress_bar(
+            all_records,
+            description="🏗️ Collect all scores per judge per criterion 🏗️",
+        ) as records:
+            for record in records:
+                for evaluation in record["per_judge_evaluations"]:
+                    judge_name = evaluation["judge_name"]
+                    for criterion in criteria_names:
+                        if criterion in evaluation:
+                            judge_scores[judge_name][criterion].append(
+                                evaluation[criterion]
+                            )
+
+        judge_evaluations = {}
+        with progress_bar(
+            judge_scores, description="🧮 Computing median scores 🧮"
+        ) as scores:
+            for judge_name, criteria_dict in scores.items():
+                judge_evaluations[judge_name] = {
+                    criterion.replace("_", " ").title(): np.median(scores)
+                    for criterion, scores in criteria_dict.items()
                 }
-            case "std":
-                std = np.std(scores)
-                return {
-                    "agreement": float(1.0 / (1.0 + std)),
-                    "method": method,
-                    "std": std,
-                    "scores": scores.tolist(),
-                }
-            case "hybrid":
-                score_range = np.max(scores) - np.min(scores)
-                range_agreement = 1.0 - score_range  # weighted combination (hybrid)
-                std = np.std(scores)
-                std_agreement = 1.0 / (1.0 + std)
 
-                agreement = hybrid_weight * range_agreement + (1 - hybrid_weight) * std_agreement
-
-                return {
-                    "method": "hybrid",
-                    "range_agreement": range_agreement,
-                    "std_agreement": std_agreement,
-                    "weight_range": hybrid_weight,
-                    "weight_std": (1.0 - hybrid_weight),
-                    "agreement": float(np.clip(agreement, 0, 1)),
-                    "range": score_range,
-                    "std": std,
-                    "scores": scores.tolist(),
-                }
-            case _:
-                raise Exception
+        return judge_evaluations
 
     def filter_dataset_streaming(
         self,
@@ -195,8 +287,7 @@ class JudgeEnsemble:
         quality_threshold: float = 0.6,
         agreement_threshold: float = 0.7,
         save_interval: int = 10,
-        agreement_method: str = "hybrid",
-        hybrid_weight: float = 0.75,
+        agreement_method: str = "weighted_multidimensional"
     ) -> dict:
         """
         Filter dataset progressively with sequential judge loading.
@@ -215,7 +306,7 @@ class JudgeEnsemble:
             Minimum judge agreement score (0-1)
         save_interval : int
             Flush to disk every N samples
-        agreement_method : str ["std", "range", "hybrid"]
+        agreement_method : str ["multidimensional", "weighted_multidimensional"]
             Method to use to compute agreement
         hybrid_weight: float, (optional, default=0.75)
             How much to weight the range component in agreement computation if hybrid is
@@ -244,6 +335,7 @@ class JudgeEnsemble:
 
         kept_batch = []
         rejected_batch = []
+        all_records = []
         with (
             jsonlines.open(output_jsonl_path, mode="w") as kept_writer,
             jsonlines.open(rejected_jsonl_path, mode="w") as rejected_writer,
@@ -252,9 +344,8 @@ class JudgeEnsemble:
 
             for sample in iter_jsonl_samples(input_jsonl_path):
                 stats["total"] += 1
-                self._scores_cache = None # flush cache
 
-                eval_result = self.evaluate_sample(sample, method=agreement_method, hybrid_weight=hybrid_weight)
+                eval_result = self.evaluate_sample(sample, method=agreement_method)
                 score: float = eval_result["ensemble_score"] # [0 - 1]
                 agreement: dict = eval_result["agreement"]
 
@@ -270,7 +361,7 @@ class JudgeEnsemble:
                     "reasoning": sample.reasoning,
                     "quality_score": score,
                     "agreement": agreement,
-                    "judge_evaluations": eval_result["evaluations"],
+                    "per_judge_evaluations": eval_result["evaluations"],
                 }
 
                 passes_quality: bool = score >= quality_threshold
@@ -282,6 +373,7 @@ class JudgeEnsemble:
 
                     if stats["kept"] % save_interval == 0: # save and flush
                         kept_writer.write_all(kept_batch)
+                        all_records.extend(kept_batch)
                         kept_batch = []
                 else:
                     stats["rejected"] += 1
@@ -301,6 +393,7 @@ class JudgeEnsemble:
 
                     # Flush batch
                     if len(rejected_batch) >= save_interval:
+                        all_records.extend(rejected_batch)
                         rejected_writer.write_all(rejected_batch)
                         rejected_batch = []
 
@@ -332,6 +425,7 @@ class JudgeEnsemble:
         stats["std_score"] = float(np.std(stats["scores"]))
         stats["mean_agreement"] = float(np.mean(stats["agreements"]))
         stats["std_agreement"] = float(np.std(stats["agreements"]))
+        stats["per_judge_metrics"] = self.aggregate_judge_evaluations(all_records=all_records)
 
         data = {
             "Total samples processed": [stats["total"], "/"],
@@ -363,7 +457,6 @@ class JudgeEnsemble:
             border_style="dim purple",
             padding=(1, 35),
         )
-
 
         del data, res_table, rejected_table
         return stats
