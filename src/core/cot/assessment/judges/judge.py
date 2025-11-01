@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .judge_types import JudgeConfig
-from ..types import ReasoningSample
+from ..datatypes import EvaluationResult, ReasoningSample
 from ..utilities import is_main_process
 
 
@@ -39,39 +39,73 @@ class LLMJudge:
     PROMPT_SKELETON: str = field(
         init=False,
         default=(
-            "Metadata information:\n"
+            "**Metadata information:**\n"
             "Source project: {project}\n"
             "Ground truth label: {target} (0=safe, 1=vulnerable)\n\n"
+
             "Relevant CWEs:\n{cwe_info}\n\n"
 
-            "C Function of reference:\n"
+            "**C Function of reference:**\n"
             "--- CODE START ---\n"
             "```c\n{func}\n```\n\n"
             "--- CODE END ---\n\n"
 
-            "Reasoning to evaluate:\n{reasoning}\n\n"
+            "**Reasoning to evaluate:**\n"
+            "{reasoning}\n\n"
 
             "**Evaluation Criteria**:\n"
-            "1. **Correctness**: Does the reasoning correctly identify vulnerabilities and match the target label?\n"
-            "2. **Completeness**: Are all relevant security issues and CWEs covered?\n"
-            "3. **Clarity**: Is the reasoning clear, well-structured, and easy to follow?\n"
-            "4. **Technical Accuracy**: Are technical details, vulnerability patterns, and references accurate?\n"
-            "5. **Logical Flow**: Does the reasoning follow a logical progression from analysis to conclusion?\n\n"
+            "Evaluate the reasoning across the following dimensions (each scored 0-1):\n\n"
+
+            "1. **Correctness** (0-1): Does the reasoning correctly identify vulnerabilities and match the ground truth label?\n"
+            "   - 0.0-0.3: Incorrect conclusion or misses critical vulnerabilities\n"
+            "   - 0.4-0.6: Partially correct but with significant errors (including vulnerbilities not explicitly present)\n"
+            "   - 0.7-0.9: Mostly correct with minor issues\n"
+            "   - 1.0: Fully correct identification and conclusion\n\n"
+
+            "2. **Completeness** (0-1): Are all relevant security issues and CWEs covered?\n"
+            "   - 0.0-0.3: Major vulnerabilities or CWEs missing\n"
+            "   - 0.4-0.6: Some issues covered but incomplete or detected vulnerabilities that are not clearly present\n"
+            "   - 0.7-0.9: Most issues covered with minor omissions\n"
+            "   - 1.0: Comprehensive coverage of all relevant issues\n\n"
+
+            "3. **Clarity** (0-1): Is the reasoning clear, well-structured, and easy to follow?\n"
+            "   - 0.0-0.3: Confusing, poorly structured, hard to understand\n"
+            "   - 0.4-0.6: Understandable but could be clearer\n"
+            "   - 0.7-0.9: Clear and well-organized\n"
+            "   - 1.0: Exceptionally clear and well-structured\n\n"
+
+            "4. **Technical Accuracy** (0-1): Are technical details, vulnerability patterns, and references accurate?\n"
+            "   - 0.0-0.3: Contains significant technical errors\n"
+            "   - 0.4-0.6: Mostly accurate but with some mistakes\n"
+            "   - 0.7-0.9: Accurate with minor issues\n"
+            "   - 1.0: Technically flawless\n\n"
+
+            "5. **Logical Flow** (0-1): Does the reasoning follow a logical progression from analysis to conclusion?\n"
+            "   - 0.0-0.3: Disjointed or illogical progression\n"
+            "   - 0.4-0.6: Somewhat logical but with gaps\n"
+            "   - 0.7-0.9: Good logical flow with minor issues\n"
+            "   - 1.0: Perfect logical progression\n\n"
 
             "**Output Format:**\n"
-            "Provide your evaluation in the following `JSON` format (stricly follow this pattern):\n"
-            "{{\n"
-            '   "quality_score": <float between 0 and 1>,\n'
-            '   "correctness": <float between 0 and 1>,\n'
-            '   "completeness": <float between 0 and 1>,\n'
-            '   "clarity": <float between 0 and 1>,\n'
-            '   "technical_accuracy": <float between 0 and 1>,\n'
-            '   "logical_flow": <float between 0 and 1>,\n'
-            '   "confidence": <float between 0 and 1>,\n'
-            '   "justification": "<brief factual explanation>"\n'
-            "}}\n\n"
+            "Provide your evaluation in the following JSON format:\n\n"
+            "```json\n"
+            "{\n"
+            '  "quality_score": <float 0-1>,  // OVERALL quality score (weighted combination of criteria above)\n'
+            '  "correctness": <float 0-1>,  // Criterion 1 score\n'
+            '  "completeness": <float 0-1>,  // Criterion 2 score\n'
+            '  "clarity": <float 0-1>,  // Criterion 3 score\n'
+            '  "technical_accuracy": <float 0-1>,  // Criterion 4 score\n'
+            '  "logical_flow": <float 0-1>,  // Criterion 5 score\n'
+            '  "confidence": <float 0-1>,  // How confident are you in this evaluation? (0=not confident, 1=very confident)\n'
+            '  "justification": "<string>"  // Brief explanation (2-3 sentences) justifying the quality_score\n'
+            "}\n"
+            "```\n\n"
 
-            "Output only valid JSON, no additional text."
+            "**Important Notes:**\n"
+            "- quality_score should be a weighted combination reflecting overall quality (not just an average)\n"
+            "- confidence reflects your certainty in the evaluation (low if reasoning is ambiguous)\n"
+            "- justification should be concise and factual, highlighting key strengths/weaknesses\n"
+            "- Output ONLY valid JSON, no additional text before or after\n"
         ).strip(),
         repr=False,
     )
@@ -220,7 +254,7 @@ class LLMJudge:
             {"role": "user", "content": prompt},
         ]
 
-    def evaluate(self, sample: ReasoningSample) -> dict[str, float|str|bool]:
+    def evaluate(self, sample: ReasoningSample) -> EvaluationResult:
         """Performs inference on a single C code snippet using the CoT format.
 
         Parameters
@@ -276,24 +310,58 @@ class LLMJudge:
             generated_tokens, skip_special_tokens=True, cleanup_tokenization_spaces=True
         )[0]
 
-        # Parse JSON response
+        return self._parse_response(response)
+
+    def _parse_response(self, response: str) -> EvaluationResult:
+        """Parse judge response into structured EvaluationResult.
+
+        Parameters
+        ----------
+        response : str
+            Raw text response from the judge model
+
+        Returns
+        -------
+        EvaluationResult
+            Parsed and validated evaluation result
+        """
+
+        pretty_name = self.judge_config.model_name.split("/")[1]
         try:
             json_start = response.find("{")
             json_end = response.rfind("}") + 1
+
             if json_start >= 0 and json_end > json_start:
                 json_str = response[json_start:json_end]
                 result = json.loads(json_str)
             else:
                 raise ValueError("No JSON found in response")
 
-            result["quality_score"] = np.clip(result.get("quality_score", 0.5), 0, 1)
-            result["confidence"] = np.clip(result.get("confidence", 0.5), 0, 1)
-            return result
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to parse response: {e}")
-            return {
-                "quality_score": 0.5,
-                "confidence": 0.3,
-                "justification": "Failed to parse response",
-                "parse_error": True,
-            }
+            # Validate and clip all scores to [0, 1]
+            return EvaluationResult(
+                judge_name=pretty_name,
+                quality_score=float(np.clip(result.get("quality_score", 0.5), 0, 1)),
+                correctness=float(np.clip(result.get("correctness", 0.5), 0, 1)),
+                completeness=float(np.clip(result.get("completeness", 0.5), 0, 1)),
+                clarity=float(np.clip(result.get("clarity", 0.5), 0, 1)),
+                technical_accuracy=float(np.clip(result.get("technical_accuracy", 0.5), 0, 1)),
+                logical_flow=float(np.clip(result.get("logical_flow", 0.5), 0, 1)),
+                confidence=float(np.clip(result.get("confidence", 0.5), 0, 1)),
+                justification=result.get("justification", "No justification provided"),
+                parse_error=False,
+            )
+
+        except (json.JSONDecodeError, ValueError, KeyError):
+            # Return fallback evaluation
+            return EvaluationResult(
+                judge_name=pretty_name,
+                quality_score=0.5,
+                correctness=0.5,
+                completeness=0.5,
+                clarity=0.5,
+                technical_accuracy=0.5,
+                logical_flow=0.5,
+                confidence=0.3,
+                justification="Failed to parse response",
+                parse_error=True,
+            )
