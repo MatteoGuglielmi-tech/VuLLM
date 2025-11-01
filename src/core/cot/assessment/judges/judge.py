@@ -239,7 +239,11 @@ class LLMJudge:
     def _create_judging_prompt(self, sample: ReasoningSample) -> list[dict[str,str]]:
         """Create prompt for judging reasoning quality"""
 
-        cwe_info = "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample.cwe, sample.cwe_desc)])
+        cwe_info = (
+            "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample.cwe, sample.cwe_desc)])
+            if bool(sample.target)
+            else "None"
+        )
 
         prompt = self.PROMPT_SKELETON.format(
             project=sample.project,
@@ -278,19 +282,23 @@ class LLMJudge:
 
 
         messages = self._create_judging_prompt(sample=sample)
-        inputs = self.tokenizer.apply_chat_template(
+        input_texts = self.tokenizer.apply_chat_template(
             messages,
-            tokenize=True,
+            tokenize=False,
             add_generation_prompt=True, # mandatory for generation
-            return_tensors="pt"
+            enable_thinking=False
+        )
+
+        inputs = self.tokenizer(
+            input_texts, return_tensors="pt", padding=True,
+            max_length=self.max_seq_length, truncation=True,
         ).to(self.model.device)
 
         # Generate response
         try:
             with torch.inference_mode():
                 outputs = self.model.generate(
-                    # **inputs,
-                    input_ids = inputs,
+                    **inputs,
                     max_new_tokens=self.max_new_tokens,
                     use_cache=True,
                     do_sample=True,
