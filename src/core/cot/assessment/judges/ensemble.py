@@ -78,6 +78,7 @@ class JudgeEnsemble:
             data=self.criterion_weights,
             title=f"Weights for computing overall quality from criteria",
             columns=["Criterion", "Weight"],
+            expand=True
         )
         rich_table(data=table)
         rich_rule()
@@ -347,7 +348,7 @@ class JudgeEnsemble:
 
                 eval_result = self.evaluate_sample(sample, method=agreement_method)
                 score: float = eval_result["ensemble_score"] # [0 - 1]
-                agreement: dict = eval_result["agreement"]
+                agreement = eval_result["agreement"]
 
                 stats["scores"].append(score)
                 stats["agreements"].append(agreement)
@@ -365,7 +366,7 @@ class JudgeEnsemble:
                 }
 
                 passes_quality: bool = score >= quality_threshold
-                passes_agreement: bool = agreement["agreement"] >= agreement_threshold
+                passes_agreement: bool = agreement >= agreement_threshold
 
                 if passes_quality and passes_agreement:
                     stats["kept"] += 1
