@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import inspect
 import json
 
@@ -22,7 +23,7 @@ from rich.progress import (
 )
 
 from .decorators import main_process_only
-from ..types import ReasoningSample
+from ..datatypes import ReasoningSample
 
 _console = Console()
 _progress = Progress(
@@ -158,32 +159,11 @@ def rich_rule(
     _console.rule(title, style=style, align="center")
 
 
-def process_with_progress(iterable: Iterable, step_func: Callable, description="Working ...", dict_mode="keys", *args, **kwargs):
-    if isinstance(iterable, dict):
-        if dict_mode == "keys":
-            items_list = list(iterable.keys())
-        elif dict_mode == "values":
-            items_list = list(iterable.values())
-        elif dict_mode == "items":
-            items_list = list(iterable.items())
-        else:
-            raise ValueError(f"Invalid dict_mode: {dict_mode}")
-    else:
-        items_list = list(iterable)
-
-    try:
-        sig = inspect.signature(step_func)
-        sig.bind(items_list[0], *args, **kwargs)
-    except TypeError:
-        rich_exception()
-        return
-
-    out = None
+@main_process_only 
+@contextmanager
+def progress_bar(iterable: Iterable, description="Working ..."):
     with _progress:
-        for item in _progress.track(iterable, description=description):
-            out = step_func(item, *args, **kwargs)
-
-    return out
+        yield _progress.track(iterable, description=description)
 
 
 def run_with_status(func: Callable, description: str, *args, **kwargs):
