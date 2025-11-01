@@ -89,7 +89,7 @@ class LLMJudge:
             "**Output Format:**\n"
             "Provide your evaluation in the following JSON format:\n\n"
             "```json\n"
-            "{\n"
+            "{{\n"
             '  "quality_score": <float 0-1>,  // OVERALL quality score (weighted combination of criteria above)\n'
             '  "correctness": <float 0-1>,  // Criterion 1 score\n'
             '  "completeness": <float 0-1>,  // Criterion 2 score\n'
@@ -98,7 +98,7 @@ class LLMJudge:
             '  "logical_flow": <float 0-1>,  // Criterion 5 score\n'
             '  "confidence": <float 0-1>,  // How confident are you in this evaluation? (0=not confident, 1=very confident)\n'
             '  "justification": "<string>"  // Brief explanation (2-3 sentences) justifying the quality_score\n'
-            "}\n"
+            "}}\n"
             "```\n\n"
 
             "**Important Notes:**\n"
