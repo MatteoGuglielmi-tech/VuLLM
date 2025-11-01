@@ -25,8 +25,6 @@ def visualize_results(
         output_dir=output_dir,
     )
     plot_filtering_sankey(stats, output_dir=output_dir)
-
-    if 0:
-        plot_judge_comparison_radar(judge_evaluations={}, output_dir=output_dir)
+    plot_judge_comparison_radar(judge_evaluations=stats["per_judge_metrics"], output_dir=output_dir)
 
     logger.info(f"✓ Visualizations saved to {output_dir}/")
