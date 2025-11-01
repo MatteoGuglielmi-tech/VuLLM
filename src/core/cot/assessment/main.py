@@ -48,8 +48,8 @@ def main():
         help="Minimum judge agreement (0-1, higher=stricter). Reject if judges differ by more than (1-agreement_threshold)",
     )
     assessment_group.add_argument(
-        "--score_type", "-t",
-        type=str, default="hybrid", choices=["range", "std", "hybrid"],
+        "--agreement_method", "-t",
+        type=str, default="weighted_multidimensional", choices=["multidimensional", "weighted_multidimensional"],
         help="Type of agreement to compute",
     )
 
@@ -125,7 +125,8 @@ def main():
             stats_json_path=paths["filtering_stats"],
             quality_threshold=args.quality_threshold,
             agreement_threshold=args.agreement_threshold,
-            save_interval=15
+            save_interval=15,
+            agreement_method=args.agreement_method
         )
 
         visualize_results(
