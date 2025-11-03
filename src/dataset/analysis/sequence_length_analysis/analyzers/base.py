@@ -497,7 +497,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         rich_rule()
         rich_panel(
             table,
-            panel_title="📋 MAX_SEQ_LENGTH RECOMMENDATIONS",
+            panel_title="📋 MAX_SEQ_LENGTH RECOMMENDATIONS 📋",
             border_style="royal_blue1",
             justify="center",
         )
@@ -517,7 +517,7 @@ class BaseSequenceLengthAnalyzer(ABC):
 
         rich_panel(
             tables,
-            panel_title="⚠️ RECOMMENDATIONS",
+            panel_title="🚨 RECOMMENDATIONS 🚨",
             border_style="yellow1",
         )
         rich_rule()

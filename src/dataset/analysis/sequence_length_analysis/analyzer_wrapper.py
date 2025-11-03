@@ -97,7 +97,7 @@ def generate_comparison_report(results: dict, output_dir: Path):
 
     rich_panel(
         tables,
-        panel_title="📊 TOKENIZER COMPARISON",
+        panel_title="📊 TOKENIZER COMPARISON 📊",
         border_style="light_slate_blue",
         layout="horizontal"
     )
