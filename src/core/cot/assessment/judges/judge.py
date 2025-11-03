@@ -105,7 +105,7 @@ class LLMJudge:
             "- quality_score should be a weighted combination reflecting overall quality (not just an average)\n"
             "- confidence reflects your certainty in the evaluation (low if reasoning is ambiguous)\n"
             "- justification should be concise and factual, highlighting key strengths/weaknesses\n"
-            "- Output ONLY valid JSON, no additional text before or after\n"
+            "- Output ONLY valid JSON, no additional text before or after"
         ).strip(),
         repr=False,
     )

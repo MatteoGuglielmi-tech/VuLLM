@@ -3,12 +3,12 @@ import inspect
 import json
 
 from collections.abc import Generator
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Literal
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
-from rich.align import AlignMethod
-from rich.console import Console, JustifyMethod
+from rich.align import AlignMethod, Align
+from rich.console import Console, JustifyMethod, Group
 from rich.style import Style, StyleType
 from rich.table import Table
 from rich.panel import Panel
@@ -41,11 +41,12 @@ def build_table(
     title: str = "",
     columns: list[str] = [],
     box=box.ASCII_DOUBLE_HEAD,
+    show_header: bool=True,
     expand: bool = False,
 ) -> Table:
     data = vars(data) if isinstance(data, Namespace) else data
 
-    table = Table(show_header=True, header_style="bold blue", box=box, expand=expand)
+    table = Table(show_header=show_header, header_style="bold blue", box=box, expand=expand)
     table.title = title
 
     for i, c in enumerate(columns):
@@ -110,11 +111,43 @@ def rich_panel(
     subtitle: TextType | None = None,
     border_style: StyleType = "red",
     align: AlignMethod = "center",
-    padding: tuple = (0,1), 
-    justify: JustifyMethod|None = None,
-    allow_wrap: bool=False
+    padding: tuple = (0, 1), 
+    justify: JustifyMethod | None = "center",
+    allow_wrap: bool = False,
+    layout: Literal["vertical", "horizontal"] = "horizontal"
 ):
-    to_render = Columns(tables) if isinstance(tables, list) else tables
+    """Display table(s) in a centered panel.
+    
+    Parameters
+    ----------
+    tables : list[Table] | Table
+        Single table or list of tables to display.
+    panel_title : str, optional
+        Title for the panel.
+    subtitle : str, optional
+        Subtitle for the panel.
+    border_style : str
+        Border color/style.
+    align : {"left", "center", "right"}
+        Alignment for panel title/subtitle.
+    padding : tuple
+        Padding inside the panel (vertical, horizontal).
+    justify : {"default", "left", "center", "right", "full"}, optional
+        Justification for the panel itself.
+    allow_wrap : bool
+        Whether to allow content wrapping.
+    layout : {"vertical", "horizontal"}
+        How to arrange multiple tables.
+    """
+    if isinstance(tables, list):
+        if layout == "vertical":
+            centered_tables = [Align.center(table) for table in tables]
+            to_render = Group(*centered_tables)
+        else:
+            to_render = Columns(tables, align="center", expand=True)
+    else:
+        to_render = tables
+    
     panel = Panel.fit(
         to_render,
         title=panel_title,
@@ -124,7 +157,7 @@ def rich_panel(
         subtitle_align=align,
         padding=padding,
     )
-    _console.print(panel, justify=justify, no_wrap=allow_wrap)
+    _console.print(panel, justify=justify, no_wrap=not allow_wrap)
 
 @main_process_only
 def rich_print(
@@ -300,7 +333,7 @@ def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, Non
                 continue
 
 
-def setup_paths(parser: ArgumentParser) -> dict[str, Path]:
+def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
     """Display custom CLI arguments in a formatted table."""
     args = parser.parse_args()
 
@@ -327,6 +360,6 @@ def setup_paths(parser: ArgumentParser) -> dict[str, Path]:
             "metadata": output_folder / "judge_config.json",
             "filtering_stats": output_folder / "filtering_stats.json",
         }
-
-    return {}
+    elif args.sequential:
+        args.output_path.parent.mkdir(parents=True, exists_ok=True)
 

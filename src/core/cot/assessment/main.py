@@ -83,6 +83,7 @@ def main():
         # Run Filtering
         # =========================================================================
         if args.ensemble:
+            assert paths is not None
             ensemble = JudgeEnsemble(list(judge_configs.values()))
             ensemble_info = ensemble.get_ensemble_info()
             with open(file=paths["metadata"], mode="w", encoding="utf-8") as f:
