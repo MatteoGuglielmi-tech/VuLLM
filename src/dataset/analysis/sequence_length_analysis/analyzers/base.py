@@ -1,32 +1,24 @@
-"""
-Sequence Length Analyzer
-Analyzes token distribution in CoT dataset to determine optimal max_seq_length.
-
-Features:
-- Memory-efficient streaming (handles large JSONL files)
-- Multiple tokenizer support
-- Comprehensive statistics and visualizations
-- Truncation impact analysis
-"""
-
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging
 
-from collections.abc import Generator
-from pathlib import Path
-from typing import Any
 from dataclasses import dataclass, field
+from typing import Any
+from pathlib import Path
+from collections.abc import Generator
 from tqdm import tqdm
-from transformers import PreTrainedTokenizer, AutoTokenizer
+from abc import ABC, abstractmethod
+from transformers import PreTrainedTokenizer
 
-from loader_config import Loader
+from src.core.cot.assessment.utilities.utils import build_table, rich_panel
 
+from ..utilities import rich_rule
+from ..datatypes import ReasoningSample, TokensStats
+from ..loader_config import Loader
 
 logger = logging.getLogger(__name__)
-
 sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (12, 6)
 plt.rcParams["font.size"] = 10
@@ -92,54 +84,35 @@ class TokenStats:
         }
 
 
-class SequenceLengthAnalyzer:
-    """Analyzes token distribution in CoT dataset to determine optimal max_seq_length."""
+class BaseSequenceLengthAnalyzer(ABC):
+    """Base class for analyzing token distribution in datasets."""
 
-    SYSTEM_PROMPT = (
-        "You are an expert cybersecurity analyst specializing in C static code analysis. "
-        "Your task is to analyze the provided code and produce a step-by-step reasoning "
-        "chain explaining whether it contains a vulnerability."
-    )
-
-    PROMPT_SKELETON = (
-        "**Analysis Instructions:**\n"
-        "1. **Trace Data Flow:** Analyze the flow of any external or user-controlled input.\n"
-        "2. **Pinpoint Dangerous Functions:** Identify the use of functions known to be risky (e.g., `strcpy`, `gets`, `sprintf`, `memcpy`) for each specified weakness.\n"
-        "3. **Check for Safeguards:** Look for any bounds checking, sanitization, or defensive programming that might mitigate risks.\n"
-        "4. **Conclude:** State your conclusion based on the analysis.\n\n"
-        "**Output Format:**\n"
-        "Produce a step-by-step list of your reasoning. After the list, your final answer must be "
-        "prefixed with 'Final Answer:' and be in the format 'YES (CWE-XXX, ...)' or 'NO'.\n"
-        "--- CODE START ---\n"
-        "{func_code}\n"
-        "--- CODE END ---\n\n"
-        "**Reasoning:**\n"
-    )
-
-    def __init__(
-        self,
-        tokenizer: PreTrainedTokenizer,
-        system_prompt: str | None = None,
-        prompt_skeleton: str | None = None,
-    ):
-        """Initialize analyzer.
-
-        Parameters
-        ----------
-        tokenizer, PreTrainedTokenizer:
-            Tokenizer to use for counting tokens
-        system_prompt, str (optional, default=None):
-            System prompt (uses default if None)
-        prompt_skeleton, str (optional, default=None):
-            User prompt template (uses default if None)
-        """
-
+    def __init__(self, tokenizer: PreTrainedTokenizer):
         self.tokenizer = tokenizer
-        self.system_prompt = system_prompt or self.SYSTEM_PROMPT
-        self.prompt_skeleton = prompt_skeleton or self.PROMPT_SKELETON
 
-    @staticmethod
-    def stream_jsonl(filepath: Path) -> Generator[dict[str, Any], None, None]:
+    @abstractmethod
+    def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
+        """Format a dataset entry into system, user, and assistant messages.
+
+        Returns
+        -------
+        tuple[str, str, str]
+            (system_content, user_content, assistant_content)
+        """
+        pass
+
+    @abstractmethod
+    def count_tokens_for_sample(self, sample: ReasoningSample) -> TokensStats:
+        """Count tokens for each component of a sample.
+
+        Returns
+        -------
+        dict[str, int]
+            Dictionary with token counts (keys vary by implementation)
+        """
+        pass
+
+    def stream_jsonl(self, filepath: Path) -> Generator[dict[str, Any], None, None]:
         """Memory-efficient JSONL streaming.
 
         Parameters
@@ -163,118 +136,12 @@ class SequenceLengthAnalyzer:
                     logger.warning(f"Failed to parse line {line_num}: {e}")
                     continue
 
-    def format_sample(self, entry: dict) -> tuple[str, str, str]:
-        """Format a dataset entry into system, user, and assistant messages.
+    def _encode_and_count(self, text, add_special_tokens: bool = False) -> int:
+        """Helper method for token counting."""
+        return len(self.tokenizer.encode(text, add_special_tokens=add_special_tokens))
 
-        Parameters
-        ----------
-        entry, dict
-            dictionary representing one line with keys: func, cwe, target, reasoning
-
-        Returns
-        -------
-        tuple[str,str,str]:
-            Tuple of (system_content, user_content, assistant_content)
-        """
-
-        system_content = self.system_prompt
-        user_content = self.prompt_skeleton.format(func_code=entry["func"])
-
-        if entry["target"] == 1 and entry.get("cwe"):
-            cwe_string = ", ".join(entry["cwe"])
-            final_answer = f" YES ({cwe_string})"
-        else:
-            final_answer = " NO"
-
-        assistant_content = f"{entry['reasoning']}\n\nFinal Answer:{final_answer}"
-
-        return system_content, user_content, assistant_content
-
-    def count_tokens_for_sample(self, entry: dict) -> dict[str, int]:
-        """Count tokens for each component of a sample.
-
-        Parametrs
-        ---------
-        entry, Dict[str, Any]
-            Dataset entry
-
-        Returns
-        -------
-        dict[str, int]:
-            Dict with token counts for each component
-        """
-
-        system_content, user_content, assistant_content = self.format_sample(entry)
-
-        # Count individual components
-        # System
-        system_messages = [{"role": "system", "content": system_content}]
-        system_formatted = self.tokenizer.apply_chat_template(
-            system_messages, tokenize=False, add_generation_prompt=False
-        )
-        system_tokens = len(self.tokenizer.encode(system_formatted, add_special_tokens=False))  # type: ignore
-
-        # System + User (to get user contribution)
-        system_user_messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
-        ]
-        system_user_formatted = self.tokenizer.apply_chat_template(
-            system_user_messages, tokenize=False, add_generation_prompt=False
-        )
-        system_user_tokens = len(self.tokenizer.encode(system_user_formatted, add_special_tokens=True))  # type: ignore
-        user_tokens = system_user_tokens - system_tokens
-
-        # Full conversation (system + user + assistant)
-        full_messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
-            {"role": "assistant", "content": assistant_content},
-        ]
-        full_formatted = self.tokenizer.apply_chat_template(
-            full_messages, tokenize=False, add_generation_prompt=False
-        )
-        total_tokens = len(self.tokenizer.encode(full_formatted, add_special_tokens=True))  # type: ignore
-
-        # Assistant tokens = total - (system + user)
-        assistant_tokens = total_tokens - system_user_tokens
-
-        # Split assistant into reasoning and answer
-        reasoning = entry["reasoning"]
-        if entry["target"] == 1 and entry.get("cwe"):
-            cwe_string = ", ".join(entry["cwe"])
-            final_answer_str = f"\n\nFinal Answer: YES ({cwe_string})"
-        else:
-            final_answer_str = "\n\nFinal Answer: NO"
-
-        # Count reasoning and answer separately (approximate)
-        # These are approximate because we can't easily separate them post-tokenization
-        reasoning_tokens_approx = len(
-            self.tokenizer.encode(reasoning, add_special_tokens=False)
-        )
-        answer_tokens_approx = len(
-            self.tokenizer.encode(final_answer_str, add_special_tokens=False)
-        )
-
-        # Adjust proportionally to match actual assistant token count
-        total_approx = reasoning_tokens_approx + answer_tokens_approx
-        if total_approx > 0:
-            reasoning_tokens = int(
-                assistant_tokens * (reasoning_tokens_approx / total_approx)
-            )
-            answer_tokens = assistant_tokens - reasoning_tokens
-        else:
-            reasoning_tokens = assistant_tokens
-            answer_tokens = 0
-
-        return {
-            "system_tokens": system_tokens,
-            "user_tokens": user_tokens,
-            "reasoning_tokens": reasoning_tokens,
-            "answer_tokens": answer_tokens,
-            "assistant_tokens": assistant_tokens,
-            "total_tokens": total_tokens,
-        }
+    def apply_template(self, messages: list[dict[str,str]]):
+        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
 
     def analyze_dataset(
         self,
@@ -304,21 +171,19 @@ class SequenceLengthAnalyzer:
         stats = TokenStats()
         sample_count = 0
 
-        # Stream and analyze
-        for entry in tqdm(
-            self.stream_jsonl(jsonl_path), total=23836, desc="Analyzing samples"
-        ):
+        for entry in tqdm(self.stream_jsonl(jsonl_path), total=23836, desc="Analyzing samples"):
             if max_samples and sample_count >= max_samples:
                 break
 
+            sample = ReasoningSample(**entry)
             try:
-                token_counts = self.count_tokens_for_sample(entry)
+                token_counts = self.count_tokens_for_sample(sample)
                 stats.add_sample(
-                    system_len=token_counts["system_tokens"],
-                    user_len=token_counts["user_tokens"],
-                    reasoning_len=token_counts["reasoning_tokens"],
-                    answer_len=token_counts["answer_tokens"],
-                    total_len=token_counts["total_tokens"],
+                    system_len=token_counts.system_tokens,
+                    user_len=token_counts.user_tokens,
+                    reasoning_len=token_counts.reasoning_tokens,
+                    answer_len=token_counts.answer_tokens,
+                    total_len=token_counts.total_tokens,
                 )
                 sample_count += 1
             except Exception as e:
@@ -348,68 +213,29 @@ class SequenceLengthAnalyzer:
         """Generate comprehensive visualizations."""
 
         with Loader("📊 Generating plots...", f"✅ All plots saved to {output_dir}", logger=logger):
-
-            self._plot_distribution(
-                stats.total_tokens,
-                title="Distribution of Total Sequence Length",
-                xlabel="Total Tokens",
-                output_path=output_dir / "total_tokens_distribution.png",
+            self._plot_distribution(data=stats.total_tokens, title="Distribution of Total Sequence Length",
+                xlabel="Total Tokens", output_path=output_dir / "total_tokens_distribution.png",
             )
-
             self._plot_component_breakdown(stats, output_dir / "component_breakdown.png")
             self._plot_cumulative_distribution(stats.total_tokens, output_path=output_dir / "cumulative_distribution.png")
             self._plot_truncation_impact(stats.total_tokens, output_path=output_dir / "truncation_impact.png")
             self._plot_component_correlation( stats, output_dir / "component_correlation.png")
 
-
-    def _plot_distribution(
-        self,
-        data: list[int],
-        title: str,
-        xlabel: str,
-        output_path: Path,
-    ):
+    def _plot_distribution(self, data: list[int], title: str, xlabel: str, output_path: Path):
         """Plot histogram with statistics overlay."""
 
         _, ax = plt.subplots(figsize=(12, 6))
-
-        # Histogram
         _ = ax.hist(data, bins=50, alpha=0.7, color="steelblue", edgecolor="black")
 
-        # Statistics lines
         mean_val = np.mean(data).astype(np.float64)
         median_val = np.median(data).astype(np.float64)
         p95_val = np.percentile(data, 95).astype(np.float64)
         p99_val = np.percentile(data, 99).astype(np.float64)
 
-        ax.axvline(
-            mean_val,
-            color="red",
-            linestyle="--",
-            linewidth=2,
-            label=f"Mean: {mean_val:.0f}",
-        )
-        ax.axvline(
-            median_val,
-            color="green",
-            linestyle="--",
-            linewidth=2,
-            label=f"Median: {median_val:.0f}",
-        )
-        ax.axvline(
-            p95_val,
-            color="orange",
-            linestyle="--",
-            linewidth=2,
-            label=f"95th percentile: {p95_val:.0f}",
-        )
-        ax.axvline(
-            p99_val,
-            color="purple",
-            linestyle="--",
-            linewidth=2,
-            label=f"99th percentile: {p99_val:.0f}",
-        )
+        ax.axvline(mean_val, color="red", linestyle="--", linewidth=2, label=f"Mean: {mean_val:.0f}")
+        ax.axvline(median_val, color="green", linestyle="--", linewidth=2, label=f"Median: {median_val:.0f}")
+        ax.axvline(p95_val, color="orange", linestyle="--", linewidth=2, label=f"95th percentile: {p95_val:.0f}")
+        ax.axvline(p99_val, color="purple", linestyle="--", linewidth=2, label=f"99th percentile: {p99_val:.0f}")
 
         ax.set_xlabel(xlabel, fontsize=12)
         ax.set_ylabel("Frequency", fontsize=12)
@@ -426,13 +252,8 @@ class SequenceLengthAnalyzer:
 
         _, ax = plt.subplots(figsize=(12, 6))
 
-        data_to_plot = [
-            stats.user_tokens,
-            stats.reasoning_tokens,
-            stats.answer_tokens,
-            stats.total_tokens,
-        ]
-        labels = ["User\n(Code)", "Reasoning", "Answer", "Total"]
+        data_to_plot = [ stats.user_tokens, stats.reasoning_tokens, stats.answer_tokens, stats.total_tokens ]
+        labels = ["User\nPrompt", "Reasoning", "Answer", "Total"]
 
         bp = ax.boxplot(
             data_to_plot,
@@ -451,17 +272,9 @@ class SequenceLengthAnalyzer:
         ax.set_title("Token Distribution by Component", fontsize=14, fontweight="bold")
         ax.grid(True, alpha=0.3, axis="y")
 
-        # Add mean values as text
-        for i, data in enumerate(data_to_plot, 1):
+        for i, data in enumerate(data_to_plot, start=1):
             mean_val = np.mean(data).astype(np.float64)
-            ax.text(
-                i,
-                mean_val,
-                f"{mean_val:.0f}",
-                ha="center",
-                va="bottom",
-                fontweight="bold",
-            )
+            ax.text(i, mean_val, f"{mean_val:.0f}", ha="center", va="bottom", fontweight="bold")
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -503,7 +316,6 @@ class SequenceLengthAnalyzer:
 
         _, ax = plt.subplots(figsize=(12, 6))
 
-        # Test various max_seq_length values
         test_lengths = [1024, 2048, 3072, 4096, 6144, 8192]
         truncation_percentages = []
 
@@ -536,7 +348,7 @@ class SequenceLengthAnalyzer:
             ax.text(
                 bar.get_x() + bar.get_width() / 2.0,
                 height,
-                f"{pct:.1f}%",
+                f"{pct:.2f}%",
                 ha="center",
                 va="bottom",
                 fontsize=9,
@@ -670,146 +482,42 @@ class SequenceLengthAnalyzer:
         with open(file=output_file, mode="w") as f:
             json.dump(recommendations, f, indent=2)
 
+        logger.info(f"✅ Recommendations saved to {output_file}")
+
         # Print recommendations
-        print("\n" + "=" * 80)
-        print("📋 MAX_SEQ_LENGTH RECOMMENDATIONS")
-        print("=" * 80)
-        print(f"Total samples analyzed: {total_stats['count']}")
-        print(f"Mean sequence length: {total_stats['mean']:.0f} tokens")
-        print(f"Median sequence length: {total_stats['median']:.0f} tokens")
-        print(f"95th percentile: {total_stats['p95']:.0f} tokens")
-        print(f"99th percentile: {total_stats['p99']:.0f} tokens")
-        print(f"Maximum length: {total_stats['max']:.0f} tokens")
-        print("\n" + "-" * 80)
-        print("RECOMMENDATIONS:")
-        print("-" * 80)
-
-        for rec in recommendations["recommendations"]:
-            symbol = "✅" if rec["recommended"] else "⚠️"
-            print(f"\n{symbol} {rec['strategy']}")
-            print(f"   max_seq_length = {rec['max_seq_length']}")
-            print(f"   Truncated: {rec['samples_truncated_pct']:.1f}%")
-            print(f"   {rec['description']}")
-
-        print("\n" + "=" * 80)
-        print(f"✅ Recommendations saved to {output_file}")
-        print("=" * 80 + "\n")
-
-
-# ============================================================================
-# UTILITIES
-# ============================================================================
-def analyze_single_tokenizer(
-    dataset_path: Path,
-    tokenizer_name: str,
-    output_dir: Path,
-    max_samples: int | None = None,
-):
-    """Analyze dataset with a single tokenizer."""
-    logger.info(f"🚀 Starting analysis with tokenizer: {tokenizer_name}")
-
-    try:
-        with Loader(
-            f"📦 Loading tokenizer...",
-            f"✅ Tokenizer `{tokenizer_name}` loaded",
-            logger=logger
-        ):
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-        with Loader(
-            f"📊 Initializing analyzer",
-            f"✅ Initialized analyzer with tokenizer: `{tokenizer.name_or_path}`",
-            logger=logger,
-        ):
-            analyzer = SequenceLengthAnalyzer(tokenizer=tokenizer)
-
-        stats = analyzer.analyze_dataset(
-            jsonl_path=dataset_path, max_samples=max_samples, output_dir=output_dir
-        )
-
-        logger.info("✅ Analysis complete!")
-        return stats
-    except Exception as e:
-        logger.error(f"❌ Error during analysis: {e}")
-        raise
-
-
-def compare_tokenizers(
-    dataset_path: Path,
-    output_dir: Path,
-    tokenizer_names: list[str],
-    max_samples: int | None = None,
-):
-    """Compare multiple tokenizers."""
-
-    logger.info(f"🔍 Comparing {len(tokenizer_names)} tokenizers")
-
-    results = {}
-
-    for tokenizer_name in tokenizer_names:
-        # logger.info(f"\n{'='*80}")
-        # logger.info(f"Analyzing with: {tokenizer_name}")
-        # logger.info(f"{'='*80}\n")
-
-        tokenizer_output_dir = output_dir / tokenizer_name.replace("/", "_")
-
-        try:
-            stats = analyze_single_tokenizer(
-                dataset_path=dataset_path,
-                tokenizer_name=tokenizer_name,
-                output_dir=tokenizer_output_dir,
-                max_samples=max_samples,
-            )
-            results[tokenizer_name] = stats.get_summary()
-        except Exception as e:
-            logger.error(f"Failed to analyze with {tokenizer_name}: {e}")
-            continue
-
-    # Generate comparison report
-    if len(results) > 1:
-        generate_comparison_report(results, output_dir)
-
-    return results
-
-
-def generate_comparison_report(results: dict, output_dir: Path):
-    """Generate a comparison report for multiple tokenizers."""
-
-    print("\n" + "=" * 80)
-    print("📊 TOKENIZER COMPARISON")
-    print("=" * 80)
-
-    comparison = {"tokenizers": list(results.keys()), "comparison": {}}
-
-    print(f"\n{'Tokenizer':<50} {'Mean':<12} {'P95':<12} {'P99':<12} {'Max':<12}")
-    print("-" * 100)
-
-    for tokenizer_name, stats in results.items():
-        total_stats = stats["total_tokens"]
-        display_name = (
-            tokenizer_name[-47:] if len(tokenizer_name) > 47 else tokenizer_name
-        )
-
-        print(
-            f"{display_name:<50} "
-            f"{total_stats['mean']:>10.0f}  "
-            f"{total_stats['p95']:>10.0f}  "
-            f"{total_stats['p99']:>10.0f}  "
-            f"{total_stats['max']:>10.0f}"
-        )
-
-        comparison["comparison"][tokenizer_name] = {
-            "mean_total_tokens": total_stats["mean"],
-            "p95_total_tokens": total_stats["p95"],
-            "p99_total_tokens": total_stats["p99"],
-            "max_total_tokens": total_stats["max"],
+        table_data = {
+            "Total samples analyzed": int(total_stats["count"]),
+            "Mean sequence length": round(total_stats["mean"], 3),
+            "Median sequence length": round(total_stats["median"], 3),
+            "95th percentile": round(total_stats["p95"], 3),
+            "99th percentile": round(total_stats["p99"], 3),
+            "Maximum length": int(total_stats["max"]),
         }
+        table = build_table(data=table_data, columns=["Metric", "Value [tokens]"])
+        rich_rule()
+        rich_panel(
+            table,
+            panel_title="📋 MAX_SEQ_LENGTH RECOMMENDATIONS",
+            border_style="royal_blue1",
+            justify="center",
+        )
+        rich_rule()
 
-    # Save comparison
-    comparison_file = output_dir / "tokenizer_comparison.json"
-    with open(file=comparison_file, mode="w") as f:
-        json.dump(comparison, f, indent=2)
+        tables = []
+        for rec in recommendations["recommendations"]:
+            trunc_pct = f"{rec['samples_truncated_pct']:.2f}%"
+            d = {
+                "Strategy": rec["strategy"],
+                "Max seq length": rec["max_seq_length"],
+                "Truncated": trunc_pct,
+                "Description": rec["description"],
+                "Recommended?": rec["recommended"]
+            }
+            tables.append(build_table(data=d, columns=["Info","Value"]))
 
-    print("\n" + "=" * 80)
-    print(f"✅ Comparison saved to {comparison_file}")
-    print("=" * 80 + "\n")
+        rich_panel(
+            tables,
+            panel_title="⚠️ RECOMMENDATIONS",
+            border_style="yellow1",
+        )
+        rich_rule()

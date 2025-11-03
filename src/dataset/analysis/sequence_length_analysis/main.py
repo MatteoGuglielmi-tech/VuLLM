@@ -1,24 +1,39 @@
-import sys
 import logging
-import cli
 
-from logging_config import setup_logger
-from sequence_length_analyzer import (
-    analyze_single_tokenizer,
-    compare_tokenizers,
-)
+from dotenv import load_dotenv
+from rich.traceback import install
+from accelerate import Accelerator
+
+from .logging_config import setup_logger
+from .cli import get_parsed_args
+from .analyzer_wrapper import analyze_single_tokenizer, compare_tokenizers
+from .utilities import cleanup_resources
+
+install(show_locals=True)
 
 
 logger = logging.getLogger(name=__name__)
+setup_logger()
+load_dotenv()
 
 if __name__ == "__main__":
-    setup_logger()
-    args = cli.get_parsed_args()
+    logger.debug("🚀 Starting baseline... 🚀")
+    args = get_parsed_args()
 
     try:
+        if args.finetuning:
+            from .analyzers import FineTunePromptAnalyzer
+
+            analyzer_type = FineTunePromptAnalyzer
+        elif args.assessment:
+            from .analyzers import JudgePromptAnalyzer
+
+            analyzer_type = JudgePromptAnalyzer
+
         if args.tokenizer:
             analyze_single_tokenizer(
                 dataset_path=args.dataset,
+                analyzer_type=analyzer_type,
                 tokenizer_name=args.tokenizer,
                 output_dir=args.output,
                 max_samples=args.max_samples,
@@ -26,16 +41,13 @@ if __name__ == "__main__":
         else:
             compare_tokenizers(
                 dataset_path=args.dataset,
+                analyzer_type=analyzer_type,
                 tokenizer_names=args.tokenizers,
                 output_dir=args.output,
                 max_samples=args.max_samples,
             )
 
         logger.info(f"🎉 All done! Check the `{args.output}` for results.")
-
-    except KeyboardInterrupt:
-        logger.warning("⚠️  Analysis interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
-        sys.exit(1)
+    finally:
+        accelerator = Accelerator()
+        cleanup_resources(accelerator)
