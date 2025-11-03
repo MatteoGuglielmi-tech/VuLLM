@@ -6,6 +6,7 @@ class JudgeConfig:
     """Configuration for each judge model"""
 
     model_name: str
+    ref_name: str = ""
     chat_template: str | None = None
     max_seq_length: int = 8192  # power of 2 and multiple of 512 + covers all prompts with margin
     max_new_tokens: int = 512
@@ -17,3 +18,7 @@ class JudgeConfig:
 
     specialization: str = "general"
     description: str | None = None
+
+    @property
+    def to_dict(self):
+        return self.__dict__
