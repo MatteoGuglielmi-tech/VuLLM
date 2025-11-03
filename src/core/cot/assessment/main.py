@@ -7,6 +7,7 @@ from pathlib import Path
 
 from accelerate import Accelerator
 
+from .cli import get_parser, validate_args
 from .logging_config import setup_logger
 from .judges import JudgeConfig, JudgeEnsemble
 from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
@@ -20,40 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-
-    parser = argparse.ArgumentParser(
-        prog="Chain of thougths quality assessment",
-        description="A jury that judges the quality of CoTs",
-    )
-
-    path_group = parser.add_argument_group("Path mandatory arguments")
-    path_group.add_argument("--input", "-i", type=Path, required=True, help="Path to the source dataset.")
-    path_group.add_argument("--output", "-o", type=Path, required=True, help="Output folder.")
-    path_group.add_argument("--assets", "-p", type=Path, required=True, help="Assets folder.")
-
-    # -- Generation --
-    model_group = parser.add_argument_group("Model arguments")
-    model_group.add_argument("--max_new_tokens", "-m", type=int, default=512, help="Maximum tokens for generation completion.")
-
-    # -- Assessment --
-    assessment_group = parser.add_argument_group("Metrics arguments")
-    assessment_group.add_argument(
-        "--quality_threshold", "-q",
-        type=float, default=0.60,
-        help="Minimum average quality (0-1).",
-    )
-    assessment_group.add_argument(
-        "--agreement_threshold", "-a",
-        type=float, default=0.75,
-        help="Minimum judge agreement (0-1, higher=stricter). Reject if judges differ by more than (1-agreement_threshold)",
-    )
-    assessment_group.add_argument(
-        "--agreement_method", "-t",
-        type=str, default="weighted_multidimensional", choices=["multidimensional", "weighted_multidimensional"],
-        help="Type of agreement to compute",
-    )
-
+    parser = get_parser()
     args = parser.parse_args()
+    validate_args(args)
+
     accelerator = Accelerator()
     try:
 
