@@ -8,8 +8,8 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
 from rich.align import AlignMethod
-from rich.console import Console
-from rich.style import Style
+from rich.console import Console, JustifyMethod
+from rich.style import Style, StyleType
 from rich.table import Table
 from rich.panel import Panel
 from rich.columns import Columns
@@ -21,6 +21,7 @@ from rich.progress import (
     TaskProgressColumn,
     TimeRemainingColumn,
 )
+from rich.text import TextType
 
 from .decorators import main_process_only
 from ..datatypes import ReasoningSample
@@ -105,11 +106,13 @@ def rich_table(
 @main_process_only
 def rich_panel(
     tables: list[Table] | Table,
-    panel_title: str | None = None,
-    subtitle: str | None = None,
-    border_style: str = "red",
+    panel_title: TextType | None = None,
+    subtitle: TextType | None = None,
+    border_style: StyleType = "red",
     align: AlignMethod = "center",
-    padding: tuple = (0,1)
+    padding: tuple = (0,1), 
+    justify: JustifyMethod|None = None,
+    allow_wrap: bool=False
 ):
     to_render = Columns(tables) if isinstance(tables, list) else tables
     panel = Panel.fit(
@@ -121,7 +124,7 @@ def rich_panel(
         subtitle_align=align,
         padding=padding,
     )
-    _console.print(panel)
+    _console.print(panel, justify=justify, no_wrap=allow_wrap)
 
 @main_process_only
 def rich_print(
@@ -310,17 +313,20 @@ def setup_paths(parser: ArgumentParser) -> dict[str, Path]:
         for action in group._group_actions
     }
 
-    rich_rule()
-    rich_table(data=custom_args, title="⚙️ CLI Arguments ⚙️", columns=["Argument name", "Value"])
+    tab = build_table(data=custom_args, columns=["Name", "Value"])
+    rich_panel(tab, panel_title= "CLI Arguments", border_style="royal_blue1")
     rich_rule()
  
-    output_folder: Path = custom_args["output"] # type: ignore
-    output_folder.mkdir(parents=True, exist_ok=True)
+    if args.ensemble:
+        output_folder: Path = custom_args["output"] # type: ignore
+        output_folder.mkdir(parents=True, exist_ok=True)
 
-    return {
-        "filtered": output_folder / "best_reasonings.jsonl",
-        "rejected": output_folder / "rejected_reasonings.jsonl",
-        "metadata": output_folder / "judge_config.json",
-        "filtering_stats": output_folder / "filtering_stats.json",
-    }
+        return {
+            "filtered": output_folder / "best_reasonings.jsonl",
+            "rejected": output_folder / "rejected_reasonings.jsonl",
+            "metadata": output_folder / "judge_config.json",
+            "filtering_stats": output_folder / "filtering_stats.json",
+        }
+
+    return {}
 
