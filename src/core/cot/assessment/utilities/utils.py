@@ -37,8 +37,8 @@ _progress = Progress(
 
 def build_table(
     data: dict[str, Any] | Namespace,
-    title: str,
-    columns: list[str],
+    title: str = "",
+    columns: list[str] = [],
     box=box.ASCII_DOUBLE_HEAD,
     expand: bool = False,
 ) -> Table:
@@ -104,9 +104,9 @@ def rich_table(
 
 @main_process_only
 def rich_panel(
-    tables: list[Table]|Table,
-    panel_title: str,
-    subtitle: str,
+    tables: list[Table] | Table,
+    panel_title: str | None = None,
+    subtitle: str | None = None,
     border_style: str = "red",
     align: AlignMethod = "center",
     padding: tuple = (0,1)

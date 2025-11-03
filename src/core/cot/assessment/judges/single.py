@@ -28,13 +28,11 @@ class SingleJudgeEvaluator:
         # pretty log
         table = build_table(
             data=judge_config.to_dict,
-            title=f"Initialized judge {judge_config.model_name}",
             columns=["Attribute", "Position"],
         )
         rich_panel(
             table,
-            panel_title="Judges configurations",
-            subtitle="Judges correctly initialized",
+            panel_title=f"Configuration for judge {judge_config.model_name}",
             border_style="green",
             padding=(1, 20),
         )
