@@ -16,9 +16,6 @@ def get_parser():
     path_group.add_argument(
         "--input", "-i", type=Path, required=True, help="Path to the source dataset."
     )
-    path_group.add_argument(
-        "--assets", "-p", type=Path, required=True, help="Assets folder."
-    )
     model_group = parser.add_argument_group("Model arguments")
     model_group.add_argument(
         "--max_new_tokens", "-m",
@@ -47,6 +44,7 @@ def get_parser():
     # ============================================================================
     ensemble_group = parser.add_argument_group("Ensemble mode only arguments")
     ensemble_group.add_argument("--output", "-o", type=Path, help="Output folder.")
+    ensemble_group.add_argument("--assets", "-p", type=Path, help="Assets folder.")
     ensemble_group.add_argument(
         "--quality_threshold", "-q",
         type=float, default=0.60,
@@ -85,6 +83,7 @@ def validate_args(args):
 
     ensemble_only = {
         "output",
+        "assets",
         "quality_threshold",
         "agreement_threshold",
         "agreement_method",
@@ -97,6 +96,8 @@ def validate_args(args):
     if args.ensemble_only:
         if args.output is None:
             raise argparse.ArgumentTypeError("--output is required for --ensemble mode")
+        if args.assets is None:
+            raise argparse.ArgumentTypeError("--assets is required for --ensemble mode")
 
         # Check HPO-only arguments
         for arg in sequential_only:
@@ -122,6 +123,8 @@ def validate_args(args):
 
         if args.judge is None:
             raise ArgumentTypeError("--judge is required for --sequential mode")
+        if args.output_path is None:
+            raise ArgumentTypeError("--output_path is required for --sequential mode")
 
     return args
 
@@ -131,11 +134,14 @@ def get_default_value(arg_name):
 
     defaults = {
         # ensemble mode only
+        "output": None,
+        "assets": None,
         "quality_threshold": 0.6,
         "agreement_threshold": 0.75,
         "agreement_method": "weighted_multidimensional",
         # sequential only
         "judge": None,
+        "output_path": None
     }
 
     return defaults.get(arg_name)
