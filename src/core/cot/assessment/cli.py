@@ -70,7 +70,7 @@ def get_parser():
         type=str, choices=["qwen-coder", "llama-3.1-70B", "deepseek-qwen"],
         help="Name of the judge model to use.",
     )
-    sequential_group.add_argument("--output_path", "-o", type=Path, help="Output filepath.")
+    sequential_group.add_argument("--output_path", "-op", type=Path, help="Output filepath.")
 
     return parser
 
@@ -93,7 +93,7 @@ def validate_args(args):
 
     invalid_args = []
 
-    if args.ensemble_only:
+    if args.ensemble:
         if args.output is None:
             raise argparse.ArgumentTypeError("--output is required for --ensemble mode")
         if args.assets is None:
@@ -110,6 +110,8 @@ def validate_args(args):
     elif args.sequential:
         if args.output_path is None:
             raise argparse.ArgumentTypeError("--output_path is required for --single mode")
+        if args.judge is None:
+            raise ArgumentTypeError("--judge is required for --sequential mode")
 
         # Check fine-tuning-only arguments
         for arg in ensemble_only:
@@ -120,11 +122,6 @@ def validate_args(args):
 
         if invalid_args:
             raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode")
-
-        if args.judge is None:
-            raise ArgumentTypeError("--judge is required for --sequential mode")
-        if args.output_path is None:
-            raise ArgumentTypeError("--output_path is required for --sequential mode")
 
     return args
 
