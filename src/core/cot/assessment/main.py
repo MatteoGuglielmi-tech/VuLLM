@@ -1,15 +1,13 @@
 import os
 import gc
-import argparse
 import json
 import logging
-from pathlib import Path
 
 from accelerate import Accelerator
 
 from .cli import get_parser, validate_args
 from .logging_config import setup_logger
-from .judges import JudgeConfig, JudgeEnsemble
+from .judges import JudgeConfig, JudgeEnsemble, SingleJudgeEvaluator
 from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
 from .plots import visualize_results
 
@@ -54,56 +52,66 @@ def main():
 
         paths = setup_paths(parser)
 
-        judge_configs = [
-            JudgeConfig(
+        judge_configs: dict[str, JudgeConfig] = {
+            "qwen-coder": JudgeConfig(
                 model_name="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
+                ref_name="Qwen2.5-Coder-32B",
                 chat_template="qwen-2.5",
                 specialization="code",
                 description="Specialized in C/C++ vulnerability patterns and code analysis"
             ),
-            JudgeConfig(
+            "llama-3.1-70B": JudgeConfig(
                 model_name="unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit",
+                ref_name="Llama-3.1-70B",
                 chat_template="llama-3.1",
                 specialization="reasoning",
                 description="Deep reasoning model for logical flow and completeness"
             ),
-            JudgeConfig(
+            "deepseek-qwen": JudgeConfig(
                 model_name="unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
                 chat_template="qwen-2.5",
+                ref_name="DeepSeek-R1-Distill-Qwen-32B",
                 temperature=0.6,
                 top_p=0.95,
                 min_p=0.05,
                 specialization="logic",
                 description="Mathematical and logical reasoning specialist"
             ),
-        ]
+        }
 
         # =========================================================================
         # Run Filtering
         # =========================================================================
-        ensemble = JudgeEnsemble(judge_configs)
-        ensemble_info = ensemble.get_ensemble_info()
-        with open(file=paths["metadata"], mode="w", encoding="utf-8") as f:
-            json.dump(ensemble_info, f, indent=2)
+        if args.ensemble:
+            ensemble = JudgeEnsemble(list(judge_configs.values()))
+            ensemble_info = ensemble.get_ensemble_info()
+            with open(file=paths["metadata"], mode="w", encoding="utf-8") as f:
+                json.dump(ensemble_info, f, indent=2)
 
-        stats = ensemble.filter_dataset_streaming(
-            input_jsonl_path=args.input,
-            output_jsonl_path=paths["filtered"],
-            rejected_jsonl_path=paths["rejected"],
-            stats_json_path=paths["filtering_stats"],
-            quality_threshold=args.quality_threshold,
-            agreement_threshold=args.agreement_threshold,
-            save_interval=15,
-            agreement_method=args.agreement_method
-        )
+            stats = ensemble.filter_dataset_streaming(
+                input_jsonl_path=args.input,
+                output_jsonl_path=paths["filtered"],
+                rejected_jsonl_path=paths["rejected"],
+                stats_json_path=paths["filtering_stats"],
+                quality_threshold=args.quality_threshold,
+                agreement_threshold=args.agreement_threshold,
+                save_interval=args.save_interval,
+                agreement_method=args.agreement_method
+            )
 
-        visualize_results(
-            stats=stats,
-            output_dir=args.assets,
-            quality_threshold=args.quality_threshold,
-            agreements_threshold=args.agreement_threshold,
-        )
-
+            visualize_results(
+                stats=stats,
+                output_dir=args.assets,
+                quality_threshold=args.quality_threshold,
+                agreements_threshold=args.agreement_threshold,
+            )
+        else:
+            evaluator = SingleJudgeEvaluator(judge_configs[args.judge])
+            evaluator.evaluate_dataset(
+                input_jsonl=args.input,
+                output_jsonl=args.output_path,
+                save_interval=args.save_interval
+            )
     except Exception:
         rich_exception()
     finally:
