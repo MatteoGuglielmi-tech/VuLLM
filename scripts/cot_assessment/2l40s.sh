@@ -19,4 +19,8 @@ mkdir -p "$TRITON_CACHE_DIR"
 
 echo "✅ Triton cache: $TRITON_CACHE_DIR"
 
+# Prevent timeout
+export NCCL_BLOCKING_WAIT=0
+export NCCL_ASYNC_ERROR_HANDLING=1
+
 python DoneBot/src/notify.py --cmd accelerate launch --config_file accelerate/2gpus.yaml -m src.core.cot.assessment.main --input ./DiverseVul/processed/gpt_reasoning.jsonl --output ./DiverseVul/assessed/ --assets ./src/core/cot/assessment/assets/ --max_new_tokens 512 --quality_threshold 0.8 --agreement_threshold 0.75 --agreement_method weighted_multidimensional
