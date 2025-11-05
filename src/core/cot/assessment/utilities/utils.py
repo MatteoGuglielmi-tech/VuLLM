@@ -1,4 +1,3 @@
-import inspect
 import json
 import logging
 import gc
@@ -6,14 +5,14 @@ import torch
 
 from collections.abc import Generator
 from collections.abc import Sized as ABCSized
-from typing import Any, Callable, Iterable, Literal, TypeVar
+from typing import Any, Iterable, Literal, TypeVar
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from contextlib import contextmanager
 
 from rich.align import AlignMethod, Align
 from rich.console import Console, JustifyMethod, Group
-from rich.style import Style, StyleType
+from rich.style import StyleType
 from rich.table import Table
 from rich.panel import Panel
 from rich.columns import Columns
@@ -404,6 +403,34 @@ def cleanup_resources(accelerator):
             logger.info("✓ CUDA cache cleared")
     except Exception:
         logger.exception(f"An error has occured during CUDA cleanup")
+
+    gc.collect()
+    logger.info("✓ Cleanup complete")
+
+
+def cleanup_single_gpu():
+    """
+    Cleanup for single-GPU jobs (without Accelerate).
+    """
+    logger.info("Cleaning up resources...")
+
+    try:
+        # Check if distributed is initialized
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            logger.info("Destroying distributed process group...")
+            torch.distributed.destroy_process_group()
+            logger.info("✓ Distributed cleaned up")
+    except Exception as e:
+        logger.debug(f"Distributed cleanup: {e}")
+
+    try:
+        # CUDA cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            logger.info("✓ CUDA cleared")
+    except Exception as e:
+        logger.debug(f"CUDA cleanup: {e}")
 
     gc.collect()
     logger.info("✓ Cleanup complete")

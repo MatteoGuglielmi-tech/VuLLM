@@ -8,9 +8,20 @@ from accelerate import Accelerator
 from .cli import get_parser, validate_args
 from .logging_config import setup_logger
 from .judges import JudgeConfig, JudgeEnsemble, SingleJudgeEvaluator
-from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
+from .utilities import (
+    setup_paths,
+    build_table,
+    rich_panel,
+    rich_exception,
+    rich_rule,
+    is_main_process,
+    cleanup_resources,
+    cleanup_single_gpu,
+)
 from .plots import visualize_results
 from .merge_script import merge_and_filter
+
+import torch
 
 from rich.traceback import install
 install(show_locals=True)
@@ -143,7 +154,10 @@ def main():
     except Exception:
         rich_exception()
     finally:
-        cleanup_resources(accelerator=accelerator)
+        if torch.cuda.device_count() > 1:
+            cleanup_resources(accelerator=accelerator)
+        else:
+            cleanup_single_gpu()
 
 
 if __name__ == "__main__":

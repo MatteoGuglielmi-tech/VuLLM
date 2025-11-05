@@ -12,6 +12,7 @@ from .utils import (
     rich_progress_manual,
     get_instruction_response_parts,
     cleanup_resources,
+    cleanup_single_gpu,
     iter_jsonl_samples,
     setup_paths,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "build_table",
     "progress_bar",
     "cleanup_resources",
+    "cleanup_single_gpu",
     "get_instruction_response_parts",
     "iter_jsonl_samples",
     "setup_paths",
