@@ -222,7 +222,7 @@ def rich_progress_manual(
     initial_status: str = "Starting...",
 ):
     """Manual progress bar (like tqdm context manager).
-    
+
     Parameters
     ----------
     total : int
@@ -232,24 +232,26 @@ def rich_progress_manual(
     initial_status : str
         Initial status message
     """
-    
+
     class ProgressController:
         def __init__(self, progress: Progress, task: TaskID):
             self.progress = progress
             self.task = task
-        
+
         def update(self, advance: int = 1):
             self.progress.update(self.task, advance=advance)
-        
+
         def set_postfix(self, postfix: dict[str, Any]):
             status = ", ".join(f"{k}={v}" for k, v in postfix.items())
             self.progress.update(self.task, status=status)
-        
+
         def set_description(self, description: str):
             self.progress.update(self.task, description=description)
-    
+
     with _progress as progress:
-        task = progress.add_task(description=description, total=total, status=initial_status)
+        task = progress.add_task(
+            description=description, total=total, status=initial_status
+        )
         controller = ProgressController(progress, task)
         yield controller
 
@@ -259,10 +261,10 @@ def rich_progress(
     total: int | None = None,
     description: str = "Processing",
     initial_status: str = "Starting...",
-    running_status: str = "Running..."
+    running_status: str = "Running...",
 ):
     """Automatic progress bar (iterator wrapper).
-    
+
     Parameters
     ----------
     iterable : Iterable
@@ -282,9 +284,11 @@ def rich_progress(
                 "Must provide 'total' when iterable doesn't support len(). "
                 "Try: rich_progress_advanced(iterable, total=<count>)"
             )
-    
+
     with _progress as progress:
-        task = progress.add_task(description=description, total=total, status=initial_status)
+        task = progress.add_task(
+            description=description, total=total, status=initial_status
+        )
         for item in iterable:
             yield item
             progress.update(task, advance=1, status=running_status)

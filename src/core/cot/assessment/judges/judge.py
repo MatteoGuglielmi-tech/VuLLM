@@ -14,7 +14,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .judge_types import JudgeConfig
 from ..datatypes import EvaluationResult, ReasoningSample
-from ..utilities import is_main_process
+from ..utilities import is_main_process, rich_status
 
 
 logger = logging.getLogger(name=__name__)
@@ -226,15 +226,16 @@ class LLMJudge:
         """Free GPU memory"""
 
         if self.model is None: return
-        logger.info(f"Unloading {self.model_name}")
-        del self.model
-        del self.tokenizer
-        self.model = None
-        self.tokenizer = None
-        gc.collect()
-        torch.cuda.empty_cache()
+        with rich_status(description=f"Unloading {self.model_name}", spinner="arc"):
+            del self.model
+            del self.tokenizer
+            self.model = None
+            self.tokenizer = None
+            gc.collect()
+            torch.cuda.empty_cache()
 
-        time.sleep(10) # give time for resources to be released
+        with rich_status(description=f"Sleeping for 10 second to finish releasing", spinner="arc"):
+            time.sleep(10)
 
     def _create_judging_prompt(self, sample: ReasoningSample) -> list[dict[str,str]]:
         """Create prompt for judging reasoning quality"""
