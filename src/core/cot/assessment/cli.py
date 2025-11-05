@@ -21,7 +21,7 @@ def get_parser():
         "--max_lengths",
         type=int,
         nargs="+",
-        default=None,
+        default=[8192, 8192, 8192],
         help="List of max sequence lengths for each judge (Order matters!!)."
     )
     model_group.add_argument(
@@ -131,7 +131,7 @@ def validate_args(args):
 
     elif args.sequential:
         if args.output_path is None:
-            raise argparse.ArgumentTypeError("--output_path is required for --single mode")
+            raise argparse.ArgumentTypeError("--output_path is required for --sequential mode")
         if args.judge is None:
             raise ArgumentTypeError("--judge is required for --sequential mode")
 
@@ -145,7 +145,7 @@ def validate_args(args):
                 invalid_args.append(f"--{arg}")
 
         if invalid_args:
-            raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode")
+            raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --sequential mode")
 
     elif args.merge:
         if args.output_path is None:
