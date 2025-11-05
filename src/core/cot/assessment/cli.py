@@ -39,23 +39,26 @@ def get_parser():
     mode_group.add_argument(
         "--sequential", action="store_true", help="Evaluate with one judge at a time"
     )
+    mode_group.add_argument(
+        "--merge", action="store_true", help="Run merge script."
+    )
     # ============================================================================
-    # ENSEMBLE ARGUMENTS
+    # SHARED: ENSEMBLE & MERGE ARGUMENTS
     # ============================================================================
-    ensemble_group = parser.add_argument_group("Ensemble mode only arguments")
-    ensemble_group.add_argument("--output", "-o", type=Path, help="Output folder.")
-    ensemble_group.add_argument("--assets", "-p", type=Path, help="Assets folder.")
-    ensemble_group.add_argument(
+    shared_group = parser.add_argument_group("Shared arguments between `ensemble` and `merge` modes")
+    shared_group.add_argument("--output", "-o", type=Path, help="Output folder.")
+    shared_group.add_argument("--assets", "-p", type=Path, help="Assets folder.")
+    shared_group.add_argument(
         "--quality_threshold", "-q",
         type=float, default=0.60,
         help="Minimum average quality (0-1).",
     )
-    ensemble_group.add_argument(
+    shared_group.add_argument(
         "--agreement_threshold", "-a",
         type=float, default=0.75,
-        help="Minimum judge agreement (0-1, higher=stricter). Reject if judges differ by more than (1-agreement_threshold)",
+        help="Minimum judge agreement (0-1, higher=stricter)."
     )
-    ensemble_group.add_argument(
+    shared_group.add_argument(
         "--agreement_method", "-t",
         type=str, default="weighted_multidimensional",
         choices=["multidimensional", "weighted_multidimensional"],
@@ -71,7 +74,17 @@ def get_parser():
         help="Name of the judge model to use.",
     )
     sequential_group.add_argument("--output_path", "-op", type=Path, help="Output filepath.")
-
+    # ============================================================================
+    # MERGE ARGUMENTS
+    # ============================================================================
+    merge_group = parser.add_argument_group("Merge script only arguments")
+    merge_group.add_argument(
+        "--judge_files",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="List of paths leading to evaluation files."
+    )
     return parser
 
 
@@ -81,15 +94,16 @@ def validate_args(args):
     Call this after parsing arguments.
     """
 
-    ensemble_only = {
+    ensemble_only = {}
+    sequential_only = {"output_path", "judge"}
+    merge_only = {"judge_files"}
+    shared = {
         "output",
         "assets",
         "quality_threshold",
         "agreement_threshold",
         "agreement_method",
     }
-
-    sequential_only = {"output_path", "judge"}
 
     invalid_args = []
 
@@ -99,8 +113,9 @@ def validate_args(args):
         if args.assets is None:
             raise argparse.ArgumentTypeError("--assets is required for --ensemble mode")
 
-        # Check HPO-only arguments
-        for arg in sequential_only:
+        prohibited = sequential_only.copy()
+        prohibited.update(merge_only)
+        for arg in prohibited:
             if getattr(args, arg) != get_default_value(arg):
                 invalid_args.append(f"--{arg}")
 
@@ -113,8 +128,29 @@ def validate_args(args):
         if args.judge is None:
             raise ArgumentTypeError("--judge is required for --sequential mode")
 
-        # Check fine-tuning-only arguments
-        for arg in ensemble_only:
+        prohibited = shared.copy()
+        prohibited.update(merge_only)
+        prohibited.update(ensemble_only)
+        for arg in prohibited:
+            value = getattr(args, arg)
+            default = get_default_value(arg)
+            if value != default:
+                invalid_args.append(f"--{arg}")
+
+        if invalid_args:
+            raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode")
+
+    elif args.merge:
+        if args.output_path is None:
+            raise argparse.ArgumentTypeError("--output_path is required for --merge mode")
+        if args.assets is None:
+            raise argparse.ArgumentTypeError("--assets is required for --assets mode")
+        if args.judge_files is None:
+            raise ArgumentTypeError("--judge_files is required for --merge mode")
+
+        prohibited = sequential_only.copy()
+        prohibited.update(ensemble_only)
+        for arg in prohibited:
             value = getattr(args, arg)
             default = get_default_value(arg)
             if value != default:
@@ -138,7 +174,9 @@ def get_default_value(arg_name):
         "agreement_method": "weighted_multidimensional",
         # sequential only
         "judge": None,
-        "output_path": None
+        "output_path": None,
+        # merge only
+        "judge_files": None
     }
 
     return defaults.get(arg_name)

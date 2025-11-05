@@ -10,6 +10,7 @@ from .logging_config import setup_logger
 from .judges import JudgeConfig, JudgeEnsemble, SingleJudgeEvaluator
 from .utilities import setup_paths, build_table, rich_panel, rich_exception, rich_rule, is_main_process, cleanup_resources
 from .plots import visualize_results
+from .merge_script import merge_and_filter
 
 from rich.traceback import install
 install(show_locals=True)
@@ -91,9 +92,9 @@ def main():
 
             stats = ensemble.filter_dataset_streaming(
                 input_jsonl_path=args.input,
-                output_jsonl_path=paths["filtered"],
-                rejected_jsonl_path=paths["rejected"],
-                stats_json_path=paths["filtering_stats"],
+                output_kept=paths["filtered"],
+                output_rejected=paths["rejected"],
+                output_stats=paths["filtering_stats"],
                 quality_threshold=args.quality_threshold,
                 agreement_threshold=args.agreement_threshold,
                 save_interval=args.save_interval,
@@ -106,12 +107,31 @@ def main():
                 quality_threshold=args.quality_threshold,
                 agreements_threshold=args.agreement_threshold,
             )
-        else:
+        elif args.sequential:
             evaluator = SingleJudgeEvaluator(judge_configs[args.judge])
             evaluator.evaluate_dataset(
                 input_jsonl=args.input,
                 output_jsonl=args.output_path,
                 save_interval=args.save_interval
+            )
+        else: # merge
+            assert paths is not None
+            stats = merge_and_filter(
+                original_data=args.input_jsonl,
+                judge_files=[args.judge1, args.judge2, args.judge3],
+                output_kept=paths["filtered"],
+                output_rejected=paths["rejected"],
+                stats_json_path=paths["filtering_stats"],
+                agreement_method=args.agreement_method,
+                agreement_threshold=args.agreement_threshold,
+                quality_threshold=args.quality_threshold,
+                save_interval=args.save_interval,
+            )
+            visualize_results(
+                stats=stats,
+                output_dir=args.assets,
+                quality_threshold=args.quality_threshold,
+                agreements_threshold=args.agreement_threshold,
             )
     except Exception:
         rich_exception()
