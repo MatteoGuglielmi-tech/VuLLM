@@ -282,9 +282,9 @@ class JudgeEnsemble:
     def filter_dataset_streaming(
         self,
         input_jsonl_path: Path,
-        output_jsonl_path: Path,
-        rejected_jsonl_path: Path,
-        stats_json_path: Path,
+        output_kept: Path,
+        output_rejected: Path,
+        output_stats: Path,
         quality_threshold: float = 0.6,
         agreement_threshold: float = 0.7,
         save_interval: int = 10,
@@ -338,8 +338,8 @@ class JudgeEnsemble:
         rejected_batch = []
         all_records = []
         with (
-            jsonlines.open(output_jsonl_path, mode="w") as kept_writer,
-            jsonlines.open(rejected_jsonl_path, mode="w") as rejected_writer,
+            jsonlines.open(output_kept, mode="w") as kept_writer,
+            jsonlines.open(output_rejected, mode="w") as rejected_writer,
             tqdm(total=total_lines, desc="🧪 Filtering samples", unit="sample") as pbar,
         ):
 
@@ -444,7 +444,7 @@ class JudgeEnsemble:
         }
         rejected_table = build_table(data=data, title="REJECTED ANALYSIS", columns=["Support", "Value"])
 
-        with open(file=stats_json_path, mode="w") as f:
+        with open(file=output_stats, mode="w") as f:
             json.dump(
                 {k: v for k, v in stats.items() if k not in ["scores", "agreements"]},
                 f,
@@ -454,7 +454,7 @@ class JudgeEnsemble:
         rich_panel(
             tables=[res_table, rejected_table],
             panel_title="🏁 Experiment outcome 🏁",
-            subtitle=f"\n✓ Statistics saved to: {stats_json_path}",
+            subtitle=f"\n✓ Statistics saved to: {output_stats}",
             border_style="dim purple",
             padding=(1, 35),
         )

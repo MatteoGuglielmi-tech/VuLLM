@@ -140,8 +140,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         """Helper method for token counting."""
         return len(self.tokenizer.encode(text, add_special_tokens=add_special_tokens))
 
-    def apply_template(self, messages: list[dict[str,str]]):
-        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    def apply_template(self, messages: list[dict[str, str]]):
+        return self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False
+        )
 
     def analyze_dataset(
         self,

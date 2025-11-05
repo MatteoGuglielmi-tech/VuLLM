@@ -64,7 +64,7 @@ class SingleJudgeEvaluator:
 
                     output: dict[str, Any] = {
                         "sample_id": sample.sample_id,
-                        "judge_name": self.judge_config.model_name,
+                        "judge_name": self.judge_config.ref_name,
                         "evaluation": eval_result.to_dict(),
                         "judge_config": self.judge_config.to_dict,
                     }
