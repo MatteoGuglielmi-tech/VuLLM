@@ -58,6 +58,8 @@ def main():
                 model_name="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
                 ref_name="Qwen2.5-Coder-32B",
                 chat_template="qwen-2.5",
+                max_seq_length=args.max_lengths[0],
+                max_new_tokens=args.max_new_tokens,
                 specialization="code",
                 description="Specialized in C/C++ vulnerability patterns and code analysis"
             ),
@@ -65,13 +67,17 @@ def main():
                 model_name="unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit",
                 ref_name="Llama-3.1-70B",
                 chat_template="llama-3.1",
+                max_seq_length=args.max_lengths[1],
+                max_new_tokens=args.max_new_tokens,
                 specialization="reasoning",
                 description="Deep reasoning model for logical flow and completeness"
             ),
             "deepseek-qwen": JudgeConfig(
                 model_name="unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
-                chat_template="qwen-2.5",
                 ref_name="DeepSeek-R1-Distill-Qwen-32B",
+                chat_template="qwen-2.5",
+                max_seq_length=args.max_lengths[2],
+                max_new_tokens=args.max_new_tokens,
                 temperature=0.6,
                 top_p=0.95,
                 min_p=0.05,

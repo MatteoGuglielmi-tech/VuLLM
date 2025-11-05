@@ -18,6 +18,13 @@ def get_parser():
     )
     model_group = parser.add_argument_group("Model arguments")
     model_group.add_argument(
+        "--max_lengths",
+        type=int,
+        nargs="+",
+        default=None,
+        help="List of max sequence lengths for each judge (Order matters!!)."
+    )
+    model_group.add_argument(
         "--max_new_tokens", "-m",
         type=int, default=256,
         help="Maximum tokens for generation completion.",
@@ -158,6 +165,9 @@ def validate_args(args):
 
         if invalid_args:
             raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode")
+
+    if len(args.max_lengths) > 3:
+        raise ValueError("Jury consists in 3 judges!!")
 
     return args
 
