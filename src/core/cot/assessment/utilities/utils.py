@@ -460,5 +460,5 @@ def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
             "filtering_stats": output_folder / "filtering_stats.json",
         }
     elif args.sequential:
-        args.output_path.parent.mkdir(parents=True, exists_ok=True)
+        args.output_path.parent.mkdir(parents=True, exist_ok=True)
 
