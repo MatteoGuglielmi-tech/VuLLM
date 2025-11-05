@@ -1,11 +1,15 @@
-from contextlib import contextmanager
 import inspect
 import json
+import logging
+import gc
+import torch
 
 from collections.abc import Generator
-from typing import Any, Callable, Iterable, Literal
+from collections.abc import Sized as ABCSized
+from typing import Any, Callable, Iterable, Literal, TypeVar
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
+from contextlib import contextmanager
 
 from rich.align import AlignMethod, Align
 from rich.console import Console, JustifyMethod, Group
@@ -17,23 +21,33 @@ from rich import box
 from rich.progress import (
     BarColumn,
     Progress,
+    SpinnerColumn,
     TextColumn,
     TaskProgressColumn,
     TimeRemainingColumn,
+    TaskID
 )
 from rich.text import TextType
 
 from .decorators import main_process_only
 from ..datatypes import ReasoningSample
 
+
+T = TypeVar('T')
+logger = logging.getLogger(__name__)
 _console = Console()
 _progress = Progress(
-    TextColumn("[bold blue][progress.description]{task.description}"),
+    SpinnerColumn(spinner_name="arc"),
+    TextColumn("{task.description}"),
     BarColumn(),
     TaskProgressColumn(),
-    "•",
+    TextColumn("•"),
+    TextColumn("{task.completed}/{task.total}"),
+    TextColumn("•"),
     TimeRemainingColumn(elapsed_when_finished=True),
-)
+    TextColumn("•"),
+    TextColumn("[cyan]{task.fields[status]}"),  # Custom field
+) 
 
 
 def build_table(
@@ -147,7 +161,7 @@ def rich_panel(
             to_render = Columns(tables, align="center", expand=True)
     else:
         to_render = tables
-    
+
     panel = Panel.fit(
         to_render,
         title=panel_title,
@@ -191,7 +205,7 @@ def rich_rule(
     is_main_process: bool | None = None,
 ):
     """Print a horizontal rule (main process only)."""
-    print("\n")
+    # print("\n")
     _console.rule(title, style=style, align="center")
 
 
@@ -202,41 +216,93 @@ def progress_bar(iterable: Iterable, description="Working ..."):
         yield _progress.track(iterable, description=description)
 
 
-def run_with_status(func: Callable, description: str, *args, **kwargs):
-    """Calls a function with a rich status spinner.
-
+@contextmanager
+def rich_progress_manual(
+    total: int,
+    description: str = "Processing",
+    initial_status: str = "Starting...",
+):
+    """Manual progress bar (like tqdm context manager).
+    
     Parameters
     ----------
-    func, Callable
-        The callable function to execute.
-    description, str
-        The text to display in the status.
-    *args
-        Positional arguments to pass to 'func'.
-    **kwargs
-        Keyword arguments to pass to 'func'.
+    total : int
+        Total number of items (required)
+    description : str
+        Description to display
+    initial_status : str
+        Initial status message
+    """
+    
+    class ProgressController:
+        def __init__(self, progress: Progress, task: TaskID):
+            self.progress = progress
+            self.task = task
+        
+        def update(self, advance: int = 1):
+            self.progress.update(self.task, advance=advance)
+        
+        def set_postfix(self, postfix: dict[str, Any]):
+            status = ", ".join(f"{k}={v}" for k, v in postfix.items())
+            self.progress.update(self.task, status=status)
+        
+        def set_description(self, description: str):
+            self.progress.update(self.task, description=description)
+    
+    with _progress as progress:
+        task = progress.add_task(description=description, total=total, status=initial_status)
+        controller = ProgressController(progress, task)
+        yield controller
 
-    Returns
-    -------
-        The return value of the 'func' call.
+
+def rich_progress(
+    iterable: Iterable[T],
+    total: int | None = None,
+    description: str = "Processing",
+    initial_status: str = "Starting...",
+    running_status: str = "Running..."
+):
+    """Automatic progress bar (iterator wrapper).
+    
+    Parameters
+    ----------
+    iterable : Iterable
+        Items to iterate over
+    total : int | None
+        Total count. If None, tries len(iterable)
+    description : str
+        Description to display
     """
 
-    try:
-        sig = inspect.signature(func)
-        sig.bind(*args, **kwargs)
-    except TypeError:
-        rich_exception()
-        return
+    if total is None:
+        # Check if iterable is Sized (has __len__)
+        if isinstance(iterable, ABCSized):
+            total = len(iterable)
+        else:
+            raise ValueError(
+                "Must provide 'total' when iterable doesn't support len(). "
+                "Try: rich_progress_advanced(iterable, total=<count>)"
+            )
+    
+    with _progress as progress:
+        task = progress.add_task(description=description, total=total, status=initial_status)
+        for item in iterable:
+            yield item
+            progress.update(task, advance=1, status=running_status)
 
-    with _console.status(description, spinner="clock") as status:
+
+@contextmanager
+def rich_status(description: str, spinner: str = "clock"):
+    """Context manager for rich status spinner."""
+    with _console.status(description, spinner=spinner) as s:
         try:
-            result = func(*args, **kwargs)
-            status.update(f"{description} [bold green]Done[/bold green]")
-            return result
+            yield s
+            s.update(f"{description} [bold green]✓ Done[/bold green]")
         except Exception:
-            status.stop()
+            s.stop()
             rich_exception()
             raise
+
 
 def get_instruction_response_parts(tokenizer) -> tuple[str, str]:
     """Automatically extract instruction and response parts from chat template.
@@ -298,16 +364,49 @@ def get_instruction_response_parts(tokenizer) -> tuple[str, str]:
             f"Template: {chat_template[:200]}"
         )
 
+
 def cleanup_resources(accelerator):
-    # Cleanup
-    accelerator.wait_for_everyone()  # Synchronize all processes
-    accelerator.free_memory()  # Free GPU memory
+    """
+    Cleanup with Accelerate support.
+    """
+    logger.info("Cleaning up resources...")
 
-    if accelerator.state.distributed_type != "NO":
-        import torch.distributed as dist
+    try:
+        # Synchronize all processes
+        accelerator.wait_for_everyone()
+        logger.info("✓ Processes synchronized")
+    except Exception:
+        logger.exception(f"During waiting for everyone to align, an error has occured")
 
-        if dist.is_initialized():
-            dist.destroy_process_group()
+    try:
+        # Free GPU memory
+        accelerator.free_memory()
+        logger.info("✓ GPU memory freed")
+    except Exception:
+        logger.exception(f"While freeing memory, an error has occured")
+
+    try:
+        # Destroy distributed process group
+        if accelerator.state.distributed_type != "NO":
+            import torch.distributed as dist
+
+            if dist.is_available() and dist.is_initialized():
+                dist.destroy_process_group()
+                logger.info("✓ Distributed process group destroyed")
+    except Exception:
+        logger.exception(f"During distribution cleanup, an error has occured")
+
+    try:
+        # Additional CUDA cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            logger.info("✓ CUDA cache cleared")
+    except Exception:
+        logger.exception(f"An error has occured during CUDA cleanup")
+
+    gc.collect()
+    logger.info("✓ Cleanup complete")
 
 
 def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, None]:
@@ -328,8 +427,8 @@ def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, Non
                     sample_id=data.get("sample_id", f"sample_{idx}"),
                 )
 
-            except (json.JSONDecodeError, KeyError) as e:
-                _console.log(f"Error parsing line {idx}:\n{e}", style=Style(color="red", bold=True, underline=True))
+            except (json.JSONDecodeError, KeyError):
+                logger.exception(f"Error parsing line {idx}", stack_info=True)
                 continue
 
 
@@ -350,7 +449,7 @@ def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
     rich_panel(tab, panel_title= "CLI Arguments", border_style="royal_blue1")
     rich_rule()
  
-    if args.ensemble:
+    if args.ensemble or args.merge:
         output_folder: Path = custom_args["output"] # type: ignore
         output_folder.mkdir(parents=True, exist_ok=True)
 
