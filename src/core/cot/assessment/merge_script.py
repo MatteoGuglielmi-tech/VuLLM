@@ -73,6 +73,7 @@ def aggregate_judge_evaluations(all_records: list[dict]) -> dict[str, dict[str, 
 def merge_and_filter(
     original_data: Path,
     judge_files: list[Path],
+    judge_configs: list[JudgeConfig],
     output_kept: Path,
     output_rejected: Path,
     stats_json_path: Path,
@@ -101,33 +102,6 @@ def merge_and_filter(
 
     logger.info(f"Loaded evaluations for {len(sample_evals)} samples")
 
-    # Create ensemble
-    judge_configs: list[JudgeConfig] = [
-        JudgeConfig(
-            model_name="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
-            ref_name="Qwen2.5-Coder-32B",
-            chat_template="qwen-2.5",
-            specialization="code",
-            description="Specialized in C/C++ vulnerability patterns and code analysis",
-        ),
-        JudgeConfig(
-            model_name="unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit",
-            ref_name="Llama-3.1-70B",
-            chat_template="llama-3.1",
-            specialization="reasoning",
-            description="Deep reasoning model for logical flow and completeness",
-        ),
-        JudgeConfig(
-            model_name="unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
-            chat_template="qwen-2.5",
-            ref_name="DeepSeek-R1-Distill-Qwen-32B",
-            temperature=0.6,
-            top_p=0.95,
-            min_p=0.05,
-            specialization="logic",
-            description="Mathematical and logical reasoning specialist",
-        ),
-    ]
     ensemble = JudgeEnsemble(judge_configs)
 
     # Process and filter

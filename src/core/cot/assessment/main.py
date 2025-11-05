@@ -125,6 +125,7 @@ def main():
             stats = merge_and_filter(
                 original_data=args.input_jsonl,
                 judge_files=[args.judge1, args.judge2, args.judge3],
+                judge_configs=list(judge_configs.values()),
                 output_kept=paths["filtered"],
                 output_rejected=paths["rejected"],
                 stats_json_path=paths["filtering_stats"],
