@@ -1,4 +1,4 @@
-from .detection import is_main_process
+from .detection import is_main_process, init_accelerator
 from .decorators import main_process_only
 from .utils import (
     rich_table,
@@ -10,6 +10,7 @@ from .utils import (
     rich_progress,
     rich_progress_manual,
     build_table,
+    display_env_info,
     progress_bar,
     get_instruction_response_parts,
     cleanup_resources,
@@ -22,6 +23,7 @@ from .utils import (
 __all__ = [
     # detection
     "is_main_process",
+    "init_accelerator",
     # decorators
     "main_process_only",
     # utils
@@ -34,6 +36,7 @@ __all__ = [
     "rich_progress",
     "rich_progress_manual",
     "build_table",
+    "display_env_info",
     "progress_bar",
     "cleanup_resources",
     "cleanup_single_gpu",

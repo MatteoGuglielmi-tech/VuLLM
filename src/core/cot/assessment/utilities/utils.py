@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import gc
@@ -17,6 +18,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.columns import Columns
 from rich import box
+from rich.measure import Measurement
 from rich.progress import (
     BarColumn,
     Progress,
@@ -30,6 +32,7 @@ from rich.text import TextType
 
 from .decorators import main_process_only
 from ..datatypes import ReasoningSample
+from .detection import get_accelerator_config
 
 
 T = TypeVar('T')
@@ -80,8 +83,10 @@ def rich_table(
     data: dict[str, Any] | Namespace | Table,
     title: str = "",
     columns: list[str] = [],
+    justify: JustifyMethod = "center",
     pre_desc: str | None = None,
     post_desc: str | None = None,
+    allow_wrap: bool = False,
     is_main_process: bool | None = None,
 ):
     """Display a rich table with data.
@@ -112,7 +117,7 @@ def rich_table(
 
     if pre_desc:
         _console.print(pre_desc)
-    _console.print(data, justify="center", no_wrap=True)
+    _console.print(data, justify=justify, no_wrap=not allow_wrap)
     if post_desc:
         _console.print(post_desc)
 
@@ -124,13 +129,14 @@ def rich_panel(
     subtitle: TextType | None = None,
     border_style: StyleType = "red",
     align: AlignMethod = "center",
-    padding: tuple = (0, 1), 
-    justify: JustifyMethod | None = "center",
+    panel_padding: tuple = (0, 1),
+    grid_padding: tuple = (0, 3),
+    panel_align: Literal["left", "center", "right"] = "center",
     allow_wrap: bool = False,
-    layout: Literal["vertical", "horizontal"] = "horizontal"
+    layout: Literal["vertical", "horizontal"] = "horizontal",
 ):
     """Display table(s) in a centered panel.
-    
+
     Parameters
     ----------
     tables : list[Table] | Table
@@ -145,8 +151,8 @@ def rich_panel(
         Alignment for panel title/subtitle.
     padding : tuple
         Padding inside the panel (vertical, horizontal).
-    justify : {"default", "left", "center", "right", "full"}, optional
-        Justification for the panel itself.
+    panel_align : {"left", "center", "right"}, optional
+        Where to align the panel.
     allow_wrap : bool
         Whether to allow content wrapping.
     layout : {"vertical", "horizontal"}
@@ -154,10 +160,14 @@ def rich_panel(
     """
     if isinstance(tables, list):
         if layout == "vertical":
-            centered_tables = [Align.center(table) for table in tables]
-            to_render = Group(*centered_tables)
+            to_render = Group(*[Align.center(table) for table in tables])
         else:
-            to_render = Columns(tables, align="center", expand=True)
+            container = Table.grid(padding=grid_padding, expand=False)
+            for _ in tables:
+                container.add_column()
+
+            container.add_row(*tables)
+            to_render = container
     else:
         to_render = tables
 
@@ -168,9 +178,18 @@ def rich_panel(
         border_style=border_style,
         title_align=align,
         subtitle_align=align,
-        padding=padding,
+        padding=panel_padding,
     )
-    _console.print(panel, justify=justify, no_wrap=not allow_wrap)
+
+    if panel_align == "left":
+        aligned_panel = Align.left(panel)
+    elif panel_align == "right":
+        aligned_panel = Align.right(panel)
+    else:
+        aligned_panel = Align.center(panel)
+
+    _console.print(aligned_panel, no_wrap=not allow_wrap)
+
 
 @main_process_only
 def rich_print(
@@ -463,25 +482,10 @@ def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, Non
                 continue
 
 
-def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
-    """Display custom CLI arguments in a formatted table."""
-    args = parser.parse_args()
-
-    BUILTIN_GROUPS = {"positional arguments", "options"}
-
-    custom_args = {
-        action.dest: getattr(args, action.dest, None)
-        for group in parser._action_groups
-        if group.title not in BUILTIN_GROUPS
-        for action in group._group_actions
-    }
-
-    tab = build_table(data=custom_args, columns=["Name", "Value"])
-    rich_panel(tab, panel_title= "CLI Arguments", border_style="royal_blue1")
-    rich_rule()
- 
+def setup_paths(args: Namespace) -> dict[str, Path] | None:
+    """Setup necessary directories."""
     if args.ensemble or args.merge:
-        output_folder: Path = custom_args["output"] # type: ignore
+        output_folder: Path = args.output
         output_folder.mkdir(parents=True, exist_ok=True)
 
         return {
@@ -493,3 +497,68 @@ def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
     elif args.sequential:
         args.output_path.parent.mkdir(parents=True, exist_ok=True)
 
+
+@main_process_only
+def display_env_info(parser: ArgumentParser, args: Namespace):
+    # env settings
+    cpus_allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
+    accelerator = get_accelerator_config()
+
+    data = {
+        "distributed type": accelerator.distributed_type.name,
+        "Num processes": accelerator.num_processes,
+        "Mixed precision": accelerator.mixed_precision,
+        "Num SLURM CPUs": cpus_allocated,
+    }
+    if accelerator.state.deepspeed_plugin is not None:
+        data["DEEPSPEED"] = "ENABLED"
+        data["ZeRO Stage"] = accelerator.state.deepspeed_plugin.zero_stage
+        data["Offload optimizer"]=accelerator.state.deepspeed_plugin.offload_optimizer_device
+        data["Offload params"]=accelerator.state.deepspeed_plugin.offload_param_device
+    else:
+        data["DEEPSPEED"] = "DISABLED"
+
+    acc = build_table(data=data, title="Meta information", columns=["Parameter", "Value"])
+
+    # cli args
+    # BUILTIN_GROUPS = {"positional arguments", "options"}
+    MANDATORY_GROUPS = ["Path mandatory arguments", "Model arguments"]
+
+    if args.ensemble:
+        MANDATORY_GROUPS.extend(["Shared arguments between `ensemble` and `merge` modes", "Ensemble mode only arguments"])
+        custom_args = {
+            action.dest: getattr(args, action.dest, None)
+            for group in parser._action_groups
+            if group.title in set(MANDATORY_GROUPS)
+            for action in group._group_actions
+        }
+    elif args.sequential:
+        MANDATORY_GROUPS.extend(["Sequential mode only arguments"])
+        custom_args = {
+            action.dest: getattr(args, action.dest, None)
+            for group in parser._action_groups
+            if group.title in set(MANDATORY_GROUPS)
+            for action in group._group_actions
+        }
+    else: # merge
+        MANDATORY_GROUPS.extend(["Shared arguments between `ensemble` and `merge` modes", "Merge script only arguments"])
+        custom_args = {
+            action.dest: getattr(args, action.dest, None)
+            for group in parser._action_groups
+            if group.title in set(MANDATORY_GROUPS)
+            for action in group._group_actions
+        }
+
+    cli = build_table(
+        data=custom_args, title="CLI arguments", columns=["Name", "Value"]
+    )
+    rich_rule()
+    rich_panel(
+        tables=[acc, cli],
+        panel_title="Run settings",
+        border_style="royal_blue1",
+        panel_align="left",
+        panel_padding=(1, 2),
+        grid_padding=(1, 2),
+    )
+    rich_rule()

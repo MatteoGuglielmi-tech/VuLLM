@@ -1,6 +1,9 @@
 import os
 
+from accelerate import Accelerator
+
 _IS_MAIN_PROCESS: bool | None = None  # cache
+_ACCELERATOR: Accelerator | None = None
 
 
 def is_main_process() -> bool:
@@ -41,3 +44,16 @@ def detect_main_process() -> bool:
             return check_rank(rank)
 
     return True
+
+
+def get_accelerator_config():
+    global _ACCELERATOR
+    if _ACCELERATOR is None:
+        _ACCELERATOR = init_accelerator()
+    return _ACCELERATOR
+
+
+def init_accelerator():
+    accelerator = Accelerator()
+    return accelerator
+
