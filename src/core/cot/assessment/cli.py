@@ -18,13 +18,6 @@ def get_parser():
     )
     model_group = parser.add_argument_group("Model arguments")
     model_group.add_argument(
-        "--max_lengths",
-        type=int,
-        nargs="+",
-        default=[8192, 8192, 8192],
-        help="List of max sequence lengths for each judge (Order matters!!)."
-    )
-    model_group.add_argument(
         "--max_new_tokens", "-m",
         type=int, default=256,
         help="Maximum tokens for generation completion.",
@@ -72,13 +65,30 @@ def get_parser():
         help="Type of agreement to compute",
     )
     # ============================================================================
+    # ENSEMBLE ARGUMENTS
+    # ============================================================================
+    ensemble_group = parser.add_argument_group("Ensemble mode only arguments")
+    ensemble_group.add_argument(
+        "--max_lengths",
+        type=int,
+        nargs="+",
+        default=[8192, 8192, 8192],
+        help="List of max sequence lengths for each judge (Order matters!!)."
+    )
+    # ============================================================================
     # SEQUENTIAL ARGUMENTS
     # ============================================================================
     sequential_group = parser.add_argument_group("Sequential mode only arguments")
     sequential_group.add_argument(
         "--judge", "-j",
-        type=str, choices=["qwen-coder", "llama-3.1-70B", "deepseek-qwen"],
+        type=str, choices=["qwen-coder", "qwen-72b", "llama-3.3", "deepseek-qwen", "deepseek-llama"],
         help="Name of the judge model to use.",
+    )
+    sequential_group.add_argument(
+        "--max_length",
+        type=int,
+        default=8192,
+        help="Max sequence length the model needs to be able to process.",
     )
     sequential_group.add_argument("--output_path", "-op", type=Path, help="Output filepath.")
     # ============================================================================
@@ -101,8 +111,8 @@ def validate_args(args):
     Call this after parsing arguments.
     """
 
-    ensemble_only = {}
-    sequential_only = {"output_path", "judge"}
+    ensemble_only = {"max_lengths"}
+    sequential_only = {"output_path", "judge", "max_length"}
     merge_only = {"judge_files"}
     shared = {
         "output",
@@ -177,6 +187,7 @@ def get_default_value(arg_name):
 
     defaults = {
         # ensemble mode only
+        "max_lengths": [8192, 8192, 8192],
         "output": None,
         "assets": None,
         "quality_threshold": 0.6,
@@ -184,6 +195,7 @@ def get_default_value(arg_name):
         "agreement_method": "weighted_multidimensional",
         # sequential only
         "judge": None,
+        "max_length": 8192,
         "output_path": None,
         # merge only
         "judge_files": None
