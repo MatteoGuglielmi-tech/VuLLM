@@ -1,15 +1,15 @@
-import time
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
+import re
+import gc
+import time
 import json
 import torch
 import logging
-import gc
 import numpy as np
 
 from dataclasses import dataclass, field
-
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .judge_types import JudgeConfig
@@ -234,7 +234,6 @@ class LLMJudge:
             gc.collect()
             torch.cuda.empty_cache()
 
-        with rich_status(description=f"Sleeping for 10 second to finish releasing", spinner="arc"):
             time.sleep(10)
 
     def _create_judging_prompt(self, sample: ReasoningSample) -> list[dict[str,str]]:
@@ -334,20 +333,28 @@ class LLMJudge:
             Parsed and validated evaluation result
         """
 
-        pretty_name = self.judge_config.model_name.split("/")[1]
+        def _clean_from_backslashes(text: str):
+            if not "//" in text:
+                return text
+
+            lines = re.sub(pattern=r"//.*", repl="", string=text).splitlines()
+            lines = list(map(lambda x: x.strip(), lines))
+
+            return "\n".join(lines)
+
         try:
             json_start = response.find("{")
             json_end = response.rfind("}") + 1
 
             if json_start >= 0 and json_end > json_start:
                 json_str = response[json_start:json_end]
-                result = json.loads(json_str)
+                result = json.loads(_clean_from_backslashes(json_str))
             else:
                 raise ValueError("No JSON found in response")
 
             # Validate and clip all scores to [0, 1]
             return EvaluationResult(
-                judge_name=pretty_name,
+                judge_name=self.judge_config.ref_name,
                 quality_score=float(np.clip(result.get("quality_score", 0.5), 0, 1)),
                 correctness=float(np.clip(result.get("correctness", 0.5), 0, 1)),
                 completeness=float(np.clip(result.get("completeness", 0.5), 0, 1)),
@@ -362,7 +369,7 @@ class LLMJudge:
         except (json.JSONDecodeError, ValueError, KeyError):
             # Return fallback evaluation
             return EvaluationResult(
-                judge_name=pretty_name,
+                judge_name=self.judge_config.ref_name,
                 quality_score=0.5,
                 correctness=0.5,
                 completeness=0.5,
