@@ -80,8 +80,13 @@ def get_parser():
     # ============================================================================
     sequential_group = parser.add_argument_group("Sequential mode only arguments")
     sequential_group.add_argument(
-        "--judge", "-j",
-        type=str, choices=["qwen-coder", "qwen-72b", "llama-3.3", "deepseek-qwen", "deepseek-llama"],
+        "--judge",
+        "-j",
+        type=str,
+        choices=[
+            "qwen-coder", "qwen-72b", "phi-4",
+            "llama-3.3", "deepseek-llama", 
+        ],
         help="Name of the judge model to use.",
     )
     sequential_group.add_argument(
