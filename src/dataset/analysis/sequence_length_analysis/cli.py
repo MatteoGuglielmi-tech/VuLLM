@@ -3,15 +3,16 @@ import argparse
 import logging
 
 from pathlib import Path
-from .utilities import rich_exception, rich_print
+from .utilities import rich_exception
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_TOKENIZER_LIST = [
-    "unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit",
     "unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
-    "unsloth/DeepSeek-R1-Distill-Qwen-32B-bnb-4bit",
+    "unsloth/Qwen2.5-72B-Instruct-bnb-4bit",
+    "unsloth/Phi-4-reasoning-plus-unsloth-bnb-4bit",
+    "unsloth/Llama-3.3-70B-Instruct-bnb-4bit",
     "unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit",
 ]
 

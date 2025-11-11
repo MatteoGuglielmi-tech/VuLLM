@@ -1,36 +1,40 @@
 from contextlib import contextmanager
-import json
 
-from collections.abc import Generator
-from typing import Any, Iterable, Literal
-from argparse import ArgumentParser, Namespace
-from pathlib import Path
+from collections.abc import Sized as ABCSized
+from typing import Any, Iterable, Literal, TypeVar
+from argparse import Namespace
 
 from rich.align import Align, AlignMethod
-from rich.console import Console, JustifyMethod, Group
-from rich.style import Style, StyleType
+from rich.console import Console, Group
+from rich.text import TextType
+from rich.style import StyleType
 from rich.table import Table
 from rich.panel import Panel
-from rich.columns import Columns
 from rich import box
 from rich.progress import (
     BarColumn,
     Progress,
+    SpinnerColumn,
     TextColumn,
     TaskProgressColumn,
     TimeRemainingColumn,
+    TaskID,
 )
-from rich.text import TextType
 
-from ..datatypes import ReasoningSample
 
+T = TypeVar("T")
 _console = Console()
 _progress = Progress(
-    TextColumn("[bold blue][progress.description]{task.description}"),
+    SpinnerColumn(spinner_name="arc"),
+    TextColumn("{task.description}"),
     BarColumn(),
     TaskProgressColumn(),
-    "•",
+    TextColumn("•"),
+    TextColumn("{task.completed}/{task.total}"),
+    TextColumn("•"),
     TimeRemainingColumn(elapsed_when_finished=True),
+    TextColumn("•"),
+    TextColumn("[cyan]{task.fields[status]}"),  # Custom field
 )
 
 
@@ -105,8 +109,9 @@ def rich_panel(
     subtitle: TextType | None = None,
     border_style: StyleType = "red",
     align: AlignMethod = "center",
-    padding: tuple = (0, 1),
-    justify: JustifyMethod | None = "center",
+    panel_padding: tuple = (0, 1),
+    grid_padding: tuple = (0, 3),
+    panel_align: Literal["left", "center", "right"] = "center",
     allow_wrap: bool = False,
     layout: Literal["vertical", "horizontal"] = "horizontal",
 ):
@@ -126,8 +131,8 @@ def rich_panel(
         Alignment for panel title/subtitle.
     padding : tuple
         Padding inside the panel (vertical, horizontal).
-    justify : {"default", "left", "center", "right", "full"}, optional
-        Justification for the panel itself.
+    panel_align : {"left", "center", "right"}, optional
+        Where to align the panel.
     allow_wrap : bool
         Whether to allow content wrapping.
     layout : {"vertical", "horizontal"}
@@ -135,10 +140,14 @@ def rich_panel(
     """
     if isinstance(tables, list):
         if layout == "vertical":
-            centered_tables = [Align.center(table) for table in tables]
-            to_render = Group(*centered_tables)
+            to_render = Group(*[Align.center(table) for table in tables])
         else:
-            to_render = Columns(tables, align="center", expand=True)
+            container = Table.grid(padding=grid_padding, expand=False)
+            for _ in tables:
+                container.add_column()
+
+            container.add_row(*tables)
+            to_render = container
     else:
         to_render = tables
 
@@ -149,17 +158,17 @@ def rich_panel(
         border_style=border_style,
         title_align=align,
         subtitle_align=align,
-        padding=padding,
+        padding=panel_padding,
     )
-    _console.print(panel, justify=justify, no_wrap=not allow_wrap)
 
+    if panel_align == "left":
+        aligned_panel = Align.left(panel)
+    elif panel_align == "right":
+        aligned_panel = Align.right(panel)
+    else:
+        aligned_panel = Align.center(panel)
 
-def rich_print(
-    message: str,
-    style: str = "",
-):
-    """Print with rich styling (main process only)."""
-    _console.print(message, style=style)
+    _console.print(aligned_panel, no_wrap=not allow_wrap)
 
 
 def rich_exception():
@@ -191,8 +200,86 @@ def progress_bar(iterable: Iterable, description="Working ..."):
         yield _progress.track(iterable, description=description)
 
 
+def rich_progress_manual(
+    total: int,
+    description: str = "Processing",
+    initial_status: str = "Starting...",
+):
+    """Manual progress bar (like tqdm context manager).
+
+    Parameters
+    ----------
+    total : int
+        Total number of items (required)
+    description : str
+        Description to display
+    initial_status : str
+        Initial status message
+    """
+
+    class ProgressController:
+        def __init__(self, progress: Progress, task: TaskID):
+            self.progress = progress
+            self.task = task
+
+        def update(self, advance: int = 1):
+            self.progress.update(self.task, advance=advance)
+
+        def set_postfix(self, postfix: dict[str, Any]):
+            status = ", ".join(f"{k}={v}" for k, v in postfix.items())
+            self.progress.update(self.task, status=status)
+
+        def set_description(self, description: str):
+            self.progress.update(self.task, description=description)
+
+    with _progress as progress:
+        task = progress.add_task(
+            description=description, total=total, status=initial_status
+        )
+        controller = ProgressController(progress, task)
+        yield controller
+
+
+def rich_progress(
+    iterable: Iterable[T],
+    total: int | None = None,
+    description: str = "Processing",
+    initial_status: str = "Starting...",
+    running_status: str = "Running...",
+):
+    """Automatic progress bar (iterator wrapper).
+
+    Parameters
+    ----------
+    iterable : Iterable
+        Items to iterate over
+    total : int | None
+        Total count. If None, tries len(iterable)
+    description : str
+        Description to display
+    """
+
+    if total is None:
+        # Check if iterable is Sized (has __len__)
+        if isinstance(iterable, ABCSized):
+            total = len(iterable)
+        else:
+            raise ValueError(
+                "Must provide 'total' when iterable doesn't support len(). "
+                "Try: rich_progress_advanced(iterable, total=<count>)"
+            )
+
+    with _progress as progress:
+        task = progress.add_task(
+            description=description, total=total, status=initial_status
+        )
+        for item in iterable:
+            yield item
+            progress.update(task, advance=1, status=running_status)
+
+
 @contextmanager
-def status(description: str, spinner: str = "clock"):
+def rich_status(description: str, spinner: str = "clock"):
     """Context manager for rich status spinner."""
     with _console.status(description, spinner=spinner) as s:
         try:
@@ -202,67 +289,6 @@ def status(description: str, spinner: str = "clock"):
             s.stop()
             rich_exception()
             raise
-
-
-def get_instruction_response_parts(tokenizer) -> tuple[str, str]:
-    """Automatically extract instruction and response parts from chat template.
-
-    Returns
-    -------
-    tuple[str, str]
-        (instruction_part, response_part)
-    """
-
-    chat_template = tokenizer.chat_template
-
-    if not chat_template:
-        raise ValueError("Tokenizer has no chat template!")
-
-    patterns = {
-        # Llama 3+
-        "llama": (
-            "<|start_header_id|>user<|end_header_id|>\n\n",
-            "<|start_header_id|>assistant<|end_header_id|>\n\n",
-        ),
-        # Qwen 2.5
-        "qwen": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # ChatML (generic)
-        "chatml": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # Mistral
-        "mistral": (
-            "[INST]",
-            "[/INST]",
-        ),
-        # Zephyr
-        "zephyr": (
-            "<|user|>\n",
-            "<|assistant|>\n",
-        ),
-    }
-
-    # Detect based on template content
-    template_lower = chat_template.lower()
-
-    if "start_header_id" in template_lower:
-        return patterns["llama"]
-    elif "im_start" in template_lower or "qwen" in template_lower:
-        return patterns["qwen"]
-    elif "[inst]" in template_lower:
-        return patterns["mistral"]
-    elif "<|user|>" in template_lower:
-        return patterns["zephyr"]
-    else:
-        raise ValueError(
-            f"Could not detect chat template format. "
-            f"Please specify instruction_part and response_part manually.\n"
-            f"Template: {chat_template[:200]}"
-        )
 
 
 def cleanup_resources(accelerator):
@@ -276,58 +302,3 @@ def cleanup_resources(accelerator):
         if dist.is_initialized():
             dist.destroy_process_group()
 
-
-def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, None]:
-    """Iterate over JSONL file, yielding ReasoningSample objects."""
-
-    with open(file=jsonl_path, mode="r", encoding="utf-8") as f:
-        for idx, line in enumerate(f):
-            try:
-                data = json.loads(line.strip())
-
-                yield ReasoningSample(
-                    project=data["project"],
-                    cwe=data["cwe"],
-                    target=data["target"],
-                    func=data["func"],
-                    cwe_desc=data["cwe_desc"],
-                    reasoning=data["reasoning"],
-                )
-
-            except (json.JSONDecodeError, KeyError) as e:
-                _console.log(
-                    f"Error parsing line {idx}:\n{e}",
-                    style=Style(color="red", bold=True, underline=True),
-                )
-                continue
-
-
-def setup_paths(parser: ArgumentParser) -> dict[str, Path] | None:
-    """Display custom CLI arguments in a formatted table."""
-    args = parser.parse_args()
-
-    BUILTIN_GROUPS = {"positional arguments", "options"}
-
-    custom_args = {
-        action.dest: getattr(args, action.dest, None)
-        for group in parser._action_groups
-        if group.title not in BUILTIN_GROUPS
-        for action in group._group_actions
-    }
-
-    tab = build_table(data=custom_args, columns=["Name", "Value"])
-    rich_panel(tab, panel_title="CLI Arguments", border_style="royal_blue1")
-    rich_rule()
-
-    if args.ensemble:
-        output_folder: Path = custom_args["output"]  # type: ignore
-        output_folder.mkdir(parents=True, exist_ok=True)
-
-        return {
-            "filtered": output_folder / "best_reasonings.jsonl",
-            "rejected": output_folder / "rejected_reasonings.jsonl",
-            "metadata": output_folder / "judge_config.json",
-            "filtering_stats": output_folder / "filtering_stats.json",
-        }
-    elif args.sequential:
-        args.output_path.parent.mkdir(parents=True, exists_ok=True)

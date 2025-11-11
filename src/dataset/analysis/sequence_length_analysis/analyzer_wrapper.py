@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
-from .utilities import status, build_table, rich_panel, rich_rule
+from .utilities import rich_status, build_table, rich_panel, rich_rule
 from .analyzers import BaseSequenceLengthAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,10 @@ def analyze_single_tokenizer(
     logger.info(f"🚀 Starting analysis with tokenizer: {tokenizer_name}")
 
     try:
-        with status(description=f"📦 Loading tokenizer..."):
+        with rich_status(description=f"📦 Loading tokenizer..."):
             tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        with status(description=f"📊 Initializing analyzer"):
+        with rich_status(description=f"📊 Initializing analyzer"):
             analyzer = analyzer_type(tokenizer=tokenizer)
 
         stats = analyzer.analyze_dataset(

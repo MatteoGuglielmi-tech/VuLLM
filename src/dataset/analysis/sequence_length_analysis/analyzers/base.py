@@ -12,9 +12,7 @@ from tqdm import tqdm
 from abc import ABC, abstractmethod
 from transformers import PreTrainedTokenizer
 
-from src.core.cot.assessment.utilities.utils import build_table, rich_panel
-
-from ..utilities import rich_rule
+from ..utilities import rich_rule, build_table, rich_panel
 from ..datatypes import ReasoningSample, TokensStats
 from ..loader_config import Loader
 
@@ -173,7 +171,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         stats = TokenStats()
         sample_count = 0
 
-        for entry in tqdm(self.stream_jsonl(jsonl_path), total=23836, desc="Analyzing samples"):
+        with open(jsonl_path, mode="r") as f:
+            total_lines = sum(1 for _ in f)
+
+        for entry in tqdm(self.stream_jsonl(jsonl_path), total=total_lines, desc="Analyzing samples"):
             if max_samples and sample_count >= max_samples:
                 break
 
@@ -501,7 +502,7 @@ class BaseSequenceLengthAnalyzer(ABC):
             table,
             panel_title="📋 MAX_SEQ_LENGTH RECOMMENDATIONS 📋",
             border_style="royal_blue1",
-            justify="center",
+            panel_padding=(1, 2),
         )
         rich_rule()
 
@@ -521,5 +522,7 @@ class BaseSequenceLengthAnalyzer(ABC):
             tables,
             panel_title="🚨 RECOMMENDATIONS 🚨",
             border_style="yellow1",
+            panel_padding=(1, 2),
+            grid_padding=(1, 3),
         )
         rich_rule()
