@@ -21,9 +21,9 @@ echo "✅ Triton cache: $TRITON_CACHE_DIR"
 python DoneBot/src/notify.py \
 	--cmd python -m src.core.cot.assessment.main \
 	--sequential \
-	--input ./DiverseVul/processed/safe.jsonl \
+	--input ./DiverseVul/selected/safe.jsonl \
 	--output_path ./DiverseVul/assessed/deepseek_safe.jsonl \
-	--judge deepseek-qwen \
+	--judge deepseek-llama \
 	--max_lengths 4096 4096 4096 \
 	--max_new_tokens 256 \
 	--save_interval 500

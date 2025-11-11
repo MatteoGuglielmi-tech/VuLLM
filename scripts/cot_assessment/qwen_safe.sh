@@ -21,7 +21,7 @@ echo "✅ Triton cache: $TRITON_CACHE_DIR"
 python DoneBot/src/notify.py \
 	--cmd python -m src.core.cot.assessment.main \
 	--sequential \
-	--input ./DiverseVul/processed/safe.jsonl \
+	--input ./DiverseVul/selected/safe.jsonl \
 	--output_path ./DiverseVul/assessed/qwen_safe.jsonl \
 	--judge qwen-coder \
 	--max_lengths 4096 4096 4096 \

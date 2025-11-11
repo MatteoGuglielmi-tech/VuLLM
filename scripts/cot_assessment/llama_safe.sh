@@ -21,7 +21,7 @@ echo "✅ Triton cache: $TRITON_CACHE_DIR"
 python DoneBot/src/notify.py \
 	--cmd python -m src.core.cot.assessment.main \
 	--sequential \
-	--input ./DiverseVul/processed/safe.jsonl \
+	--input ./DiverseVul/selected/safe.jsonl \
 	--output_path ./DiverseVul/assessed/llama_safe.jsonl \
 	--judge llama-3.1-70B \
 	--max_lengths 4096 4096 4096 \

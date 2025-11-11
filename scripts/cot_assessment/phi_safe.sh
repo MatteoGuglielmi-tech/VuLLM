@@ -12,19 +12,18 @@
 module load CUDA/12.5.0
 module load Python/3.12.3-GCCcore-13.3.0
 
-source vullm/bin/activate
-
 export TRITON_CACHE_DIR=/tmp/$USER/triton_cache
 mkdir -p "$TRITON_CACHE_DIR"
 echo "✅ Triton cache: $TRITON_CACHE_DIR"
 
+source vullm/bin/activate
+
 python DoneBot/src/notify.py \
 	--cmd python -m src.core.cot.assessment.main \
 	--sequential \
-	--input ./DiverseVul/selected/vul.jsonl \
-	--output_path ./DiverseVul/assessed/llama_vul.jsonl \
-	--judge llama-3.1-70B \
-	--max_lengths 4096 4096 4096 \
+	--input ./DiverseVul/selected/safe.jsonl \
+	--output_path ./DiverseVul/assessed/phi_safe.jsonl \
+	--judge phi-4 \
+	--max_length 4096 \
 	--max_new_tokens 256 \
 	--save_interval 500
-
