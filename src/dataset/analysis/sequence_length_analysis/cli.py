@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOKENIZER_LIST = [
     "unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
     "unsloth/Qwen2.5-72B-Instruct-bnb-4bit",
-    "unsloth/Phi-4-reasoning-plus-unsloth-bnb-4bit",
+    "microsoft/Phi-4",
+    "microsoft/Phi-4-reasoning-plus",
     "unsloth/Llama-3.3-70B-Instruct-bnb-4bit",
     "unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit",
 ]

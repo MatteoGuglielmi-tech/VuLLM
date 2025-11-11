@@ -57,7 +57,7 @@ def main():
                 description="Logical reasoning and evaluation specialist"
             ),
             "phi-4": JudgeConfig(
-                model_name="microsoft/Phi-4",  # Standard instruct, NOT reasoning-plus
+                model_name="microsoft/Phi-4",
                 ref_name="Phi-4",
                 chat_template="phi-4",
                 max_seq_length=args.max_length if args.sequential else args.max_lengths[2],
