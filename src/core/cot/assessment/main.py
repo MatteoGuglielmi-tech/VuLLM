@@ -57,7 +57,7 @@ def main():
                 description="Logical reasoning and evaluation specialist"
             ),
             "phi-4": JudgeConfig(
-                model_name="unsloth/Phi-4-reasoning-plus-unsloth-bnb-4bit",
+                model_name="microsoft/Phi-4",  # Standard instruct, NOT reasoning-plus
                 ref_name="Phi-4",
                 chat_template="phi-4",
                 max_seq_length=args.max_length if args.sequential else args.max_lengths[2],
@@ -65,8 +65,8 @@ def main():
                 temperature=0.8,
                 top_p=0.95,
                 top_k=50,
-                specialization="reasoning",
-                description="Mathematical and logical reasoning specialist"
+                specialization="reasoning-quality",
+                description="Mathematical and logical reasoning verification specialist"
             ),
             "llama-3.3": JudgeConfig(
                 model_name="unsloth/Llama-3.3-70B-Instruct-bnb-4bit",
@@ -74,7 +74,7 @@ def main():
                 chat_template="llama-3.3",
                 max_seq_length=args.max_length if args.sequential else args.max_lengths[3],
                 max_new_tokens=args.max_new_tokens,
-                specialization="strong baseline",
+                specialization="deep reasoning",
                 description="Multilinugal model"
             ),
             "deepseek-llama": JudgeConfig(

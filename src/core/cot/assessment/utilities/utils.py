@@ -16,9 +16,7 @@ from rich.console import Console, JustifyMethod, Group
 from rich.style import StyleType
 from rich.table import Table
 from rich.panel import Panel
-from rich.columns import Columns
 from rich import box
-from rich.measure import Measurement
 from rich.progress import (
     BarColumn,
     Progress,
@@ -49,7 +47,7 @@ _progress = Progress(
     TimeRemainingColumn(elapsed_when_finished=True),
     TextColumn("•"),
     TextColumn("[cyan]{task.fields[status]}"),  # Custom field
-) 
+)
 
 
 def build_table(
@@ -557,7 +555,6 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
         tables=[acc, cli],
         panel_title="Run settings",
         border_style="royal_blue1",
-        panel_align="left",
         panel_padding=(1, 2),
         grid_padding=(1, 2),
     )
