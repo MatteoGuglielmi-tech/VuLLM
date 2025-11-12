@@ -13,61 +13,61 @@ from .utilities import (
     count_jsonl_lines,
     rich_progress,
     rich_progress_manual,
-    progress_bar,
-    build_table,
     rich_panel,
+    rich_rule,
+    build_table,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def aggregate_judge_evaluations(all_records: list[dict]) -> dict[str, dict[str, float]]:
-        """
-        Aggregate per-judge criteria scores across all samples using median.
+    """
+    Aggregate per-judge criteria scores across all samples using median.
 
-        Parameters
-        ----------
-        all_records : list[dict]
-            List of all output records containing 'per_judge_evaluations'
+    Parameters
+    ----------
+    all_records : list[dict]
+        List of all output records containing 'per_judge_evaluations'
 
-        Returns
-        -------
-        dict[str, dict[str, float]]
-            Nested dict: {judge_name: {criterion: median_score}}
-            Example: {'Qwen-Coder': {'correctness': 0.82, 'completeness': 0.78, ...}}
-        """
+    Returns
+    -------
+    dict[str, dict[str, float]]
+        Nested dict: {judge_name: {criterion: median_score}}
+        Example: {'Qwen-Coder': {'correctness': 0.82, 'completeness': 0.78, ...}}
+    """
 
-        # Collect all scores per judge per criterion
-        # Structure: {"judge_name": {"criterion": [score1, score2, ...]}}
-        judge_scores = defaultdict(lambda: defaultdict(list))
+    # Collect all scores per judge per criterion
+    # Structure: {"judge_name": {"criterion": [score1, score2, ...]}}
+    judge_scores = defaultdict(lambda: defaultdict(list))
 
-        criteria_names = EvaluationResult.get_criteria_names()
-        criteria_names.append("quality_score")
+    criteria_names = EvaluationResult.get_criteria_names()
+    criteria_names.append("quality_score")
 
-        with progress_bar(
-            all_records,
-            description="🏗️ Collect all scores per judge per criterion 🏗️",
-        ) as records:
-            for record in records:
-                for evaluation in record["per_judge_evaluations"]:
-                    judge_name = evaluation["judge_name"]
-                    for criterion in criteria_names:
-                        if criterion in evaluation:
-                            judge_scores[judge_name][criterion].append(
-                                evaluation[criterion]
-                            )
+    for record in rich_progress(
+        all_records,
+        description="🏗️ Collecting all scores",
+        status_fn=lambda _: "Running ...",
+    ):
+        # for record in records:
+        for evaluation in record["per_judge_evaluations"]:
+            judge_name = evaluation["judge_name"]
+            for criterion in criteria_names:
+                if criterion in evaluation:
+                    judge_scores[judge_name][criterion].append(evaluation[criterion])
 
-        judge_evaluations = {}
-        with progress_bar(
-            judge_scores, description="🧮 Computing median scores 🧮"
-        ) as scores:
-            for judge_name, criteria_dict in scores.items():
-                judge_evaluations[judge_name] = {
-                    criterion.replace("_", " ").title(): np.median(scores)
-                    for criterion, scores in criteria_dict.items()
-                }
+    judge_evaluations = {}
+    for judge_name, criteria_dict in rich_progress(
+        judge_scores.items(),
+        description="📟 Computing median scores",
+        status_fn=lambda _: "Running ...",
+    ):
+        judge_evaluations[judge_name] = {
+            criterion.replace("_", " ").title(): np.median(scores)
+            for criterion, scores in criteria_dict.items()
+        }
 
-        return judge_evaluations
+    return judge_evaluations
 
 
 def merge_and_filter(
@@ -80,7 +80,7 @@ def merge_and_filter(
     agreement_method: str = "weighted_multidimensional",
     agreement_threshold: float = 0.75,
     quality_threshold: float = 0.6,
-    save_interval: int = 100
+    save_interval: int = 100,
 ):
     """Merge judge evaluations and filter dataset."""
 
@@ -92,9 +92,9 @@ def merge_and_filter(
     sample_evals = defaultdict(dict[str, dict[str, EvaluationResult]])
     for judge_file in rich_progress(
         judge_files,
-        total=len(judge_files),
-        description="Loading judge evaluations",
-        status_fn=lambda f: f"Loading {f.name}"
+        # total=len(judge_files),
+        description="⏳ Loading judge evaluations",
+        status_fn=lambda f: f"Loading {f.name}",
     ):
         with jsonlines.open(judge_file) as reader:
             for record in reader:
@@ -122,7 +122,6 @@ def merge_and_filter(
     all_records = []
     judges_refnames = [jc.ref_name for jc in judge_configs]
 
-
     with (
         jsonlines.open(file=output_kept, mode="w") as kept_writer,
         jsonlines.open(file=output_rejected, mode="w") as rejected_writer,
@@ -134,20 +133,24 @@ def merge_and_filter(
             stats["total"] += 1
 
             evals_dict = sample_evals.get(sample.sample_id, {})
-            if len(evals_dict) != len(judges_refnames):
+            if len(evals_dict) != len(judge_files):
                 logger.warning(
                     f"Sample {sample.sample_id} has {len(evals_dict)} evaluations "
-                    f"(expected {len(judges_refnames)}), skipping"
+                    f"(expected {len(judge_files)}), skipping"
                 )
                 continue
 
-            evaluations: list[EvaluationResult] = [evals_dict[judge_name] for judge_name in judges_refnames]
+            evaluations: list[EvaluationResult] = [
+                evals_dict[judge_name] for judge_name in judges_refnames
+            ]
 
             # Compute ensemble metrics
             ensemble_score = ensemble._compute_weighted_score(evaluations)
             agreement = ensemble._compute_agreement(
                 evaluations, method=agreement_method
             )
+            stats["scores"].append(ensemble_score)
+            stats["agreements"].append(agreement)
 
             # Prepare output
             output_record = {
@@ -216,7 +219,9 @@ def merge_and_filter(
 
     # Compute final statistics
     stats["keep_rate"] = stats["kept"] / stats["total"] if stats["total"] > 0 else 0
-    stats["reject_rate"] = stats["rejected"] / stats["total"] if stats["total"] > 0 else 0
+    stats["reject_rate"] = (
+        stats["rejected"] / stats["total"] if stats["total"] > 0 else 0
+    )
     stats["mean_score"] = float(np.mean(stats["scores"]))
     stats["std_score"] = float(np.std(stats["scores"]))
     stats["mean_agreement"] = float(np.mean(stats["agreements"]))
@@ -225,10 +230,16 @@ def merge_and_filter(
 
     data = {
         "Total samples processed": [stats["total"], "/"],
-        "Kept": [stats["kept"], f"{ stats["keep_rate"]:.2% }"],
-        "Rejected": [stats["rejected"], f"{ stats["reject_rate"] :.2% }"],
-        "Mean quality score": [f"{stats['mean_score']:.3f} ± {stats['std_score']:.3f}", "/", ],
-        "Mean quality score": [ f"{stats['mean_agreement']:.3f} ± {stats['std_agreement']:.3f}", "/", ],
+        "Kept": [stats["kept"], f"{stats["keep_rate"]:.2%}"],
+        "Rejected": [stats["rejected"], f"{stats["reject_rate"]:.2%}"],
+        "Mean quality score": [
+            f"{stats['mean_score']:.3f} ± {stats['std_score']:.3f}",
+            "/",
+        ],
+        "Mean quality score": [
+            f"{stats['mean_agreement']:.3f} ± {stats['std_agreement']:.3f}",
+            "/",
+        ],
     }
     res_table = build_table(
         data=data, title="FILTERING RESULTS", columns=["Metric", "Value", "Rate"]
@@ -250,14 +261,37 @@ def merge_and_filter(
             indent=2,
         )
 
+    rich_rule(style="medium_purple1")
     rich_panel(
         tables=[res_table, rejected_table],
         panel_title="🏁 Experiment outcome 🏁",
         subtitle=f"\n✓ Statistics saved to: {output_stats}",
-        border_style="dim purple",
-        padding=(1, 35),
+        border_style="medium_purple1",
+        panel_padding=(1, 3),
+        grid_padding=(1, 5),
     )
+    rich_rule(style="medium_purple1")
 
     del data, res_table, rejected_table
 
     return stats
+
+
+def finalize_jury_merge_mode(
+    judge_files: list[Path],
+    max_lengths: list[int],
+    judge_configs: dict[str, JudgeConfig],
+) -> dict[str, JudgeConfig]:
+    """Dynamically assign max_seq_length attribute in `JudgeConfig` based on order of `judge_files`."""
+
+    def _clean_string(text: str):
+        text = text.replace("_vul", "")
+        text = text.replace("_safe", "")
+        return text.replace("_", "-")
+
+    # this assumes judge files have the same names as the judges
+    judge_names: list[str] = [_clean_string(p.stem) for p in judge_files]
+    for key_name, length_val in zip(judge_names, max_lengths):
+        judge_configs[key_name].max_seq_length = length_val
+
+    return {k: v for k, v in judge_configs.items() if k in judge_names}
