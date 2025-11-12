@@ -12,7 +12,15 @@ from scipy.spatial.distance import pdist
 from .judge import LLMJudge
 from .judge_types import JudgeConfig
 from ..datatypes import EvaluationResult, ReasoningSample
-from ..utilities import iter_jsonl_samples, rich_table, rich_rule, rich_panel, build_table, progress_bar
+from ..utilities import (
+    iter_jsonl_samples,
+    rich_progress,
+    rich_rule,
+    rich_panel,
+    build_table,
+    build_panel,
+    rich_panels_grid,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -52,11 +60,14 @@ class JudgeEnsemble:
         }
         table = build_table(
             data=data,
-            title=f"Initialized ensemble with {len(judge_configs)} judges",
             columns=["Judge", "Position", "Specialization", "Weight", "Description"],
         )
-        rich_table(data=table)
-        rich_rule()
+        rich_panel(
+            table,
+            panel_title=f"Initialized ensemble with {len(judge_configs)} judges",
+            border_style="light_sky_blue1",
+        )
+        rich_rule(style="light_sky_blue1")
         tables = [
             build_table(
                 jc.__dict__,
@@ -66,22 +77,27 @@ class JudgeEnsemble:
             for jc in judge_configs
         ]
 
-        rich_panel(
+        p0 = build_panel(
             tables,
             panel_title="Judges configurations",
-            subtitle="Judges correctly initialized",
+            subtitle="✓ Judges correctly initialized",
             border_style="green",
-            padding=(1, 20),
+            panel_padding = (1, 3),
+            grid_padding = (1, 5),
         )
 
         table = build_table(
             data=self.criterion_weights,
-            title=f"Weights for computing overall quality from criteria",
             columns=["Criterion", "Weight"],
-            expand=True
         )
-        rich_table(data=table)
+        p1 = build_panel(
+            table,
+            panel_title=f"Weights for computing overall quality from criteria",
+        )
+
+        rich_panels_grid(panels=[p0, p1], grid_shape=(1, 2))
         rich_rule()
+
         del tables, table, data
         gc.collect()
 
@@ -254,28 +270,29 @@ class JudgeEnsemble:
         criteria_names = EvaluationResult.get_criteria_names()
         criteria_names.append("quality_score")
 
-        with progress_bar(
+        for record in rich_progress(
             all_records,
             description="🏗️ Collect all scores per judge per criterion 🏗️",
-        ) as records:
-            for record in records:
-                for evaluation in record["per_judge_evaluations"]:
-                    judge_name = evaluation["judge_name"]
-                    for criterion in criteria_names:
-                        if criterion in evaluation:
-                            judge_scores[judge_name][criterion].append(
-                                evaluation[criterion]
-                            )
+            status_fn=lambda _: "Running ...",
+        ):
+            for evaluation in record["per_judge_evaluations"]:
+                judge_name = evaluation["judge_name"]
+                for criterion in criteria_names:
+                    if criterion in evaluation:
+                        judge_scores[judge_name][criterion].append(
+                            evaluation[criterion]
+                        )
 
         judge_evaluations = {}
-        with progress_bar(
-            judge_scores, description="🧮 Computing median scores 🧮"
-        ) as scores:
-            for judge_name, criteria_dict in scores.items():
-                judge_evaluations[judge_name] = {
-                    criterion.replace("_", " ").title(): np.median(scores)
-                    for criterion, scores in criteria_dict.items()
-                }
+        for judge_name, criteria_dict in rich_progress(
+            judge_scores.items(),
+            description="🧮 Computing median scores 🧮",
+            status_fn=lambda _: "Running ...",
+        ):
+            judge_evaluations[judge_name] = {
+                criterion.replace("_", " ").title(): np.median(scores)
+                for criterion, scores in criteria_dict.items()
+            }
 
         return judge_evaluations
 

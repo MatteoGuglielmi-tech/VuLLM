@@ -34,6 +34,7 @@ class SingleJudgeEvaluator:
             table,
             panel_title=f"Configuration for judge {judge_config.model_name}",
             border_style="green",
+            panel_padding=(1, 3),
         )
         rich_rule()
 
