@@ -12,10 +12,10 @@ from .utils import (
     build_table,
     display_env_info,
     progress_bar,
-    get_instruction_response_parts,
     cleanup_resources,
     cleanup_single_gpu,
     iter_jsonl_samples,
+    count_jsonl_lines,
     setup_paths,
 )
 
@@ -40,7 +40,7 @@ __all__ = [
     "progress_bar",
     "cleanup_resources",
     "cleanup_single_gpu",
-    "get_instruction_response_parts",
     "iter_jsonl_samples",
+    "count_jsonl_lines",
     "setup_paths",
 ]

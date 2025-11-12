@@ -1,5 +1,4 @@
 import json
-import argparse
 import jsonlines
 import logging
 import numpy as np
@@ -11,6 +10,7 @@ from .judges import JudgeConfig, JudgeEnsemble
 from .datatypes import EvaluationResult
 from .utilities import (
     iter_jsonl_samples,
+    count_jsonl_lines,
     rich_progress,
     rich_progress_manual,
     progress_bar,
@@ -38,7 +38,7 @@ def aggregate_judge_evaluations(all_records: list[dict]) -> dict[str, dict[str, 
         """
 
         # Collect all scores per judge per criterion
-        # Structure: {judge_name: {criterion: [score1, score2, ...]}}
+        # Structure: {"judge_name": {"criterion": [score1, score2, ...]}}
         judge_scores = defaultdict(lambda: defaultdict(list))
 
         criteria_names = EvaluationResult.get_criteria_names()
@@ -76,7 +76,7 @@ def merge_and_filter(
     judge_configs: list[JudgeConfig],
     output_kept: Path,
     output_rejected: Path,
-    stats_json_path: Path,
+    output_stats: Path,
     agreement_method: str = "weighted_multidimensional",
     agreement_threshold: float = 0.75,
     quality_threshold: float = 0.6,
@@ -84,23 +84,24 @@ def merge_and_filter(
 ):
     """Merge judge evaluations and filter dataset."""
 
-    logger.info("Loading judge evaluations...")
+    assert len(judge_files) == len(
+        judge_configs
+    ), "Mismatch between specified judge files and judge configurations."
 
     # load evaluations: {sample_id: {judge_name: EvaluationResult}}
     sample_evals = defaultdict(dict[str, dict[str, EvaluationResult]])
-
     for judge_file in rich_progress(
-        judge_files, total=len(judge_files), description="Loading judge evaluations"
+        judge_files,
+        total=len(judge_files),
+        description="Loading judge evaluations",
+        status_fn=lambda f: f"Loading {f.name}"
     ):
         with jsonlines.open(judge_file) as reader:
-            logger.info(f"Loading {judge_file}")
             for record in reader:
                 sample_id = record["sample_id"]
                 judge_name = record["judge_name"]  # ref_name
                 evaluation = EvaluationResult(**record["evaluation"])
                 sample_evals[sample_id][judge_name] = evaluation
-
-    logger.info(f"Loaded evaluations for {len(sample_evals)} samples")
 
     ensemble = JudgeEnsemble(judge_configs)
 
@@ -121,29 +122,26 @@ def merge_and_filter(
     all_records = []
     judges_refnames = [jc.ref_name for jc in judge_configs]
 
-    with open(file=original_data, mode="r") as f:
-        total_lines = sum(1 for _ in f)
+
     with (
-        jsonlines.open(output_kept, "w") as kept_writer,
-        jsonlines.open(output_rejected, "w") as rejected_writer,
-        rich_progress_manual(total=total_lines, description="🧪 Filtering samples") as pbar,
+        jsonlines.open(file=output_kept, mode="w") as kept_writer,
+        jsonlines.open(file=output_rejected, mode="w") as rejected_writer,
+        rich_progress_manual(
+            total=count_jsonl_lines(original_data), description="🧪 Filtering samples"
+        ) as pbar,
     ):
         for sample in iter_jsonl_samples(original_data):
             stats["total"] += 1
 
             evals_dict = sample_evals.get(sample.sample_id, {})
-            if len(evals_dict) != 3:
+            if len(evals_dict) != len(judges_refnames):
                 logger.warning(
                     f"Sample {sample.sample_id} has {len(evals_dict)} evaluations "
-                    f"(expected 3), skipping"
+                    f"(expected {len(judges_refnames)}), skipping"
                 )
                 continue
 
-            evaluations: list[EvaluationResult] = [
-                evals_dict[judges_refnames[0]],
-                evals_dict[judges_refnames[1]],
-                evals_dict[judges_refnames[2]],
-            ]
+            evaluations: list[EvaluationResult] = [evals_dict[judge_name] for judge_name in judges_refnames]
 
             # Compute ensemble metrics
             ensemble_score = ensemble._compute_weighted_score(evaluations)
@@ -245,7 +243,7 @@ def merge_and_filter(
         data=data, title="REJECTED ANALYSIS", columns=["Support", "Value"]
     )
 
-    with open(file=stats_json_path, mode="w") as f:
+    with open(file=output_stats, mode="w") as f:
         json.dump(
             {k: v for k, v in stats.items() if k not in ["scores", "agreements"]},
             f,
@@ -255,7 +253,7 @@ def merge_and_filter(
     rich_panel(
         tables=[res_table, rejected_table],
         panel_title="🏁 Experiment outcome 🏁",
-        subtitle=f"\n✓ Statistics saved to: {stats_json_path}",
+        subtitle=f"\n✓ Statistics saved to: {output_stats}",
         border_style="dim purple",
         padding=(1, 35),
     )

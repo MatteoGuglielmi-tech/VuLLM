@@ -133,7 +133,7 @@ def main():
                 judge_configs=list(judge_configs.values()),
                 output_kept=paths["filtered"],
                 output_rejected=paths["rejected"],
-                stats_json_path=paths["filtering_stats"],
+                output_stats=paths["filtering_stats"],
                 agreement_method=args.agreement_method,
                 agreement_threshold=args.agreement_threshold,
                 quality_threshold=args.quality_threshold,

@@ -6,7 +6,7 @@ import torch
 
 from collections.abc import Generator
 from collections.abc import Sized as ABCSized
-from typing import Any, Iterable, Literal, TypeVar
+from typing import Any, Iterable, Literal, TypeVar, Callable
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from contextlib import contextmanager
@@ -278,9 +278,9 @@ def rich_progress(
     total: int | None = None,
     description: str = "Processing",
     initial_status: str = "Starting...",
-    running_status: str = "Running...",
+    status_fn: Callable[[T], str] | None = None,
 ):
-    """Automatic progress bar (iterator wrapper).
+    """Automatic progress bar with optional dynamic status.
 
     Parameters
     ----------
@@ -290,10 +290,13 @@ def rich_progress(
         Total count. If None, tries len(iterable)
     description : str
         Description to display
+    initial_status : str
+        Initial status message
+    status_fn : Callable[[T], str] | None
+        Function that takes the current item and returns a status string
     """
 
     if total is None:
-        # Check if iterable is Sized (has __len__)
         if isinstance(iterable, ABCSized):
             total = len(iterable)
         else:
@@ -308,7 +311,12 @@ def rich_progress(
         )
         for item in iterable:
             yield item
-            progress.update(task, advance=1, status=running_status)
+
+            if status_fn:
+                status = status_fn(item)
+                progress.update(task, advance=1, status=status)
+            else:
+                progress.update(task, advance=1)
 
 
 @contextmanager
@@ -322,67 +330,6 @@ def rich_status(description: str, spinner: str = "clock"):
             s.stop()
             rich_exception()
             raise
-
-
-def get_instruction_response_parts(tokenizer) -> tuple[str, str]:
-    """Automatically extract instruction and response parts from chat template.
-
-    Returns
-    -------
-    tuple[str, str]
-        (instruction_part, response_part)
-    """
-
-    chat_template = tokenizer.chat_template
-
-    if not chat_template:
-        raise ValueError("Tokenizer has no chat template!")
-
-    patterns = {
-        # Llama 3+
-        "llama": (
-            "<|start_header_id|>user<|end_header_id|>\n\n",
-            "<|start_header_id|>assistant<|end_header_id|>\n\n",
-        ),
-        # Qwen 2.5
-        "qwen": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # ChatML (generic)
-        "chatml": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # Mistral
-        "mistral": (
-            "[INST]",
-            "[/INST]",
-        ),
-        # Zephyr
-        "zephyr": (
-            "<|user|>\n",
-            "<|assistant|>\n",
-        ),
-    }
-
-    # Detect based on template content
-    template_lower = chat_template.lower()
-
-    if "start_header_id" in template_lower:
-        return patterns["llama"]
-    elif "im_start" in template_lower or "qwen" in template_lower:
-        return patterns["qwen"]
-    elif "[inst]" in template_lower:
-        return patterns["mistral"]
-    elif "<|user|>" in template_lower:
-        return patterns["zephyr"]
-    else:
-        raise ValueError(
-            f"Could not detect chat template format. "
-            f"Please specify instruction_part and response_part manually.\n"
-            f"Template: {chat_template[:200]}"
-        )
 
 
 def cleanup_resources(accelerator):
@@ -478,6 +425,11 @@ def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, Non
             except (json.JSONDecodeError, KeyError):
                 logger.exception(f"Error parsing line {idx}", stack_info=True)
                 continue
+
+
+def count_jsonl_lines(jsonl_path: Path|str) -> int:
+    with open(file=jsonl_path, mode="r") as f:
+        return sum(1 for _ in f)
 
 
 def setup_paths(args: Namespace) -> dict[str, Path] | None:
