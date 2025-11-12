@@ -64,17 +64,15 @@ def get_parser():
         choices=["multidimensional", "weighted_multidimensional"],
         help="Type of agreement to compute",
     )
-    # ============================================================================
-    # ENSEMBLE ARGUMENTS
-    # ============================================================================
-    ensemble_group = parser.add_argument_group("Ensemble mode only arguments")
-    ensemble_group.add_argument(
+    shared_group.add_argument(
         "--max_lengths",
         type=int,
         nargs="+",
-        default=[8192, 8192, 8192],
         help="List of max sequence lengths for each judge (Order matters!!)."
     )
+    # ============================================================================
+    # ENSEMBLE ARGUMENTS
+    # ============================================================================
     # ============================================================================
     # SEQUENTIAL ARGUMENTS
     # ============================================================================
@@ -116,12 +114,13 @@ def validate_args(args):
     Call this after parsing arguments.
     """
 
-    ensemble_only = {"max_lengths"}
+    ensemble_only = {}
     sequential_only = {"output_path", "judge", "max_length"}
     merge_only = {"judge_files"}
     shared = {
         "output",
         "assets",
+        "max_lengths",
         "quality_threshold",
         "agreement_threshold",
         "agreement_method",
@@ -134,6 +133,8 @@ def validate_args(args):
             raise argparse.ArgumentTypeError("--output is required for --ensemble mode")
         if args.assets is None:
             raise argparse.ArgumentTypeError("--assets is required for --ensemble mode")
+        if args.max_lengths is None:
+            raise argparse.ArgumentTypeError("--max_lengths is required for --ensemble mode")
 
         prohibited = sequential_only.copy()
         prohibited.update(merge_only)
@@ -163,12 +164,14 @@ def validate_args(args):
             raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --sequential mode")
 
     elif args.merge:
-        if args.output_path is None:
-            raise argparse.ArgumentTypeError("--output_path is required for --merge mode")
+        if args.output is None:
+            raise argparse.ArgumentTypeError("--output is required for --merge mode")
         if args.assets is None:
             raise argparse.ArgumentTypeError("--assets is required for --assets mode")
         if args.judge_files is None:
             raise ArgumentTypeError("--judge_files is required for --merge mode")
+        if args.max_lengths is None:
+            raise argparse.ArgumentTypeError("--max_lengths is required for --merge mode")
 
         prohibited = sequential_only.copy()
         prohibited.update(ensemble_only)
@@ -192,7 +195,7 @@ def get_default_value(arg_name):
 
     defaults = {
         # ensemble mode only
-        "max_lengths": [8192, 8192, 8192],
+        "max_lengths": None,
         "output": None,
         "assets": None,
         "quality_threshold": 0.6,
