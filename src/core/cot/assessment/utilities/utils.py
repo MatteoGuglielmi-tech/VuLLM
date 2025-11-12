@@ -24,7 +24,7 @@ from rich.progress import (
     TextColumn,
     TaskProgressColumn,
     TimeRemainingColumn,
-    TaskID
+    TaskID,
 )
 from rich.text import TextType
 
@@ -33,21 +33,24 @@ from ..datatypes import ReasoningSample
 from .detection import get_accelerator_config
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 logger = logging.getLogger(__name__)
 _console = Console()
-_progress = Progress(
-    SpinnerColumn(spinner_name="arc"),
-    TextColumn("{task.description}"),
-    BarColumn(),
-    TaskProgressColumn(),
-    TextColumn("•"),
-    TextColumn("{task.completed}/{task.total}"),
-    TextColumn("•"),
-    TimeRemainingColumn(elapsed_when_finished=True),
-    TextColumn("•"),
-    TextColumn("[cyan]{task.fields[status]}"),  # Custom field
-)
+
+
+def create_progress() -> Progress:
+    return Progress(
+        SpinnerColumn(spinner_name="arc"),
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("•"),
+        TextColumn("{task.completed}/{task.total}"),
+        TextColumn("•"),
+        TimeRemainingColumn(elapsed_when_finished=True),
+        TextColumn("•"),
+        TextColumn("[cyan]{task.fields[status]}"),  # Custom field
+    )
 
 
 def build_table(
@@ -55,12 +58,14 @@ def build_table(
     title: str = "",
     columns: list[str] = [],
     box=box.ASCII_DOUBLE_HEAD,
-    show_header: bool=True,
+    show_header: bool = True,
     expand: bool = False,
 ) -> Table:
     data = vars(data) if isinstance(data, Namespace) else data
 
-    table = Table(show_header=show_header, header_style="bold blue", box=box, expand=expand)
+    table = Table(
+        show_header=show_header, header_style="bold blue", box=box, expand=expand
+    )
     table.title = title
 
     for i, c in enumerate(columns):
@@ -120,20 +125,18 @@ def rich_table(
         _console.print(post_desc)
 
 
-@main_process_only
-def rich_panel(
+def build_panel(
     tables: list[Table] | Table,
     panel_title: TextType | None = None,
     subtitle: TextType | None = None,
     border_style: StyleType = "red",
     align: AlignMethod = "center",
-    panel_padding: tuple = (0, 1),
-    grid_padding: tuple = (0, 3),
+    panel_padding: tuple = (1, 3),
+    grid_padding: tuple = (1, 5),
     panel_align: Literal["left", "center", "right"] = "center",
-    allow_wrap: bool = False,
     layout: Literal["vertical", "horizontal"] = "horizontal",
 ):
-    """Display table(s) in a centered panel.
+    """Build table(s) in a panel.
 
     Parameters
     ----------
@@ -151,8 +154,6 @@ def rich_panel(
         Padding inside the panel (vertical, horizontal).
     panel_align : {"left", "center", "right"}, optional
         Where to align the panel.
-    allow_wrap : bool
-        Whether to allow content wrapping.
     layout : {"vertical", "horizontal"}
         How to arrange multiple tables.
     """
@@ -185,8 +186,108 @@ def rich_panel(
         aligned_panel = Align.right(panel)
     else:
         aligned_panel = Align.center(panel)
+    return aligned_panel
 
+
+@main_process_only
+def rich_panel(
+    tables: list[Table] | Table,
+    panel_title: TextType | None = None,
+    subtitle: TextType | None = None,
+    border_style: StyleType = "red",
+    align: AlignMethod = "center",
+    panel_padding: tuple = (1, 3),
+    grid_padding: tuple = (1, 5),
+    panel_align: Literal["left", "center", "right"] = "center",
+    allow_wrap: bool = False,
+    layout: Literal["vertical", "horizontal"] = "horizontal",
+):
+    """Display table(s) in a centered panel.
+
+    Parameters
+    ----------
+    tables : list[Table] | Table
+        Single table or list of tables to display.
+    panel_title : str, optional
+        Title for the panel.
+    subtitle : str, optional
+        Subtitle for the panel.
+    border_style : str
+        Border color/style.
+    align : {"left", "center", "right"}
+        Alignment for panel title/subtitle.
+    padding : tuple
+        Padding inside the panel (vertical, horizontal).
+    panel_align : {"left", "center", "right"}, optional
+        Where to align the panel.
+    allow_wrap : bool
+        Whether to allow content wrapping.
+    layout : {"vertical", "horizontal"}
+        How to arrange multiple tables.
+    """
+
+    aligned_panel = build_panel(
+        tables,
+        panel_title,
+        subtitle,
+        border_style,
+        align,
+        panel_padding,
+        grid_padding,
+        panel_align,
+        layout,
+    )
     _console.print(aligned_panel, no_wrap=not allow_wrap)
+
+
+@main_process_only
+def rich_panels_grid(
+    panels: list[Panel],
+    grid_shape: tuple[int, int] | None = None,
+    grid_padding: tuple = (0, 2),
+    align: Literal["left", "center", "right"] = "center",
+):
+    """Arrange multiple panels in a grid.
+
+    Parameters
+    ----------
+    panels : list[Panel]
+        List of Panel objects to arrange
+    grid_shape : tuple[int, int] | None
+        (rows, cols). If None, auto-determines
+    grid_padding : tuple
+        Padding between panels
+    align : {"left", "center", "right"}
+        Alignment of the entire grid
+    """
+    if grid_shape:
+        _, cols = grid_shape
+    else:
+        import math
+
+        cols = math.ceil(math.sqrt(len(panels)))
+        # rows = math.ceil(len(panels) / cols)
+
+    grid = Table.grid(padding=grid_padding, expand=False)
+
+    for _ in range(cols):
+        grid.add_column()
+
+    for i in range(0, len(panels), cols):
+        row_panels = panels[i : i + cols]
+        # Pad with empty strings if needed
+        while len(row_panels) < cols:
+            row_panels.append("")
+        grid.add_row(*row_panels)
+
+    if align == "left":
+        aligned = Align.left(grid)
+    elif align == "right":
+        aligned = Align.right(grid)
+    else:
+        aligned = Align.center(grid)
+
+    _console.print(aligned)
 
 
 @main_process_only
@@ -200,13 +301,13 @@ def rich_print(
 
 
 @main_process_only
-def rich_exception(is_main_process: bool | None = None):
+def rich_exception(is_main_process: bool | None = None, show_locals: bool=False):
     """Print exception traceback with locals (main process only).
     No-op if not in exception context.
     """
 
     try:
-        _console.print_exception(show_locals=True)
+        _console.print_exception(show_locals=show_locals)
     except ValueError:
         # Not in an exception context
         _console.print(
@@ -223,13 +324,6 @@ def rich_rule(
     """Print a horizontal rule (main process only)."""
     # print("\n")
     _console.rule(title, style=style, align="center")
-
-
-@main_process_only 
-@contextmanager
-def progress_bar(iterable: Iterable, description="Working ..."):
-    with _progress:
-        yield _progress.track(iterable, description=description)
 
 
 @contextmanager
@@ -265,6 +359,7 @@ def rich_progress_manual(
         def set_description(self, description: str):
             self.progress.update(self.task, description=description)
 
+    _progress = create_progress()
     with _progress as progress:
         task = progress.add_task(
             description=description, total=total, status=initial_status
@@ -305,18 +400,13 @@ def rich_progress(
                 "Try: rich_progress_advanced(iterable, total=<count>)"
             )
 
-    with _progress as progress:
-        task = progress.add_task(
-            description=description, total=total, status=initial_status
-        )
+    _progress = create_progress()
+    with _progress:
+        task = _progress.add_task(description=description, total=total, status=initial_status)
         for item in iterable:
             yield item
-
-            if status_fn:
-                status = status_fn(item)
-                progress.update(task, advance=1, status=status)
-            else:
-                progress.update(task, advance=1)
+            status = status_fn(item) if status_fn else None
+            _progress.update(task, advance=1, status=status)
 
 
 @contextmanager
@@ -380,28 +470,27 @@ def cleanup_single_gpu():
     """
     Cleanup for single-GPU jobs (without Accelerate).
     """
-    logger.info("Cleaning up resources...")
 
-    try:
-        # Check if distributed is initialized
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            logger.info("Destroying distributed process group...")
-            torch.distributed.destroy_process_group()
-            logger.info("✓ Distributed cleaned up")
-    except Exception as e:
-        logger.debug(f"Distributed cleanup: {e}")
+    with rich_status("Cleaning up resources...", spinner="arc"):
+        try:
+            # Check if distributed is initialized
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                logger.info("Destroying distributed process group...")
+                torch.distributed.destroy_process_group()
+                logger.info("✓ Distributed cleaned up")
+        except Exception as e:
+            logger.debug(f"Distributed cleanup: {e}")
 
-    try:
-        # CUDA cleanup
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            logger.info("✓ CUDA cleared")
-    except Exception as e:
-        logger.debug(f"CUDA cleanup: {e}")
+        try:
+            # CUDA cleanup
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("✓ CUDA cleared")
+        except Exception as e:
+            logger.debug(f"CUDA cleanup: {e}")
 
-    gc.collect()
-    logger.info("✓ Cleanup complete")
+        gc.collect()
 
 
 def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, None]:
@@ -427,7 +516,7 @@ def iter_jsonl_samples(jsonl_path: Path) -> Generator[ReasoningSample, None, Non
                 continue
 
 
-def count_jsonl_lines(jsonl_path: Path|str) -> int:
+def count_jsonl_lines(jsonl_path: Path | str) -> int:
     with open(file=jsonl_path, mode="r") as f:
         return sum(1 for _ in f)
 
@@ -441,7 +530,7 @@ def setup_paths(args: Namespace) -> dict[str, Path] | None:
         return {
             "filtered": output_folder / "best_reasonings.jsonl",
             "rejected": output_folder / "rejected_reasonings.jsonl",
-            "metadata": output_folder / "judge_config.json",
+            "metadata": output_folder / "judge_configs.json",
             "filtering_stats": output_folder / "filtering_stats.json",
         }
     elif args.sequential:
@@ -455,7 +544,7 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
     accelerator = get_accelerator_config()
 
     data = {
-        "distributed type": accelerator.distributed_type.name,
+        "distributed type": accelerator.state.distributed_type.name,
         "Num processes": accelerator.num_processes,
         "Mixed precision": accelerator.mixed_precision,
         "Num SLURM CPUs": cpus_allocated,
@@ -463,19 +552,26 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
     if accelerator.state.deepspeed_plugin is not None:
         data["DEEPSPEED"] = "ENABLED"
         data["ZeRO Stage"] = accelerator.state.deepspeed_plugin.zero_stage
-        data["Offload optimizer"]=accelerator.state.deepspeed_plugin.offload_optimizer_device
-        data["Offload params"]=accelerator.state.deepspeed_plugin.offload_param_device
+        data["Offload optimizer"] = (
+            accelerator.state.deepspeed_plugin.offload_optimizer_device
+        )
+        data["Offload params"] = accelerator.state.deepspeed_plugin.offload_param_device
     else:
         data["DEEPSPEED"] = "DISABLED"
 
-    acc = build_table(data=data, title="Meta information", columns=["Parameter", "Value"])
+    acc = build_table(
+        data=data, title="Meta information", columns=["Parameter", "Value"]
+    )
 
     # cli args
-    # BUILTIN_GROUPS = {"positional arguments", "options"}
     MANDATORY_GROUPS = ["Path mandatory arguments", "Model arguments"]
-
     if args.ensemble:
-        MANDATORY_GROUPS.extend(["Shared arguments between `ensemble` and `merge` modes", "Ensemble mode only arguments"])
+        MANDATORY_GROUPS.extend(
+            [
+                "Shared arguments between `ensemble` and `merge` modes",
+                "Ensemble mode only arguments",
+            ]
+        )
         custom_args = {
             action.dest: getattr(args, action.dest, None)
             for group in parser._action_groups
@@ -490,8 +586,13 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
             if group.title in set(MANDATORY_GROUPS)
             for action in group._group_actions
         }
-    else: # merge
-        MANDATORY_GROUPS.extend(["Shared arguments between `ensemble` and `merge` modes", "Merge script only arguments"])
+    else:  # merge
+        MANDATORY_GROUPS.extend(
+            [
+                "Shared arguments between `ensemble` and `merge` modes",
+                "Merge script only arguments",
+            ]
+        )
         custom_args = {
             action.dest: getattr(args, action.dest, None)
             for group in parser._action_groups
