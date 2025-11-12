@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=llama_vul
+#SBATCH --job-name=qwen_72b_vul
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -22,8 +22,8 @@ python DoneBot/src/notify.py \
 	--cmd python -m src.core.cot.assessment.main \
 	--sequential \
 	--input ./DiverseVul/selected/vul.jsonl \
-	--output_path ./DiverseVul/assessed/llama_vul.jsonl \
-	--judge llama-3.1-70B \
+	--output_path ./DiverseVul/assessed/qwen_vul.jsonl \
+	--judge qwen-coder \
 	--max_lengths 4096 4096 4096 \
 	--max_new_tokens 256 \
 	--save_interval 500

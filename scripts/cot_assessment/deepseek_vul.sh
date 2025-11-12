@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=court
+#SBATCH --job-name=deepseek_vul
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
