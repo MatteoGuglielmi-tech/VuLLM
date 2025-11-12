@@ -23,7 +23,7 @@ python DoneBot/src/notify.py \
 	--sequential \
 	--input ./DiverseVul/selected/safe.jsonl \
 	--output_path ./DiverseVul/assessed/llama_safe.jsonl \
-	--judge llama-3.1-70B \
-	--max_lengths 4096 4096 4096 \
+	--judge llama-3.3 \
+	--max_length 4096 \
 	--max_new_tokens 256 \
 	--save_interval 500

@@ -24,7 +24,7 @@ python DoneBot/src/notify.py \
 	--input ./DiverseVul/selected/vul.jsonl \
 	--output_path ./DiverseVul/assessed/qwen_vul.jsonl \
 	--judge qwen-coder \
-	--max_lengths 4096 4096 4096 \
+	--max_length 4096 \
 	--max_new_tokens 256 \
 	--save_interval 500
 
