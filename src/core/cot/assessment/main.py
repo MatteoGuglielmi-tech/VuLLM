@@ -14,7 +14,7 @@ from .utilities import (
     cleanup_single_gpu,
 )
 from .plots import visualize_results
-from .merge_script import merge_and_filter
+from .merge_script import merge_and_filter, finalize_jury_merge_mode
 
 import torch
 
@@ -37,12 +37,13 @@ def main():
         display_env_info(parser=parser, args=args)
         gc.collect()
 
+        # todo: fix max_seq_length assigment to be order and selection agnostic
         judge_configs: dict[str, JudgeConfig] = {
             "qwen-coder": JudgeConfig(
                 model_name="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
                 ref_name="Qwen2.5-Coder-32B",
                 chat_template="qwen-2.5",
-                max_seq_length=args.max_length if args.sequential else args.max_lengths[0],
+                # max_seq_length=args.max_length if args.sequential else args.max_lengths[0],
                 max_new_tokens=args.max_new_tokens,
                 specialization="code",
                 description="Specialized in C/C++ vulnerability patterns and code analysis"
@@ -51,7 +52,7 @@ def main():
                 model_name="unsloth/Qwen2.5-72B-Instruct-bnb-4bit",
                 ref_name="Qwen2.5-72B",
                 chat_template="qwen-2.5",
-                max_seq_length=args.max_length if args.sequential else args.max_lengths[1],
+                # max_seq_length=args.max_length if args.sequential else args.max_lengths[1],
                 max_new_tokens=args.max_new_tokens,
                 specialization="logic",
                 description="Logical reasoning and evaluation specialist"
@@ -60,19 +61,19 @@ def main():
                 model_name="microsoft/Phi-4",
                 ref_name="Phi-4",
                 chat_template="phi-4",
-                max_seq_length=args.max_length if args.sequential else args.max_lengths[2],
+                # max_seq_length=args.max_length if args.sequential else args.max_lengths[2],
                 max_new_tokens=args.max_new_tokens,
                 temperature=0.8,
                 top_p=0.95,
                 top_k=50,
-                specialization="reasoning-quality",
+                specialization="reasoning quality",
                 description="Mathematical and logical reasoning verification specialist"
             ),
             "llama-3.3": JudgeConfig(
                 model_name="unsloth/Llama-3.3-70B-Instruct-bnb-4bit",
                 ref_name="Llama-3.3-70B",
                 chat_template="llama-3.3",
-                max_seq_length=args.max_length if args.sequential else args.max_lengths[3],
+                # max_seq_length=args.max_length if args.sequential else args.max_lengths[3],
                 max_new_tokens=args.max_new_tokens,
                 specialization="deep reasoning",
                 description="Multilinugal model"
@@ -81,7 +82,7 @@ def main():
                 model_name="unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit",
                 ref_name="DeepSeek-R1-Distill-Llama",
                 chat_template="llama-3.3",
-                max_seq_length=args.max_length if args.sequential else args.max_lengths[4],
+                # max_seq_length=args.max_length if args.sequential else args.max_lengths[4],
                 max_new_tokens=args.max_new_tokens,
                 temperature=0.7,
                 top_p=0.95,
@@ -94,6 +95,7 @@ def main():
         # =========================================================================
         # Run Filtering
         # =========================================================================
+        # note: ensemble is unused and not up-to-date
         if args.ensemble:
             assert paths is not None
             ensemble = JudgeEnsemble(list(judge_configs.values()))
@@ -119,6 +121,7 @@ def main():
                 agreements_threshold=args.agreement_threshold,
             )
         elif args.sequential:
+            judge_configs[args.judge].max_seq_length = args.max_length
             evaluator = SingleJudgeEvaluator(judge_configs[args.judge])
             evaluator.evaluate_dataset(
                 input_jsonl=args.input,
@@ -127,9 +130,14 @@ def main():
             )
         else: # merge
             assert paths is not None
+            judge_configs = finalize_jury_merge_mode(
+                judge_files=args.judge_files,
+                max_lengths=args.max_lengths,
+                judge_configs=judge_configs,
+            )
             stats = merge_and_filter(
-                original_data=args.input_jsonl,
-                judge_files=[args.judge1, args.judge2, args.judge3],
+                original_data=args.input,
+                judge_files=args.judge_files,
                 judge_configs=list(judge_configs.values()),
                 output_kept=paths["filtered"],
                 output_rejected=paths["rejected"],
