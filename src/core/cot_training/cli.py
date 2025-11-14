@@ -75,7 +75,7 @@ def get_parser():
         "--base_model_name",
         "-n",
         type=str,
-        default="unsloth/llama-3.1-8b-instruct-bnb-4bit",
+        default="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
         help="Name of the base model to use",
     )
     shared_training_group.add_argument(
@@ -353,8 +353,6 @@ def validate_args(args):
             raise argparse.ArgumentTypeError(
                 "--lora_weights is required for --inference mode"
             )
-
-    return args
 
 
 def get_default_value(arg_name):
