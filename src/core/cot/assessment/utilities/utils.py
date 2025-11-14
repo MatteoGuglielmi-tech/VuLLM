@@ -11,8 +11,9 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from contextlib import contextmanager
 
+from rich.pretty import Pretty
 from rich.align import AlignMethod, Align
-from rich.console import Console, JustifyMethod, Group
+from rich.console import Console, HighlighterType, JustifyMethod, Group, OverflowMethod
 from rich.style import StyleType
 from rich.table import Table
 from rich.panel import Panel
@@ -277,7 +278,7 @@ def rich_panels_grid(
         row_panels = panels[i : i + cols]
         # Pad with empty strings if needed
         while len(row_panels) < cols:
-            row_panels.append("")
+            row_panels.append("") # type: ignore[reportArgumentType]
         grid.add_row(*row_panels)
 
     if align == "left":
@@ -290,14 +291,83 @@ def rich_panels_grid(
     _console.print(aligned)
 
 
+def build_pretty_renderable(
+    _object,
+    highlighter: HighlighterType | None = None,
+    *,
+    indent_size: int = 4,
+    justify: JustifyMethod | None = None,
+    overflow: OverflowMethod | None = None,
+    no_wrap: bool = False,
+    indent_guides: bool = True,
+    max_length: int | None = None,
+    max_string: int | None = None,
+    max_depth: int | None = None,
+    expand_all: bool = False,
+    margin: int = 0,
+    insert_line: bool = False,
+):
+    return Pretty(
+        _object,
+        highlighter=highlighter,
+        indent_size=indent_size,
+        justify=justify,
+        overflow=overflow,
+        no_wrap=no_wrap,
+        indent_guides=indent_guides,
+        max_length=max_length,
+        max_string=max_string,
+        max_depth=max_depth,
+        expand_all=expand_all,
+        margin=margin,
+        insert_line=insert_line,
+    )
+
+
 @main_process_only
 def rich_print(
-    message: str,
+    _object,
+    highlighter: HighlighterType | None = None,
+    *,
+    console: Console | None = None,
+    indent_guides: bool = True,
+    max_length: int | None = None,
+    max_string: int | None = None,
+    max_depth: int | None = None,
+    expand_all: bool = False,
     style: str = "",
+    indent_size: int = 4,
+    justify: JustifyMethod | None = None,
+    overflow: OverflowMethod | None = None,
+    no_wrap: bool = False,
+    margin: int = 0,
+    insert_line: bool = False,
     is_main_process: bool | None = None,
 ):
     """Print with rich styling (main process only)."""
-    _console.print(message, style=style)
+
+    cons = console if console is not None else _console
+
+    if isinstance(_object, str):
+        cons.print(_object, style=style)
+    else:
+        pretty_obj = build_pretty_renderable(
+            _object, 
+            highlighter=highlighter,
+            indent_size=indent_size,
+            justify=justify,
+            overflow=overflow,
+            no_wrap=no_wrap,
+            indent_guides=indent_guides,
+            max_length=max_length,
+            max_string=max_string,
+            max_depth=max_depth,
+            expand_all=expand_all,
+            margin=margin,
+            insert_line=insert_line,
+        )
+
+        cons.print(pretty_obj)
 
 
 @main_process_only
