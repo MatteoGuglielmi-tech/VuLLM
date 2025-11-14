@@ -51,6 +51,10 @@ src/dataset/restructure
 src/dataset/analysis/analysis/run/
 src/dataset/analysis/analysis/distribution/assets/
 src/dataset/analysis/sequence_length_analysis/__pycache__/
+src/dataset/analysis/sequence_length_analysis/results/assessment/selected/safe
+src/dataset/analysis/sequence_length_analysis/results/assessment/selected/vul
+!src/dataset/analysis/sequence_length_analysis/results/assessment/selected/safe/tokenizer_comparison.json
+!src/dataset/analysis/sequence_length_analysis/results/assessment/selected/vul/tokenizer_comparison.json
 
 # src/dataset/balance
 src/dataset/balance/__pycache__/
