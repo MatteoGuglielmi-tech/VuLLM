@@ -1,0 +1,48 @@
+{
+  "tokenizers": [
+    "unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
+    "unsloth/Qwen2.5-72B-Instruct-bnb-4bit",
+    "microsoft/Phi-4",
+    "microsoft/Phi-4-reasoning-plus",
+    "unsloth/Llama-3.3-70B-Instruct-bnb-4bit",
+    "unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit"
+  ],
+  "comparison": {
+    "unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit": {
+      "mean_total_tokens": 1723.2825,
+      "p95_total_tokens": 1890.0,
+      "p99_total_tokens": 1912.0,
+      "max_total_tokens": 2046
+    },
+    "unsloth/Qwen2.5-72B-Instruct-bnb-4bit": {
+      "mean_total_tokens": 1723.2825,
+      "p95_total_tokens": 1890.0,
+      "p99_total_tokens": 1912.0,
+      "max_total_tokens": 2046
+    },
+    "microsoft/Phi-4": {
+      "mean_total_tokens": 1704.72525,
+      "p95_total_tokens": 1869.0,
+      "p99_total_tokens": 1889.0099999999998,
+      "max_total_tokens": 1894
+    },
+    "microsoft/Phi-4-reasoning-plus": {
+      "mean_total_tokens": 1888.72525,
+      "p95_total_tokens": 2053.0,
+      "p99_total_tokens": 2073.0099999999998,
+      "max_total_tokens": 2078
+    },
+    "unsloth/Llama-3.3-70B-Instruct-bnb-4bit": {
+      "mean_total_tokens": 1727.65925,
+      "p95_total_tokens": 1892.0,
+      "p99_total_tokens": 1912.0,
+      "max_total_tokens": 1917
+    },
+    "unsloth/DeepSeek-R1-Distill-Llama-70B-bnb-4bit": {
+      "mean_total_tokens": 1698.65925,
+      "p95_total_tokens": 1863.0,
+      "p99_total_tokens": 1883.0,
+      "max_total_tokens": 1888
+    }
+  }
+}
