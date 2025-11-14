@@ -184,8 +184,8 @@ def validate_args(args):
         if invalid_args:
             raise ArgumentTypeError(f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode")
 
-    if len(args.max_lengths) > 3:
-        raise ValueError("Jury consists in 3 judges!!")
+    if len(args.max_lengths) > 5:
+        raise ValueError("Jury consists in 5 judges!!")
 
     return args
 
