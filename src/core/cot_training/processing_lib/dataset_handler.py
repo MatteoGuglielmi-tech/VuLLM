@@ -346,7 +346,7 @@ class DatasetHandler:
         dataset_dict: DatasetDict = self.load_and_split_dataset()
         formatted_dataset_dict = self.format_dataset(dataset_dict=dataset_dict)
 
-        self.formatted_dataset_dir.mkdir(exist_ok=True)
+        self.formatted_dataset_dir.mkdir(exist_ok=True, parents=True)
         self.save_to_disk(formatted_dataset_dict, fp=self.formatted_dataset_dir)
 
         return formatted_dataset_dict
