@@ -1,20 +1,37 @@
 import os
+import gc
 import logging
 import warnings
-import argparse
 
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import cast
 
 from datasets import Dataset
-from accelerate import Accelerator
 from rich.traceback import install
 
-from .utilities import rich_table, rich_exception, rich_rule, is_main_process, cleanup_resources
-from .processing_lib import DatasetHandler, ModelHandler, FineTuningHandler, LLMHyperparameterOptimizer, TestHandler, Evaluator
+from .utilities import (
+    rich_table,
+    rich_exception,
+    rich_rule,
+    is_main_process,
+    cleanup_resources,
+    cleanup_single_gpu,
+    init_accelerator,
+    display_env_info,
+)
+from .processing_lib import (
+    DatasetHandler,
+    ModelHandler,
+    FineTuningHandler,
+    LLMHyperparameterOptimizer,
+    TestHandler,
+    Evaluator,
+)
 from .logging_config import setup_logger
 from . import cli
+
+import torch
 
 install(show_locals=True)
 
@@ -26,48 +43,24 @@ warnings.filterwarnings(
 )
 
 
+load_dotenv()
+setup_logger()
 logger = logging.getLogger(name=__name__)
 
 if __name__ == "__main__":
-    # -- loading configs --
-    load_dotenv()
-    setup_logger()
-
     parser = cli.get_parser()
     args = parser.parse_args()
-
-    try:
-        args = cli.validate_args(args)
-        rich_table(data=args, title="✅ Arguments validated successfully! ✅ ", columns=["Argument", "Value"])
-    except argparse.ArgumentTypeError as e:
-        parser.error(str(e))
-
+    cli.validate_args(args)
     cli.save_running_args(args)
 
     cpus_allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
-    accelerator = Accelerator()
-
-    rich_rule("[bold italic]Configuration data")
-    if is_main_process():
-        data = {
-            "Distributed type": accelerator.distributed_type,
-            "Num processes": accelerator.num_processes,
-            "Mixed precision": accelerator.mixed_precision,
-            "Num SLURM CPUs": cpus_allocated,
-        }
-        if accelerator.state.deepspeed_plugin is not None:
-            data["DEEPSPEED"] = "ENABLED"
-            data["ZeRO Stage"] = accelerator.state.deepspeed_plugin.zero_stage
-            data["Offload optimizer"]=accelerator.state.deepspeed_plugin.offload_optimizer_device
-            data["Offload params"]=accelerator.state.deepspeed_plugin.offload_param_device
-        else:
-            data["DEEPSPEED"] = "DISABLED"
-
-        rich_table(data=data, title="🔍 Diagnostic Information", columns=["Parameter", "Value"])
+    accelerator = init_accelerator()
+    display_env_info(parser=parser, args=args)
+    gc.collect()
 
     try:
         if not args.inference and not args.hpo:
-            rich_rule(f"🚀 [bold][italic] Starting fine-tuning pipeline [/][/] 🚀")
+            rich_rule(f"🚀 [bold][italic][green] Starting fine-tuning pipeline [/green][/italic][/bold] 🚀")
 
             # --- Fine-Tuning ---
             fine_tuner = FineTuningHandler(
@@ -103,16 +96,16 @@ if __name__ == "__main__":
                 debug=args.debug,
             )
             fine_tuner.fine_tune()
-            rich_rule()
+            rich_rule(style="green")
 
         elif args.hpo:
-            rich_rule(f"🚀 [bold][italic] Starting HPO pipeline [/][/] 🚀")
+            rich_rule(f"🚀 [bold][italic][light_salmon1] Starting HPO pipeline [/][/][/] 🚀")
 
             optimizer = LLMHyperparameterOptimizer(
                 # Dataset parameters
                 dataset_handler_class=DatasetHandler,
                 dataset_path=args.dataset_path,
-                formatted_dataset_dir=Path(args.tokenized_dataset_dir),
+                formatted_dataset_dir=Path(args.formatted_dataset_dir),
                 num_cpus=cpus_allocated,
 
                 # Model parameters
@@ -148,9 +141,9 @@ if __name__ == "__main__":
                     post_desc=f"📉 Best validation loss: {best_score:.4f}",
                 )
 
-            rich_rule()
+            rich_rule(syle="light_salmon1")
         else:
-            rich_rule(f"🚀 [bold][italic] Starting inference pipeline [/][/] 🚀")
+            rich_rule(f"🚀 [bold][italic][light_sky_blue1] Starting inference pipeline [/][/][/] 🚀")
 
             test_set = cast(Dataset, DatasetHandler.load_from_disk(fp=args.formatted_dataset_dir, split="test"))
             test_handler = TestHandler(
@@ -203,7 +196,7 @@ if __name__ == "__main__":
 
                 logger.info(f"\n📁 All artifacts saved to: {args.assets_dir}")
 
-            rich_rule()
+            rich_rule(style="light_sky_blue1")
 
             if args.save_summary:
                 evaluator.save_evaluation_summary(
@@ -215,4 +208,7 @@ if __name__ == "__main__":
     except Exception as e:
         rich_exception()
     finally:
-        cleanup_resources(accelerator=accelerator)
+        if torch.cuda.device_count() > 1:
+            cleanup_resources(accelerator=accelerator)
+        else:
+            cleanup_single_gpu()
