@@ -88,9 +88,9 @@ def plot_filtering_distributions(stats, quality_threshold: float, agreement_thre
 
     categories = ['Low Quality\nOnly', 'Low Agreement\nOnly', 'Both Issues']
     values = [
-        stats['low_quality'] - stats['both_issues'],
-        stats['low_agreement'] - stats['both_issues'],
-        stats['both_issues']
+        stats["low_quality"] - stats["both_issues"],
+        stats["low_agreement"] - stats["both_issues"],
+        stats["both_issues"],
     ]
     colors = ["#ff6b6b", "#ffa07a", "#cd5c5c"]
 
