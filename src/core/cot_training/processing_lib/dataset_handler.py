@@ -2,12 +2,13 @@ import logging
 import random
 
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict, Dataset, load_from_disk
 from collections import defaultdict
 
 
+from .prompt_config import VulnerabilityPromptConfig
 from ..utilities import rich_table, is_main_process
 
 logger = logging.getLogger(name=__name__)
@@ -23,34 +24,7 @@ class DatasetHandler:
     num_cpus: int
     debug_mode: bool
 
-    SYSTEM_PROMPT: str = field(
-        init=False,
-        default=(
-            "You are an expert cybersecurity analyst specializing in C static code analysis. "
-            "Your task is to analyze the provided code and produce a step-by-step reasoning "
-            "chain explaining whether it contains a vulnerability."
-        ),
-        repr=False,
-    )
-
-    PROMPT_SKELETON: str = field(
-        init=False,
-        default=(
-            "**Analysis Instructions:**\n"
-            "1. **Trace Data Flow:** Analyze the flow of any external or user-controlled input.\n"
-            "2. **Pinpoint Dangerous Functions:** Identify the use of functions known to be risky (e.g., `strcpy`, `gets`, `sprintf`, `memcpy`) for each specified weakness.\n"
-            "3. **Check for Safeguards:** Look for any bounds checking, sanitization, or defensive programming that might mitigate risks.\n"
-            "4. **Conclude:** State your conclusion based on the analysis.\n\n"
-            "**Output Format:**\n"
-            "Produce a step-by-step list of your reasoning. After the list, your final answer must be "
-            "prefixed with 'Final Answer:' and be in the format 'YES (CWE-XXX, ...)' or 'NO'.\n"
-            "--- CODE START ---\n"
-            "{func_code}\n"
-            "--- CODE END ---\n\n"
-            "**Reasoning:**\n"
-        ).strip(),
-        repr=False,
-    )
+    prompt_config = VulnerabilityPromptConfig()
 
     def load_and_split_dataset(
         self, test_size: float = 0.1, val_size: float = 0.1, seed: int = 42
@@ -275,7 +249,7 @@ class DatasetHandler:
         """
         logger.info("🥼 Formatting train and validation splits with Chain-of-Thought template... 🥼")
 
-        def formatting_func(example):
+        def formatting_func(example: dict):
             """Formats a single example for Chain-of-Thought fine-tuning."""
             if example["target"] == 1 and example.get("cwe"):
                 cwe_string = ", ".join(example["cwe"])
@@ -284,12 +258,11 @@ class DatasetHandler:
                 final_answer = " NO"
 
             ground_truth = f"{example['reasoning']}\n\nFinal Answer:{final_answer}"
-            prompt = self.PROMPT_SKELETON.format(func_code=example["func"])
-            messages = [
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": ground_truth},
-            ]
+
+            messages = self.prompt_config.as_messages(
+                func_code=example["func"], ground_truth=ground_truth
+            )
+
             return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
             # return {"messages": messages}
 

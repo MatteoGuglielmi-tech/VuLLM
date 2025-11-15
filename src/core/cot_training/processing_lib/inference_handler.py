@@ -1,4 +1,4 @@
-from ..utilities import is_main_process
+from collections.abc import Generator
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
@@ -12,6 +12,9 @@ from tqdm import tqdm
 
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
+
+from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
+from ..utilities import is_main_process, rich_progress
 
 
 logger = logging.getLogger(name=__name__)
@@ -27,34 +30,8 @@ class TestHandler:
     model: FastLanguageModel|None = field(init=False, default=None, repr=False)
     tokenizer: PreTrainedTokenizer|None = field(init=False, default=None, repr=False)
 
-    SYSTEM_PROMPT: str = field(
-        init=False,
-        default=(
-            "You are an expert cybersecurity analyst specializing in C static code analysis. "
-            "Your task is to analyze the provided code and produce a step-by-step reasoning "
-            "chain explaining whether it contains a vulnerability."
-        ),
-        repr=False,
-    )
-
-    PROMPT_SKELETON: str = field(
-        init=False,
-        default=(
-            "**Analysis Instructions:**\n"
-            "1. **Trace Data Flow:** Analyze the flow of any external or user-controlled input.\n"
-            "2. **Pinpoint Dangerous Functions:** Identify the use of functions known to be risky (e.g., `strcpy`, `gets`, `sprintf`, `memcpy`) for each specified weakness.\n"
-            "3. **Check for Safeguards:** Look for any bounds checking, sanitization, or defensive programming that might mitigate risks.\n"
-            "4. **Conclude:** State your conclusion based on the analysis.\n\n"
-            "**Output Format:**\n"
-            "Produce a step-by-step list of your reasoning. After the list, your final answer must be "
-            "prefixed with 'Final Answer:' and be in the format 'YES (CWE-XXX, ...)' or 'NO'.\n"
-            "--- CODE START ---\n"
-            "{func_code}\n"
-            "--- CODE END ---\n\n"
-            "**Reasoning:**"
-        ).strip(),
-        repr=False,
-    )
+    prompt_config = VulnerabilityPromptConfig()
+    _counter_fails: int = field(init=False, default=0, repr=False)
 
     def __post_init__(self):
         self._validate_inputs()
@@ -211,7 +188,7 @@ class TestHandler:
             logger.critical(f"❌ Failed to load model: {e}")
             raise
 
-    def run_inference(self, c_code_input: str) -> str:
+    def run_inference(self, c_code_input: str) -> ParsedResponse:
         """Performs inference on a single C code snippet using the CoT format.
 
         Parameters
@@ -233,17 +210,10 @@ class TestHandler:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model and tokenizer must be loaded before running inference.")
 
-        # build full prompt
-        prompt = self.PROMPT_SKELETON.format(func_code=c_code_input)
         # build message structure
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-            # {"role": "assistant", "content": ""},
-        ]
+        messages: list[dict] = self.prompt_config.as_messages(func_code=c_code_input)
 
         input_text = self.tokenizer.apply_chat_template(
-            # [messages],
             messages,
             tokenize=False,
             add_generation_prompt=True,
@@ -256,15 +226,6 @@ class TestHandler:
             max_length=self.max_seq_length,
             truncation=True,
         ).to(self.model.device)  # type: ignore
-
-        # outputs = self.model.generate( #type: ignore
-        #     **inputs,
-        #     max_new_tokens=self.max_new_tokens,
-        #     do_sample=True,
-        #     temperature=0.2,
-        #     top_p=0.95,
-        #     min_p=0.1,
-        # )
 
         # Generate response
         try:
@@ -289,14 +250,14 @@ class TestHandler:
             generated_tokens, skip_special_tokens=True, cleanup_tokenization_spaces=True
         )[0]
 
-        return decoded_output.strip()
+        return self._parse_response(decoded_output.strip())
 
     def evaluate_on_test_set(
         self,
         test_dataset: Dataset,
         batch_size: int,
         use_batching: bool = True,
-    ) -> tuple[Dataset, list[str]]:
+    ) -> tuple[Dataset, list[ParsedResponse]]:
         """Run inference on test dataset and return predictions.
 
         Parameters
@@ -327,6 +288,7 @@ class TestHandler:
             predictions = self._batched_inference(test_dataset, batch_size)
         else:
             predictions = self._sequential_inference(test_dataset)
+
         # add predictions to dataset
         results_dataset = test_dataset.add_column("model_prediction", predictions)
 
@@ -334,48 +296,60 @@ class TestHandler:
 
         return results_dataset, predictions
 
-    def _sequential_inference(self, test_dataset: Dataset) -> list[str]:
+    def _sequential_inference(self, test_dataset: Dataset) -> list[ParsedResponse]:
         """Run inference sequentially using run_inference() method."""
 
-        predictions = []
+        predictions: list[ParsedResponse] = []
         for sample in tqdm(test_dataset, total=len(test_dataset), desc="Sequential Inference"):
             try:
                 prediction = self.run_inference(sample["func"])
                 predictions.append(prediction)
-            except Exception as e:
-                logger.error(f"Failed on sample: {e}")
-                predictions.append("")
+            except Exception:
+                logger.exception(f"Failed to evaluate sample")
+                predictions.append(
+                    ParsedResponse(
+                        reasoning={}, vulnerabilities=[], verdict={}, parse_error=True
+                    )
+                )
 
         return predictions 
 
-    def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[str]:
+    def _create_message_batches(
+        self, dataset: Dataset, *, batch_size: int
+    ) -> Generator[list[Messages], None, None]:
+        """Generate batches of formatted messages for inference."""
+
+        batch: list[Messages] = []
+
+        for func in dataset["func"]:
+            messages = self.prompt_config.as_messages(func_code=func)
+            batch.append(messages)
+
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+
+        if batch:
+            yield batch
+
+    def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[ParsedResponse]:
         """Run batched inference for speed. Processes multiple samples simultaneously."""
 
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model and tokenizer must be loaded before running evaluation.")
 
-        all_prompts = [
-            self.PROMPT_SKELETON.format(func_code=func) for func in test_dataset["func"]
-        ]
+        all_predictions: list[ParsedResponse] = []
+        num_batches = (len(test_dataset["func"]) + batch_size - 1) // batch_size
 
-        all_predictions = []
-        for i in tqdm(
-            range(0, len(all_prompts), batch_size),
-            total=len(all_prompts),
-            desc="Batched Inference",
+        for batch_messages in rich_progress(
+            self._create_message_batches(test_dataset, batch_size=batch_size),
+            total=num_batches,
+            description="Batched Inference",
+            status_fn=lambda b: f"{len(b)} samples"
         ):
-            batch_prompts = all_prompts[i : i + batch_size]
-            batch_messages = [
-                [
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ]
-                for prompt in batch_prompts
-            ]
-
-            # apply chat template to batch
-            input_texts = self.tokenizer.apply_chat_template(batch_messages, tokenize=False, add_generation_prompt=True)
-            # tokenize batch
+            input_texts = self.tokenizer.apply_chat_template(
+                batch_messages, tokenize=False, add_generation_prompt=True
+            )
             inputs = self.tokenizer(
                 input_texts, return_tensors="pt", padding=True,
                 max_length=self.max_seq_length, truncation=True,
@@ -398,13 +372,56 @@ class TestHandler:
 
                 generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
                 decoded_predictions = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-                all_predictions.extend([p.strip() for p in decoded_predictions])
+                all_predictions.extend([self._parse_response(p.strip()) for p in decoded_predictions])
 
-            except Exception as e:
-                logger.error(f"Batch inference failed at index {i}: {e}")
-                all_predictions.extend([""] * len(batch_prompts))
+            except Exception:
+                # if generation fails, proceed with next batch
+                # hopefully this never happens
+                logger.exception(f"Batch inference failed")
+                continue
 
         return all_predictions
+
+    def _parse_response(self, response: str) -> ParsedResponse:
+        """Parse judge response into structured ParsedResponse.
+
+        Parameters
+        ----------
+        response : str
+            Raw text response from the judge model
+
+        Returns
+        -------
+        ParsedResponse
+            Parsed text for generated output
+        """
+
+        try:
+            # extract json content
+            json_start = response.find("{")
+            json_end = response.rfind("}") + 1
+
+            if json_start >= 0 and json_end > json_start:
+                json_str = response[json_start:json_end]
+                result = json.loads(json_str)
+            else:
+                self._counter_fails += 1
+                raise ValueError("No JSON found in response")
+
+            return ParsedResponse(
+                reasoning=result.get("reasoning"),
+                vulnerabilities=result.get("vulnerabilities"),
+                verdict=result.get("verdict"),
+                parse_error=False,
+            )
+
+        except (json.JSONDecodeError, ValueError, KeyError):
+            return ParsedResponse(
+                reasoning={},
+                vulnerabilities=[],
+                verdict={},
+                parse_error=True,
+            )
 
 
 # Perform Detailed Error Analysis

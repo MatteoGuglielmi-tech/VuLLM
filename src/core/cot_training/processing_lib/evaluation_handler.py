@@ -16,6 +16,8 @@ from datasets import Dataset
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sklearn.preprocessing import MultiLabelBinarizer
 
+from .prompt_config import ParsedResponse
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,117 +105,7 @@ class Evaluator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"📊 Evaluator initialized. Output dir: {self.output_dir}")
 
-    def parse_prediction(self, prediction: str) -> dict[str, Any]:
-        """Robust parser for the model's Chain-of-Thought output.
-
-        Extracts:
-            - Binary label (YES/NO)
-            - CWE list (if vulnerable)
-            - Reasoning chain
-            - Parsing success status
-
-        Parameters
-        ----------
-        prediction : str
-            The model's complete generated output (reasoning + final answer).
-
-        Returns
-        -------
-        dict
-            {
-                "label": "YES" | "NO" | None,
-                "cwes": list[str],  # e.g., ["CWE-119", "CWE-787"]
-                "reasoning": str,   # Everything before "Final Answer:"
-                "final_answer_text": str,  # Everything after "Final Answer:"
-                "parse_success": bool,
-            }
-        """
-
-        result: dict[str, Any] = {
-            "label": None,
-            "cwes": [],
-            "reasoning": "",
-            "final_answer_text": "",
-            "parse_success": False,
-        }
-
-        conclusion_patterns = [
-            r"\bCONCLUSION\b(.+)",
-            r"\bFINAL\s+ANSWER\b(.+)",
-            r"\bANSWER\b(.+)",
-            r"\bEND\b(.+)",
-            r"\bVERDICT\b(.+)",
-        ]
-
-        answer_match: re.Match|None = None
-        for pattern in conclusion_patterns:
-            answer_match = re.search(pattern=pattern, string=prediction, flags=re.IGNORECASE|re.DOTALL)
-            if answer_match: break
-
-        if not answer_match:
-            # logger.warning("No 'Final Answer:' found in prediction")
-            result["reasoning"] = prediction.strip()
-            return result
-
-        # isolate components
-        split_point = answer_match.start()
-        result["reasoning"] = prediction[:split_point].strip()
-        result["final_answer_text"] = answer_match.group(1).strip()
-        final_answer = result["final_answer_text"]
-
-        # ============================================================
-        # CRITICAL: Check NO patterns FIRST (higher priority)
-        # ============================================================
-        no_patterns = [
-            r"\bNO\b",                                              # "NO"
-            r"\bNOT\s+VULNERABLE\b",                                # "NOT VULNERABLE"
-            r"\bISN'T\s+VULNERABLE\b",                              # "ISN'T VULNERABLE"
-            r"\bAIN'T\s+VULNERABLE\b",                              # "AIN'T VULNERABLE"
-            r"\bIS\s+NOT\s+VULNERABLE\b",                           # "IS NOT VULNERABLE"
-            r"\bNOT\s+VULN\b",                                      # "NOT VULN" (shorthand)
-            r"\bNO\s+VULNERABILITY\b",                              # "NO VULNERABILITY"
-            r"(?<!\bNOT\s)(?<!\bISN'T\s)(?<!\bIS\sNOT\s)\bSAFE\b"   # "SAFE"
-        ]
-
-        if any(re.search(pattern, final_answer, re.IGNORECASE) for pattern in no_patterns):
-            result["label"] = "NO"
-            result["parse_success"] = True
-            return result
-
-        # ============================================================
-        # Only check YES patterns if NO patterns didn't match
-        # ============================================================
-        yes_patterns = [
-            r"\bYES\b",                         # "YES"
-            r"\bVULNERABLE\b",                  # "VULNERABLE"
-            r"\bVULN\b",                        # "VULN" (shorthand)
-            r"\bCONTAINS\s+VULNERABILITY\b",    # "CONTAINS VULNERABILITY"
-            r"\bNOT\s+SAFE\b",                  # "NOT SAFE"
-            r"\bISN'T\s+SAFE\b",                # "ISN'T SAFE"
-            r"\bIS\s+NOT\s+SAFE\b",             # "IS NOT SAFE"
-        ]
-
-        if any(re.search(pattern, final_answer, re.IGNORECASE) for pattern in yes_patterns):
-            result["label"] = "YES"
-            result["parse_success"] = True
-
-            # extract CWEs (e.g., "YES (CWE-119, CWE-787)")
-            # cwe_match = re.search(pattern=r"\(([^)]+)\)", string=final_answer)
-            # if cwe_match:
-                # cwe_string = cwe_match.group(1) # group 1: extract parenthesis inner content
-            # cwes: list[str] = re.findall(pattern=r"CWE-\d+", string=cwe_string, flags=re.IGNORECASE)
-            cwes: list[str] = re.findall(pattern=r"CWE-\d+", string=final_answer, flags=re.IGNORECASE)
-            if cwes:
-                result["cwes"] = [cwe.upper() for cwe in cwes]
-            # else:
-                # logger.warning(f"Label is YES but no CWEs found in: {final_answer}")
-            return result
-
-        # -- UNABLE TO PARSE--
-        # logger.warning(f"Could not parse label from: {final_answer[:100]}...")
-        return result
-
-    def evaluate_binary_classification(self, predictions: list[str], save_artifacts: bool = True) -> BinaryEvaluationResults:
+    def evaluate_binary_classification(self, predictions: list[ParsedResponse], save_artifacts: bool = True) -> BinaryEvaluationResults:
         """Evaluate binary vulnerability detection (YES/NO).
 
         Parameters
@@ -262,7 +154,7 @@ class Evaluator:
             confusion_matrix=cm.tolist(),
         )
 
-    def _parse_all_predictions(self, predictions: list[str]) -> list[dict[str, Any]]:
+    def _parse_all_predictions(self, predictions: list[ParsedResponse]) -> list[dict[str, Any]]:
         """Parse all model predictions.
 
         Returns
@@ -274,19 +166,19 @@ class Evaluator:
         logger.info(f"Parsing {len(predictions)} predictions...")
 
         parsed_results = []
-        for i, pred_text in enumerate(predictions):
+        for i, parsed_pred in enumerate(predictions):
             sample = self.test_dataset[i]
             gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
-            parse_result = self.parse_prediction(pred_text)
+            pred_label = parsed_pred.verdict.get("is_vulnerable")
 
             parsed_results.append({
                 "index": i,
                 "ground_truth": gt_label,
-                "predicted_label": parse_result.get("label"),
-                "parse_success": parse_result.get("parse_success", False),
-                "prediction_text": pred_text,
-                "predicted_cwes": parse_result.get("cwes", []),
+                "predicted_label": 1 if pred_label else 0,
                 "ground_truth_cwes": sample.get("cwe", []),
+                "predicted_cwes": parsed_pred.verdict.get("cwe_list"),
+                "prediction_text": parsed_pred,
+                "parse_success": parsed_pred.parse_error,
             })
 
         return parsed_results
@@ -440,7 +332,7 @@ class Evaluator:
         )
         logger.info(f"✅ Confusion matrix: {cm_path.name}")
 
-    def evaluate_cwe_classification(self, predictions: list[str], save_artifacts: bool = True) -> CWEEvaluationResults:
+    def evaluate_cwe_classification(self, predictions: list[ParsedResponse], save_artifacts: bool = True) -> CWEEvaluationResults:
         """Evaluate CWE identification performance on vulnerable samples.
 
         Only evaluates samples where BOTH:
@@ -498,7 +390,7 @@ class Evaluator:
             all_cwes=all_cwes,
         )
 
-    def _collect_cwe_pairs(self, predictions: list[str]) -> dict[str, Any]:
+    def _collect_cwe_pairs(self, predictions: list[ParsedResponse]) -> dict[str, Any]:
         """Collect aligned ground truth and predicted CWE lists.
 
         Only includes samples where:
@@ -528,7 +420,7 @@ class Evaluator:
         valid_samples = 0  # Both GT and pred are YES with CWEs
         samples_missing_cwes = 0  # Pred is YES but no CWEs extracted
 
-        for i, pred_text in enumerate(predictions):
+        for i, parsed_pred in enumerate(predictions):
             # ground-truth
             sample = self.test_dataset[i]
             gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
@@ -539,11 +431,10 @@ class Evaluator:
             total_vulnerable += 1
 
             # predictions
-            parse_result = self.parse_prediction(pred_text)
-            pred_label = parse_result.get("label")
-            pred_cwes = parse_result.get("cwes", [])
+            pred_label = 1 if parsed_pred.verdict.get("is_vulnerable") else 0
+            pred_cwes = parsed_pred.verdict.get("cwe_list")
 
-            if not parse_result.get("parse_success") or pred_label != self.LABEL_YES:
+            if not parsed_pred.parse_error or pred_label != self.LABEL_YES:
                 # skip: either unparseable or predicted as NOT vulnerable
                 continue
 
@@ -552,7 +443,7 @@ class Evaluator:
                 missing_cwe_samples.append({
                     "index": i,
                     "ground_truth_cwes": gt_cwes,
-                    "prediction_text": pred_text,
+                    "prediction_text": parsed_pred,
                 })
 
             # even if pred_cwes is empty - it's a valid prediction
@@ -730,7 +621,7 @@ class Evaluator:
 
     def analyze_misclassifications(
         self,
-        predictions: list[str],
+        predictions: list[ParsedResponse],
         save_artifacts: bool = True,
         include_code: bool = False,
         max_response_length: int = 1000,
@@ -779,7 +670,7 @@ class Evaluator:
 
     def _collect_misclassifications(
         self,
-        predictions: list[str],
+        predictions: list[ParsedResponse],
         include_code: bool,
         max_response_length: int,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -796,31 +687,24 @@ class Evaluator:
         false_positives = []
         false_negatives = []
 
-        for i, pred_text in enumerate(predictions):
+        for i, parsed_resp in enumerate(predictions):
             sample = self.test_dataset[i]
             gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
 
-            parse_result = self.parse_prediction(pred_text)
-            pred_label = parse_result.get("label")
+            pred_label = 1 if  parsed_resp.verdict.get("cwe_list") else 0
 
             # skip if unparseable and correct
-            if not parse_result.get("parse_success") or pred_label is None: continue
+            if not parsed_resp.parse_error or pred_label is None: continue
             if pred_label == gt_label: continue
-
-            truncated_response = (
-                pred_text[:max_response_length] + "...[truncated]"
-                if len(pred_text) > max_response_length
-                else pred_text
-            )
 
             sample_details = {
                 "index": i,
                 "ground_truth_label": gt_label,
                 "predicted_label": pred_label,
                 "ground_truth_cwes": sample.get("cwe", []),
-                "predicted_cwes": parse_result.get("cwes", []),
-                "model_response": truncated_response,
-                "response_full_length": len(pred_text),
+                "predicted_cwes": parsed_resp.verdict.get("cwe_list"),
+                "model_response": parsed_resp.__repr__(),
+                "response_full_length": len(parsed_resp.__str__()), # approx
             }
 
             if include_code:
