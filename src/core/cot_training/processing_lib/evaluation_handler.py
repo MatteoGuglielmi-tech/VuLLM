@@ -47,6 +47,7 @@ class CWEPair:
         yield self.cwes_gt
         yield self.cwes_pred
 
+
 @dataclass
 class CWEEvaluationResults:
     """Results from CWE classification evaluation."""
@@ -79,7 +80,6 @@ class CWEEvaluationResults:
             "n_samples": self.n_samples,
             "n_classes": self.n_classes,
         }
-
 
 
 @dataclass
@@ -121,7 +121,6 @@ class Evaluator:
     results: list[dict] = field(default_factory=list, init=False, repr=False)
     parse_failures: list[dict] = field(default_factory=list, init=False, repr=False)
     metrics: Optional[dict] = field(default=None, init=False, repr=False)
-
 
     n_samples: int = field(default=0, init=False, repr=False)
     n_parse_failures: int = field(default=0, init=False, repr=False)
@@ -169,6 +168,7 @@ class Evaluator:
             Comprehensive evaluation metrics.
         """
 
+        logger.info("Starting binary classifiaction evaluation ...")
         self._parse_predictions()
         binary_metrics = self._compute_binary_metrics()
 
@@ -192,7 +192,8 @@ class Evaluator:
         with rich_progress_manual(
             total=self.n_samples, description="Validating CWE format ..."
         ) as pbar:
-            for idx, sample in enumerate(self.test_dataset):
+            for idx in range(self.n_samples):
+                sample: dict[str, Any] = self.test_dataset[idx]
                 try:
                     prediction: ParsedResponse = sample["model_prediction"]
                     if prediction.parse_error:
@@ -305,15 +306,14 @@ class Evaluator:
         Populates self.results and self.parse_failures.
         """
 
-        logger.info("Extracting predictions and ground truths...")
-
         with rich_progress_manual(
             total=self.n_samples,
             description="Extracting predictions and ground truths...",
         ) as pbar:
-            for idx, sample in enumerate(self.test_dataset):
-                prediction: ParsedResponse = sample["model_prediction"]
+            for idx in range(self.n_samples):
+                sample = self.test_dataset[idx]
 
+                prediction: ParsedResponse = sample["model_prediction"]
                 gt_binary_label: bool = bool(sample["target"])
                 gt_cwes: list[int] = (
                     list(map(lambda x: int(x.split("-")[1]), sample["cwe"]))
@@ -524,15 +524,21 @@ class Evaluator:
             logger.exception("No valid predictions found. Run _parse_predictions() first.")
             raise ValueError("No results available for metrics computation")
 
-        with rich_status(description="Computing binary classification metrics...", spinner="arc"):
+        with rich_status(
+            description="Computing binary classification metrics...", spinner="arc"
+        ):
             y_true: list[bool] = [r["gt_vulnerable"] for r in self.results]
             y_pred: list[bool] = [r["pred_vulnerable"] for r in self.results]
 
             y_true_labels = ["Vulnerable" if y else "Safe" for y in y_true]
             y_pred_labels = ["Vulnerable" if y else "Safe" for y in y_pred]
 
-            report = self._compute_classification_report(y_true=y_true_labels, y_pred=y_pred_labels)
-            cm = self._compute_confusion_matrix(y_true=y_true_labels, y_pred=y_pred_labels)
+            report = self._compute_classification_report(
+                y_true=y_true_labels, y_pred=y_pred_labels
+            )
+            cm = self._compute_confusion_matrix(
+                y_true=y_true_labels, y_pred=y_pred_labels
+            )
 
             tp = sum(r["tp"] for r in self.results)
             tn = sum(r["tn"] for r in self.results)
@@ -653,7 +659,7 @@ class Evaluator:
 
     def evaluate_cwe_classification(self, save_artifacts: bool = True):
 
-        logger.info("CWE CLASSIFICATION EVALUATION")
+        logger.info("Starting CWE classifiaction evaluation ...")
 
         cwe_pairs = self._collect_cwe_pairs()
         cwe_vocabulary: list[int] = self._build_cwe_vocabulary(cwe_pairs=cwe_pairs)
@@ -661,9 +667,9 @@ class Evaluator:
             cwe_pairs=cwe_pairs, vocabulary=cwe_vocabulary
         )
         per_cwe_report = self._compute_per_cwe_metrics(
-            y_true_bin, y_pred_bin, vocabulary=cwe_vocabulary # type: ignore
+            y_true_bin, y_pred_bin, vocabulary=cwe_vocabulary  # type: ignore
         )
-        micro_f1, macro_f1 = self._compute_aggregate_metrics(y_true_bin, y_pred_bin) # type: ignore
+        micro_f1, macro_f1 = self._compute_aggregate_metrics(y_true_bin, y_pred_bin)  # type: ignore
 
         results = CWEEvaluationResults(
             per_cwe_metrics=per_cwe_report,
@@ -677,6 +683,10 @@ class Evaluator:
             self._save_cwe_artifacts(results)
 
     def _collect_cwe_pairs(self) -> list[CWEPair]:
+        """Collect pairs of CWE indexes in a list of tuples where:
+            - 1st element represents all ground truth cwe ids
+            - 2nd element represents corresponding predicted cwe ids
+        """
         return [
             CWEPair(cwes_gt=entry["gt_cwes"], cwes_pred=entry["pred_cwes"])
             for entry in self.results

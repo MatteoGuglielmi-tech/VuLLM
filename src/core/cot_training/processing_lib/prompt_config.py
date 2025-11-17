@@ -126,7 +126,7 @@ class ParsedResponse:
     verdict: dict[str, Any]
     parse_error: bool = False
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reasoning": self.reasoning,
             "vulnerabilities": self.vulnerabilities,
