@@ -286,7 +286,11 @@ class FineTuningHandler:
 
         instruction_part, response_part = get_instruction_response_parts(tokenizer=self.tokenizer)
         trainer = train_on_responses_only(
-            trainer, instruction_part=instruction_part, response_part=response_part
+            trainer,
+            instruction_part=instruction_part,
+            response_part=response_part,
+            tokenizer=self.tokenizer,
+            num_proc=int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
         )
 
         logger.info(f"✅ Trainer configured with response-only training")
