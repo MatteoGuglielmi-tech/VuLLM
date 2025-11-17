@@ -257,7 +257,7 @@ class TestHandler:
         test_dataset: Dataset,
         batch_size: int,
         use_batching: bool = True,
-    ) -> tuple[Dataset, list[ParsedResponse]]:
+    ) -> Dataset:
         """Run inference on test dataset and return predictions.
 
         Parameters
@@ -294,7 +294,9 @@ class TestHandler:
 
         logger.info("✅ Evaluation complete.")
 
-        return results_dataset, predictions
+        results_dataset.save_to_disk(fp="./DiverseVul/test_evaluations/")
+
+        return results_dataset
 
     def _sequential_inference(self, test_dataset: Dataset) -> list[ParsedResponse]:
         """Run inference sequentially using run_inference() method."""
