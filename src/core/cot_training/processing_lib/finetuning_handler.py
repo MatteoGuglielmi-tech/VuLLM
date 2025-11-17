@@ -294,7 +294,7 @@ class FineTuningHandler:
             "run_name": f"{self.base_model_name.split('/')[-1]}-epochs-{self.epochs}",
             "num_train_epochs": self.epochs,
             "per_device_train_batch_size": self.per_device_train_batch_size,
-            "per_device_eval_batch_size": self.per_device_train_batch_size,
+            # "per_device_eval_batch_size": self.per_device_train_batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
             "warmup_steps": self.warmup_steps,
             "learning_rate": self.lr,

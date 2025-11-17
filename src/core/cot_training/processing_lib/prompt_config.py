@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 from dataclasses import dataclass, field
 
 Messages = list[dict[str,str]]
@@ -77,22 +77,22 @@ class VulnerabilityPromptConfig:
     def __iter__(self):
         """Allow tuple unpacking: system, user = VulnerabilityPromptConfig()"""
         return iter([self.SYSTEM_PROMPT, self.USER_PROMPT])
-    
+
     @property
     def system(self) -> str:
         """System prompt."""
         return self.SYSTEM_PROMPT
-    
+
     @property
     def user(self) -> str:
         """User prompt template."""
         return self.USER_PROMPT
-    
+
     def format_user_prompt(self, func_code: str) -> str:
         """Format user prompt with function code."""
         return self.USER_PROMPT.format(func_code=func_code)
-    
-    def as_messages(self, func_code: str, ground_truth: str|None = None) -> Messages:
+
+    def as_messages(self, func_code: str, ground_truth: str | None = None) -> Messages:
         """
         Format as messages list for chat models.
 
@@ -122,7 +122,7 @@ class ParsedResponse:
     """Container for json response"""
 
     reasoning: dict[str, str]
-    vulnerabilities: list[dict[str, str|int]]
+    vulnerabilities: list[dict[str, str | int]]
     verdict: dict[str, Any]
     parse_error: bool = False
 
@@ -147,6 +147,21 @@ class ParsedResponse:
         return self.verdict
 
     @property
-    def is_unable_to_parse(self):
-        return self.parse_error
+    def is_vulnerable(self) -> Optional[bool]:
+        if self.parse_error:
+            return None
+        return self.verdict.get("is_vulnerable")
 
+    @property
+    def cwe_list(self) -> list[int]:
+        """Extract CWE list from verdict, handling parse errors."""
+        if self.parse_error:
+            return []
+        return self.verdict.get("cwe_list", [])
+
+    @property
+    def confidence(self) -> Optional[float]:
+        """Extract confidence from verdict, handling parse errors."""
+        if self.parse_error:
+            return None
+        return self.verdict.get("confidence")

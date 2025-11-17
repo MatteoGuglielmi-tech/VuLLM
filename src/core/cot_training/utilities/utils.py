@@ -481,7 +481,7 @@ def rich_status(description: str, spinner: str = "clock"):
     with _console.status(description, spinner=spinner) as s:
         try:
             yield s
-            s.update(f"{description} [bold green]✓ Done[/bold green]")
+            s.update(f"{description} -> [bold green]✓ Done[/bold green]")
         except Exception:
             s.stop()
             rich_exception()

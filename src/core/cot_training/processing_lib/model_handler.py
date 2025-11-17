@@ -12,8 +12,7 @@ from dataclasses import dataclass, field
 from transformers import PreTrainedTokenizer
 from peft import LoftQConfig
 
-from ..loader_config import Loader
-from ..utilities import rich_table
+from ..utilities import rich_table, rich_status
 
 logger = logging.getLogger(name=__name__)
 
@@ -153,8 +152,8 @@ class ModelHandler:
             raise oom
 
         except Exception as e:
-            logger.critical(f"❌ Failed to load model: {e}")
-            raise
+            logger.exception(f"❌ Failed to load model")
+            raise e
 
         if getattr(self.base_model, "is_loaded_in_4bit", False):
                 logger.info("✅ Verification successful: Model is loaded in 4-bit.")
@@ -192,7 +191,7 @@ class ModelHandler:
             }
         )
 
-        with Loader(" 🩹 Patching model ..."):
+        with rich_status(description=" 🩹 Patching model ...", spinner="arc"):
             self.patched_model = FastLanguageModel.get_peft_model(
                 model=self.base_model,
                 r=self.lora_r,

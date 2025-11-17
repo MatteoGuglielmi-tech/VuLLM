@@ -42,12 +42,14 @@ warnings.filterwarnings(
     category=FutureWarning,
 )
 
-
-load_dotenv()
-setup_logger()
 logger = logging.getLogger(name=__name__)
 
+
 if __name__ == "__main__":
+
+    load_dotenv()
+    setup_logger()
+
     parser = cli.get_parser()
     args = parser.parse_args()
     cli.validate_args(args)
@@ -152,59 +154,25 @@ if __name__ == "__main__":
                 max_new_tokens=args.max_tokens_per_answer,
                 chat_template=args.chat_template_inference
             )
-            evaluator = Evaluator(output_dir=args.assets_dir, test_dataset=test_set)
 
-            _, predictions = test_handler.evaluate_on_test_set(test_dataset=test_set, batch_size=args.batch_size, use_batching=args.use_batching)
-            binary_results = evaluator.evaluate_binary_classification(predictions=predictions, save_artifacts=True)
-            cwe_results = evaluator.evaluate_cwe_classification(predictions=predictions, save_artifacts=True)
-            misclass_results = evaluator.analyze_misclassifications(
-                predictions=predictions,
-                save_artifacts=True,
-                include_code=args.include_code_in_reports,
-                max_response_length=args.max_tokens_per_answer,
+            dataset_with_perdictions = test_handler.evaluate_on_test_set(
+                test_dataset=test_set,
+                batch_size=args.batch_size,
+                use_batching=args.use_batching,
             )
 
-            if is_main_process():
-                rich_rule(f" ✅[bold][italic] EVALUATION COMPLETE - SUMMARY [/][/]✅")
+            evaluator = Evaluator(output_dir=args.assets_dir, test_dataset=dataset_with_perdictions)
+            evaluator.validate_cwe_format() # validate predicted cwe quality
+            binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=True) # address target performance
+            cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=True) # address cwe performance
 
-                data = {
-                    "Accuracy": round(binary_results.accuracy, 3),
-                    "F1 (Vulnerable)": round(binary_results.f1_vulnerable, 2),
-                    "Valid samples (%)": round((binary_results.valid_samples / binary_results.total_samples) * 100, 2),
-                    "Unparsable(%)": round(( binary_results.unparsable_samples / binary_results.total_samples) * 100, 2),
-                }
-                rich_table(data=data,title="📊 Binary Classification", columns=["Metric", "Value"])
+            # misclass_results = evaluator.analyze_misclassifications(
+            #     predictions=predictions,
+            #     save_artifacts=True,
+            #     include_code=args.include_code_in_reports,
+            #     max_response_length=args.max_tokens_per_answer,
+            # )
 
-                print("\n")
-                data = {
-                    "Macro-avg F1": round(cwe_results.macro_avg_f1, 3),
-                    "Micro-avg F1": round(cwe_results.micro_avg_f1, 2),
-                    "Unique CWEs": len(cwe_results.all_cwes),
-                    "Valid samples": cwe_results.valid_samples,
-                    "Missing CWEs": cwe_results.samples_missing_cwes,
-                }
-                rich_table(data=data, title="📊 CWE Classification", columns=["Metric", "Value"])
-
-                print("\n")
-                data = {
-                    "Total errors": misclass_results.total_errors,
-                    "Error rate": round(misclass_results.error_rate, 2),
-                    "False Positives": misclass_results.false_positives,
-                    "False Negatives": misclass_results.false_negatives,
-                }
-                rich_table(data=data, title="📊 Misclassifications", columns=["Metric", "Value"])
-
-                logger.info(f"\n📁 All artifacts saved to: {args.assets_dir}")
-
-            rich_rule(style="light_sky_blue1")
-
-            if args.save_summary:
-                evaluator.save_evaluation_summary(
-                    output_dir=Path(args.assets_dir),
-                    binary_results=binary_results,
-                    cwe_results=cwe_results,
-                    misclass_results=misclass_results,
-                )
     except Exception as e:
         rich_exception()
     finally:
