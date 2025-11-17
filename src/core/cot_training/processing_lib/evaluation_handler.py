@@ -1,72 +1,85 @@
-import re
+import csv
 import json
 import logging
-import csv
-import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
-from typing import Any
-from pathlib import Path
+from matplotlib.colors import Normalize
 from dataclasses import dataclass, field
-from datetime import datetime
-
+from pathlib import Path
+from typing import Any, Optional, Iterator, cast
 from datasets import Dataset
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sklearn.preprocessing import MultiLabelBinarizer
 
+from ..utilities import (build_panel, build_table, rich_panel,
+                         rich_panels_grid, rich_progress_manual, rich_status)
 from .prompt_config import ParsedResponse
-
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BinaryEvaluationResults:
-    """Results from binary classification evaluation."""
-
-    total_samples: int
-    valid_samples: int
-    unparsable_samples: int
-    unparsable_indices: list[int]
-    classification_report: dict[str, Any]
-    confusion_matrix: list[list[int]]
+class CWEPair:
+    cwes_gt: list[int]
+    cwes_pred: list[int]
 
     @property
-    def accuracy(self) -> float:
-        """Extract accuracy from classification report."""
-        return self.classification_report.get("accuracy", 0.0)
+    def ground_truth(self) -> list[int]:
+        return self.cwes_gt
 
     @property
-    def f1_vulnerable(self) -> float:
-        """F1-score for vulnerable (YES) class."""
-        return self.classification_report.get("YES (Vulnerable)", {}).get("f1-score", 0.0)
+    def predicted(self) -> list[int]:
+        return self.cwes_pred
+
+    @property
+    def as_tuple(self) -> tuple[list[int], list[int]]:
+        return self.cwes_gt, self.cwes_pred
+
+    @property
+    def as_flatten_tuple(self) -> tuple[int, ...]:
+        return (*self.cwes_gt, *self.cwes_pred)
+
+    def __iter__(self) -> Iterator[list[int]]:
+        """Allow unpacking: gt, pred = pair"""
+        yield self.cwes_gt
+        yield self.cwes_pred
 
 @dataclass
 class CWEEvaluationResults:
     """Results from CWE classification evaluation."""
-    total_vulnerable_samples: int
-    valid_samples: int
-    samples_missing_cwes: int
-    per_cwe_report: dict[str, Any]
-    micro_avg_f1: float
-    macro_avg_f1: float
-    all_cwes: list[str]
+    per_cwe_metrics: dict[str, Any]
+    aggreate_metrics: dict[str, float]
+    vocabulary: list[int]
+    n_samples: int
+    n_classes: int
 
     @property
     def micro_avg(self) -> float:
         """Extract accuracy from classification report."""
-        return self.micro_avg_f1
+        return self.aggreate_metrics["micro_avg_f1"]
+
     @property
     def macro_avg(self) -> float:
         """Extract accuracy from classification report."""
-        return self.macro_avg_f1
+        return self.aggreate_metrics["macro_f1"]
 
     @property
-    def encountered_cwe(self) -> list[str]:
+    def cwe_vocabulary(self) -> list[int]:
         """F1-score for vulnerable (YES) class."""
-        return self.all_cwes
+        return self.vocabulary
+
+    def to_dict(self):
+        return {
+            "per_cwe_metrics": self.per_cwe_metrics,
+            "aggregate_metrics": self.aggreate_metrics,
+            "vocabulary": self.vocabulary,
+            "n_samples": self.n_samples,
+            "n_classes": self.n_classes,
+        }
+
 
 
 @dataclass
@@ -92,26 +105,61 @@ class MisclassificationAnalysisResults:
 
 @dataclass
 class Evaluator:
-    """Handles evaluation, metrics computation, and visualization for model predictions."""
+    """
+    Handles evaluation, metrics computation, and visualization for model predictions.
+
+    Expected dataset fields:
+        - func: str - C function source code
+        - target: int - Binary ground truth (0=safe, 1=vulnerable)
+        - cwe: list[int] - Ground truth CWE IDs
+        - model_prediction: ParsedResponse - Model's parsed JSON output
+    """
 
     output_dir: Path
     test_dataset: Dataset
 
-    LABEL_YES: str = field(default="YES", init=False)
-    LABEL_NO: str = field(default="NO", init=False)
+    results: list[dict] = field(default_factory=list, init=False, repr=False)
+    parse_failures: list[dict] = field(default_factory=list, init=False, repr=False)
+    metrics: Optional[dict] = field(default=None, init=False, repr=False)
+
+
+    n_samples: int = field(default=0, init=False, repr=False)
+    n_parse_failures: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self):
         """Setup output directory."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"📊 Evaluator initialized. Output dir: {self.output_dir}")
+        (self.output_dir / "plots").mkdir(exist_ok=True)
+        (self.output_dir / "errors").mkdir(exist_ok=True)
 
-    def evaluate_binary_classification(self, predictions: list[ParsedResponse], save_artifacts: bool = True) -> BinaryEvaluationResults:
+        if len(self.test_dataset) == 0:
+            raise ValueError("Test dataset is empty")
+
+        self.n_samples = len(self.test_dataset)
+
+        sample: dict[str, Any] = self.test_dataset[0]
+        required_fields: list[str] = ["func", "target", "cwe", "model_prediction"]
+        missing_fields: list[str] = [f for f in required_fields if f not in sample]
+
+        if missing_fields:
+            raise ValueError(f"Dataset missing fields: {missing_fields}")
+
+        if not isinstance(sample["model_prediction"], ParsedResponse):
+            raise TypeError(
+                f"Expected model_prediction to be ParsedResponse, "
+                f"got {type(sample['model_prediction'])}"
+            )
+
+        logger.info("📊 Evaluator initialized")
+        logger.info(f"  Output dir: {self.output_dir}")
+        logger.info(f"  Test samples: {self.n_samples}")
+        logger.info(f"  Required fields: ✓")
+
+    def evaluate_binary_classification(self, save_artifacts: bool = True) -> None:
         """Evaluate binary vulnerability detection (YES/NO).
 
         Parameters
         ----------
-        predictions : list[str]
-            Raw model predictions (reasoning + final answer).
         save_artifacts : bool
             Whether to save reports and plots.
 
@@ -121,142 +169,339 @@ class Evaluator:
             Comprehensive evaluation metrics.
         """
 
-        parsed_results = self._parse_all_predictions(predictions)
-        filtered_data = self._filter_unparsable_samples(parsed_results)
-
-        # compute metrics on valid samples only
-        report = self._compute_classification_report(y_true=filtered_data["ground_truth"], y_pred=filtered_data["predictions"])
-
-        # compute confusion matrix
-        cm = self._compute_confusion_matrix(y_true=filtered_data["ground_truth"], y_pred=filtered_data["predictions"])
-        self._log_binary_summary(
-            report=report,
-            cm=cm,
-            total_samples=len(predictions),
-            valid_samples=len(filtered_data["predictions"]),
-            unparsable_count=len(filtered_data["unparsable_indices"]),
-        )
+        self._parse_predictions()
+        binary_metrics = self._compute_binary_metrics()
 
         if save_artifacts:
-            self._save_binary_artifacts(
-                report=report,
-                cm=cm,
-                unparsable_indices=filtered_data["unparsable_indices"],
-                unparsable_texts=filtered_data["unparsable_texts"],
-            )
+            self._save_binary_artifacts(binary_metrics=binary_metrics)
 
-        return BinaryEvaluationResults(
-            total_samples=len(predictions),
-            valid_samples=len(filtered_data["predictions"]),
-            unparsable_samples=len(filtered_data["unparsable_indices"]),
-            unparsable_indices=filtered_data["unparsable_indices"],
-            classification_report=report,
-            confusion_matrix=cm.tolist(),
-        )
+    def validate_cwe_format(self) -> None:
+        """
+        Validate that CWE fields are properly formatted in predictions.
 
-    def _parse_all_predictions(self, predictions: list[ParsedResponse]) -> list[dict[str, Any]]:
-        """Parse all model predictions.
-
-        Returns
-        -------
-        list[dict]
-            List of parsed results with ground truth labels.
+        Checks:
+        - CWEs are integers (not strings like "CWE-119")
+        - CWEs are only present when is_vulnerable=True
+        - CWE list is empty when is_vulnerable=False
         """
 
-        logger.info(f"Parsing {len(predictions)} predictions...")
+        invalid_cwes: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []  # For non-critical issues
+        parse_errors: int = 0
 
-        parsed_results = []
-        for i, parsed_pred in enumerate(predictions):
-            sample = self.test_dataset[i]
-            gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
-            pred_label = parsed_pred.verdict.get("is_vulnerable")
+        with rich_progress_manual(
+            total=self.n_samples, description="Validating CWE format ..."
+        ) as pbar:
+            for idx, sample in enumerate(self.test_dataset):
+                try:
+                    prediction: ParsedResponse = sample["model_prediction"]
+                    if prediction.parse_error:
+                        parse_errors += 1
+                        pbar.update(advance=1)
+                        pbar.set_postfix({
+                            "✗ Parse errors": parse_errors,
+                            "✗ Format errors": len(invalid_cwes),
+                            "⚠ Warnings": len(warnings),
+                            "Error rate": (
+                                f"{len(invalid_cwes)/self.n_samples:.1%}"
+                                if invalid_cwes
+                                else "0.0%"
+                            ),
+                        })
 
-            parsed_results.append({
-                "index": i,
-                "ground_truth": gt_label,
-                "predicted_label": 1 if pred_label else 0,
-                "ground_truth_cwes": sample.get("cwe", []),
-                "predicted_cwes": parsed_pred.verdict.get("cwe_list"),
-                "prediction_text": parsed_pred,
-                "parse_success": parsed_pred.parse_error,
-            })
+                    pred_cwes: list[int] = prediction.cwe_list
+                    is_pred_vulnerable: Optional[bool] = prediction.is_vulnerable
 
-        return parsed_results
+                    if is_pred_vulnerable and pred_cwes:
+                        warnings.append({
+                            "index": idx,
+                            "issue": "Predicted vulnerable but CWE list is empty",
+                            "is_vulnerable": is_pred_vulnerable,
+                            "cwe_list": pred_cwes,
+                        })
 
+                    if not is_pred_vulnerable and pred_cwes:
+                        warnings.append({
+                            "index": idx,
+                            "issue": "Predicted safe but CWE list is non-empty",
+                            "is_vulnerable": is_pred_vulnerable,
+                            "cwe_list": pred_cwes
+                        })
 
-    def _filter_unparsable_samples(self, parsed_results: list[dict[str, Any]]) -> dict[str, Any]:
-        """Filter out unparsable samples for unbiased evaluation.
+                    if pred_cwes and is_pred_vulnerable:
+                        if not all(isinstance(cwe, int) for cwe in pred_cwes):
+                            invalid_cwes.append({
+                                "index": idx,
+                                "issue": "CWE list contains non-integer values",
+                                "pred_cwes": pred_cwes,
+                                "types": [type(cwe).__name__ for cwe in pred_cwes],
+                            })
 
-        Returns
-        -------
-        dict
-            {
-                "ground_truth": list[str],
-                "predictions": list[str],
-                "unparsable_indices": list[int],
-                "unparsable_texts": list[dict],
+                except Exception as e:
+                    invalid_cwes.append({
+                        "index": idx,
+                        "issue": f"CWE validation error: {e}",
+                        "raw_cwe": sample.get("cwe", "missing"),
+                        "prediction": str(
+                            sample.get("model_prediction", "missing")
+                        ),
+                    })
+                finally:
+                    pbar.update(advance=1)
+                    pbar.set_postfix({
+                        "✗ Parse errors": parse_errors,
+                        "✗ Format errors": len(invalid_cwes),
+                        "⚠ Warnings": len(warnings),
+                        "Format error rate": (
+                            f"{len(invalid_cwes)/self.n_samples:.1%}"
+                            if invalid_cwes
+                            else "0.0%"
+                        ),
+                    })
+
+            if invalid_cwes:
+                logger.error(
+                    f"❌ Found {len(invalid_cwes)} samples with INVALID CWE format"
+                )
+
+                invalid_file = self.output_dir / "errors" / "invalid_cwes.json"
+                with open(file=invalid_file, mode="w", encoding="utf-8") as f:
+                    json.dump(invalid_cwes, f, indent=2, default=str)
+
+                logger.error(f"Invalid CWEs saved to {invalid_file}")
+
+            if warnings:
+                logger.warning(
+                    f"⚠️  Found {len(warnings)} samples with CWE inconsistencies"
+                )
+
+                warnings_file = self.output_dir / "errors" / "cwe_warnings.json"
+                with open(file=warnings_file, mode="w", encoding="utf-8") as f:
+                    json.dump(warnings, f, indent=2, default=str)
+
+                logger.warning(f"CWE warnings saved to {warnings_file}")
+
+            if not invalid_cwes and not warnings:
+                logger.info("✅ All CWEs properly formatted and consistent")
+
+            stats = {
+                "total_samples": self.n_samples,
+                "invalid_format": len(invalid_cwes),
+                "inconsistencies": len(warnings),
+                "valid": self.n_samples - len(invalid_cwes),
             }
+
+            tb = build_table(data=stats, columns=["Stat", "Value"])
+            rich_panel(
+                tables=tb,
+                panel_title="CWE format statistics",
+                border_style="light_steel_blue",
+            )
+            del tb
+
+    def _parse_predictions(self) -> None:
+        """
+        Extract predictions and ground truths from dataset.
+        Populates self.results and self.parse_failures.
         """
 
-        ground_truth = []
-        predictions = []
-        unparsable_indices = []
-        unparsable_texts = []
+        logger.info("Extracting predictions and ground truths...")
 
-        for result in parsed_results:
-            if result["parse_success"] and result["predicted_label"] is not None:
-                ground_truth.append(result["ground_truth"])
-                predictions.append(result["predicted_label"])
-            else:
-                # unparsable sample - exclude from evaluation
-                unparsable_indices.append(result["index"])
-                unparsable_texts.append({
-                    "index": result["index"],
-                    "ground_truth": result["ground_truth"],
-                    "prediction_text": result["prediction_text"],
-                    "predicted_label": result["predicted_label"],
-                })
+        with rich_progress_manual(
+            total=self.n_samples,
+            description="Extracting predictions and ground truths...",
+        ) as pbar:
+            for idx, sample in enumerate(self.test_dataset):
+                prediction: ParsedResponse = sample["model_prediction"]
 
+                gt_binary_label: bool = bool(sample["target"])
+                gt_cwes: list[int] = (
+                    list(map(lambda x: int(x.split("-")[1]), sample["cwe"]))
+                    if sample["cwe"]
+                    else []
+                )
+
+                if (
+                    prediction.parse_error
+                    or prediction.is_vulnerable is None
+                    or not isinstance(prediction.is_vulnerable, bool)
+                ):
+                    self.parse_failures.append(
+                        {
+                            "index": idx,
+                            "func": sample["func"][:500],
+                            "gt_vulnerable": gt_binary_label,
+                            "gt_cwes": gt_cwes,
+                            "error": "Parse failure - invalid JSON or missing verdict",
+                            "raw_verdict": (
+                                prediction.verdict if not prediction.parse_error else None
+                            ),
+                        }
+                    )
+                    self.n_parse_failures += 1
+
+                    pbar.update(advance=1)
+                    pbar.set_postfix({
+                        "✓ Valid": len(self.results),
+                        "✗ Failures": self.n_parse_failures,
+                        "Error rate (%)": (
+                            f"{self.n_parse_failures/self.n_samples:.1%}"
+                            if self.n_parse_failures > 0
+                            else "0%"
+                        ),
+                    })
+                    continue
+
+                is_pred_vulnerable: bool = prediction.is_vulnerable
+                pred_cwe_list: list[int] = prediction.cwe_list
+                pred_confidence: Optional[float] = prediction.confidence
+
+                result = {
+                    "index": idx,
+                    "gt_vulnerable": gt_binary_label,
+                    "gt_cwes": set(gt_cwes),
+                    "pred_vulnerable": is_pred_vulnerable,
+                    "pred_cwes": set(pred_cwe_list),
+                    "confidence": (
+                        pred_confidence if pred_confidence is not None else 0.0
+                    ),
+                    "correct_binary": (gt_binary_label == is_pred_vulnerable),
+                    "correct_cwes": (
+                        (set(gt_cwes) == set(pred_cwe_list))
+                        if gt_binary_label and is_pred_vulnerable
+                        else None
+                    ),
+                    "tp": gt_binary_label and is_pred_vulnerable,
+                    "tn": (not gt_binary_label) and (not is_pred_vulnerable),
+                    "fp": (not gt_binary_label) and is_pred_vulnerable,
+                    "fn": gt_binary_label and (not is_pred_vulnerable),
+                }
+
+                self.results.append(result)
+
+                pbar.update(advance=1)
+                pbar.set_postfix(
+                    {
+                        "✓ Valid": len(self.results),
+                        "✗ Failures": self.n_parse_failures,
+                        "Error rate (%)": (
+                            f"{self.n_parse_failures/self.n_samples:.1%}"
+                            if self.n_parse_failures > 0
+                            else "0%"
+                        ),
+                    }
+                )
+
+        logger.info(f"✓ Extracted {len(self.results)} valid predictions")
         logger.info(
-            f"Valid samples: {len(predictions)} | "
-            f"Unparsable: {len(unparsable_indices)} "
-            f"({len(unparsable_indices)/len(parsed_results)*100:.2f}%)"
+            f"✗ Parse failures: {self.n_parse_failures} "
+                f"({self.n_parse_failures/self.n_samples:.1%})"
         )
+        # Save parse failures for analysis
+        if self.parse_failures:
+            self._save_parse_failures()
+        else:
+            logger.info("✅ No parse failures detected")
 
-        if unparsable_indices:
-            logger.warning(
-                f"⚠️  {len(unparsable_indices)} samples excluded from evaluation "
-                f"due to parsing failures"
-            )
+    def _analyze_confidence_distribution(self) -> None:
+        """Analyze confidence score distribution for valid predictions."""
+        if not self.results:
+            logger.warning("No results to analyze confidence")
+            return
 
-        return {
-            "ground_truth": ground_truth,
-            "predictions": predictions,
-            "unparsable_indices": unparsable_indices,
-            "unparsable_texts": unparsable_texts,
+        confidences: list[float] = [r["confidence"] for r in self.results]
+
+        correct_confidences = [
+            r["confidence"] for r in self.results if r["correct_binary"]
+        ]
+        incorrect_confidences = [
+            r["confidence"] for r in self.results if not r["correct_binary"]
+        ]
+
+        mean_conf_correct = float(f"{np.mean(correct_confidences):.3f}")
+        mean_conf_incorrect = float(f"{np.mean(incorrect_confidences):.3f}")
+
+        stats = {
+            "Mean": np.mean(confidences),
+            "Median": np.median(confidences),
+            "STD": np.std(confidences),
+            "Min": np.min(confidences),
+            "Max": np.max(confidences),
+            "Q25": np.percentile(confidences, 25),
+            "Q75": np.percentile(confidences, 75),
+            "Q90": np.percentile(confidences, 90),
+            "Q95": np.percentile(confidences, 95),
+            "Q99": np.percentile(confidences, 99),
+            "Mean (correct)": mean_conf_correct,
+            "Mean (incorrect)": mean_conf_incorrect
         }
 
+        tb = build_table(data=stats, columns=["Statistic index", "Value"])
+        rich_panel(
+            tables=tb,
+            panel_title="Confidence statistics in predictions",
+            border_style="pale_turquoise1",
+        )
+        del tb
+
+        # Calibration check: High confidence should mean high accuracy
+        high_conf = [r for r in self.results if r["confidence"] > 0.9]
+        if high_conf:
+            high_conf_accuracy = sum(r["correct_binary"] for r in high_conf) / len(
+                high_conf
+            )
+            logger.info(
+                f"  Accuracy when confidence > 0.9: {high_conf_accuracy:.2%} "
+                f"({len(high_conf)} samples)"
+            )
+
+    def _save_parse_failures(self) -> None:
+        """Save parse failures to JSON for debugging."""
+
+        if self.n_parse_failures > 0:
+            failures_file = self.output_dir / "errors" / "parse_failures.json"
+            with open(file=failures_file, mode="w", encoding="utf-8") as f:
+                json.dump(self.parse_failures, f, indent=2, default=str)
+
+            logger.info(f"Parse failures saved to {failures_file}")
+
     def _compute_classification_report(self, y_true: list[str], y_pred: list[str]) -> dict[str, Any]:
-        """Compute classification report with all metrics.
+        """
+        Compute classification report with all metrics.
+
+        Parameters
+        ----------
+        y_true: list[str]
+            Ground truth labels
+        y_pred: list[str]
+            Predicted labels
 
         Returns
         -------
-        dict
-            Classification report containing accuracy, precision, recall, f1
+        dict[str, Any]
+            Classification report containing accuracy, precision, recall, f1 
             for each class, plus macro/weighted averages.
         """
         report = classification_report(
             y_true,
             y_pred,
-            target_names=[f"{self.LABEL_YES} (Vulnerable)", f"{self.LABEL_NO} (Not Vulnerable)"],
+            target_names=["Vulnerable", "Safe"],
             output_dict=True,
-            zero_division=0.0,
+            zero_division=0.0, # type: ignore
         )
 
-        return report
+        return report # type: ignore
 
     def _compute_confusion_matrix(self, y_true: list[str], y_pred: list[str]) -> np.ndarray:
-        """Compute confusion matrix.
+        """
+        Compute confusion matrix.
+
+        Parameters
+        ----------
+        y_true: list[str]
+            Ground truth labels
+        y_pred: list[str]
+            Predicted labels
 
         Returns
         -------
@@ -266,212 +511,179 @@ class Evaluator:
              [FP, TN]]
         """
 
-        return confusion_matrix(y_true, y_pred, labels=[self.LABEL_YES, self.LABEL_NO])
+        return confusion_matrix(y_true, y_pred, labels=["Vulnerable", "Safe"])
 
+    def _compute_binary_metrics(self) -> dict[str, Any]:
+        """
+        Compute binary classification metrics (accuracy, precision, recall, F1).
 
-    def _log_binary_summary(self, report: dict[str, Any], cm: np.ndarray, total_samples: int, valid_samples: int, unparsable_count: int) -> None:
+        Returns:
+            Dictionary containing classification report and confusion matrix
+        """
+        if not self.results:
+            logger.exception("No valid predictions found. Run _parse_predictions() first.")
+            raise ValueError("No results available for metrics computation")
+
+        with rich_status(description="Computing binary classification metrics...", spinner="arc"):
+            y_true: list[bool] = [r["gt_vulnerable"] for r in self.results]
+            y_pred: list[bool] = [r["pred_vulnerable"] for r in self.results]
+
+            y_true_labels = ["Vulnerable" if y else "Safe" for y in y_true]
+            y_pred_labels = ["Vulnerable" if y else "Safe" for y in y_pred]
+
+            report = self._compute_classification_report(y_true=y_true_labels, y_pred=y_pred_labels)
+            cm = self._compute_confusion_matrix(y_true=y_true_labels, y_pred=y_pred_labels)
+
+            tp = sum(r["tp"] for r in self.results)
+            tn = sum(r["tn"] for r in self.results)
+            fp = sum(r["fp"] for r in self.results)
+            fn = sum(r["fn"] for r in self.results)
+
+            # sanity check: sklearn confusion matrix should match tracking
+            assert cm[0, 0] == tp, "TP mismatch between sklearn and tracked values"
+            assert cm[0, 1] == fn, "FN mismatch between sklearn and tracked values"
+            assert cm[1, 0] == fp, "FP mismatch between sklearn and tracked values"
+            assert cm[1, 1] == tn, "TN mismatch between sklearn and tracked values"
+
+        binary_metrics = {
+            "classification_report": report,
+            "confusion_matrix": cm.tolist(),
+            "confusion_matrix_dict": {
+                "tp": int(tp),
+                "tn": int(tn),
+                "fp": int(fp),
+                "fn": int(fn),
+            },
+            "n_samples": len(self.results),
+            "n_vulnerable": sum(y_true),
+            "n_safe": len(y_true) - sum(y_true),
+        }
+
+        self._log_binary_summary(binary_metrics=binary_metrics)
+
+        return binary_metrics
+
+    def _save_binary_metrics(self, binary_metrics: dict[str, Any]) -> None:
+        """Save binary classification metrics to JSON file."""
+
+        metrics_file = self.output_dir / "binary_metrics.json"
+
+        with open(file=metrics_file, mode="w", encoding="utf-8") as f:
+            json.dump(binary_metrics, f, indent=2)
+
+        logger.info(f"Binary metrics saved to {metrics_file}")
+
+    def _log_binary_summary(self, binary_metrics: dict[str, Any]) -> None:
         """Log evaluation summary to console."""
 
-        yes_metrics = report[f"{self.LABEL_YES} (Vulnerable)"]
-        no_metrics = report[f"{self.LABEL_NO} (Not Vulnerable)"]
+        yes_metrics = binary_metrics["report"]["Vulnerable"]
+        no_metrics = binary_metrics["report"]["Safe"]
+        tp, tn, fp, fn = binary_metrics["confusion_matrix_dict"].values()
 
-        print(f"\n📊 Binary Classification Results:")
-        print(f"   Total samples:      {total_samples}")
-        print(f"   Valid samples:      {valid_samples}")
-        print(f"   Unparsable:         {unparsable_count} ({unparsable_count/total_samples*100:.2f}%)")
+        overall_stats = {
+            "Support (total)": binary_metrics["n_samples"],
+            "Support (vulnerable)": binary_metrics["n_vulnerable"],
+            "Support (safe)": binary_metrics["n_safe"],
+            "Accuracy": f"{binary_metrics["accuracy"]:3.f}",
+            "Confusion Matrix": f"TP={tp}, TN={tn}, FP={fp}, FN={fn}",
+            "Overall Accuracy": f"{binary_metrics['accuracy']:.4f}"
+        }
 
-        print(f"\n   Overall Accuracy:   {report['accuracy']:.4f}")
+        tb = build_table(data=overall_stats, columns=["Index name", "Value"])
+        overall_panel = build_panel(
+            tb,
+            panel_title="📊 Binary classification results",
+            border_style="slate_blue1",
+        )
 
-        print(f"\n   YES (Vulnerable) Class:")
-        print(f"      Precision: {yes_metrics['precision']:.4f}")
-        print(f"      Recall:    {yes_metrics['recall']:.4f}")
-        print(f"      F1-Score:  {yes_metrics['f1-score']:.4f}")
-        print(f"      Support:   {yes_metrics['support']}")
+        vul_stats = {
+            "Support (vulnerable)": binary_metrics["n_vulnerable"],
+            "Precision (vulnerable)": float(f"{yes_metrics["precision"]:3.f}"),
+            "Recall (vulnerable)": float(f"{yes_metrics["recall"]:3.f}"),
+            "F1-Score (vulnerable)": float(f"{yes_metrics["f1-score"]:3.f}"),
+        }
+        tb = build_table(data=vul_stats, columns=["Index name", "Value"])
+        vul_panel = build_panel(
+            tb,
+            panel_title="Vulnearble class results",
+            border_style="red1",
+        )
 
-        print(f"\n   NO (Not Vulnerable) Class:")
-        print(f"      Precision: {no_metrics['precision']:.4f}")
-        print(f"      Recall:    {no_metrics['recall']:.4f}")
-        print(f"      F1-Score:  {no_metrics['f1-score']:.4f}")
-        print(f"      Support:   {no_metrics['support']}")
+        safe_stats = {
+            "Support (safe)": binary_metrics["n_safe"],
+            "Precision (safe)": f"{no_metrics["precision"]:3.f}",
+            "Recall (safe)": f"{no_metrics["recall"]:3.f}",
+            "F1-Score (safe)": f"{no_metrics["f1-score"]:3.f}",
+        }
+        tb = build_table(data=safe_stats, columns=["Index name", "Value"])
+        safe_panel = build_panel(
+            tb,
+            panel_title="Safe class results",
+            border_style="chartreuse1",
+        )
 
-        # Confusion matrix breakdown
-        tp, fn = cm[0, 0], cm[0, 1]
-        fp, tn = cm[1, 0], cm[1, 1]
+        rich_panels_grid(
+            panels=[overall_panel, vul_panel, safe_panel], grid_shape=(1, 3)
+        )
 
-        print(f"\n   Confusion Matrix:")
-        print(f"      True Positives:  {tp:4d}")
-        print(f"      True Negatives:  {tn:4d}")
-        print(f"      False Positives: {fp:4d}")
-        print(f"      False Negatives: {fn:4d}")
+        l: list[tuple[str, dict]] = [
+            ("overall_stats", overall_stats),
+            ("vul_stats", vul_stats),
+            ("safe_stats", safe_stats),
+        ]
+        stats: dict[str,dict] = {k: v for k, v in l}
+        self._save_json(filepath=(self.output_dir / "stats.json"), obj=stats)
 
-    def _save_binary_artifacts(self, report: dict[str, Any], cm: np.ndarray, unparsable_indices: list[int], unparsable_texts: list[dict]) -> None:
+    def _save_binary_artifacts(self, binary_metrics: dict[str, Any]) -> None:
         """Save all binary classification artifacts to disk."""
 
-        _ = unparsable_indices
+        with rich_status(description="Saving Artifacts ...", spinner="arc"):
+            self._save_binary_metrics(binary_metrics=binary_metrics)
+            # classification report as a separate file from `binary_metrics.json`
+            report_path = self.output_dir / "binary_classification_report.json"
+            self._save_json(report_path, binary_metrics["classification_report"])
+            logger.info(f"✅ Classification report: {report_path.name}")
 
-        logger.info(f"Saving Artifacts ...")
+            cm_path = self.output_dir / "binary_confusion_matrix.png"
+            self._plot_confusion_matrix(
+                cm=binary_metrics["confusion_matrix"],
+                title="Binary Vulnerability Detection",
+                save_path=cm_path,
+            )
 
-        # classification report
-        report_path = self.output_dir / "binary_classification_report.json"
-        self._save_json(report_path, report)
-        logger.info(f"✅ Classification report: {report_path.name}")
-
-        # unparsable samples (if any)
-        if unparsable_texts:
-            unparsable_path = self.output_dir / "binary_unparsable_samples.json"
-            self._save_json(unparsable_path, unparsable_texts)
-            logger.info(f"✅ Unparsable samples ({len(unparsable_texts)}): {unparsable_path.name}")
-
-        # confusion matrix plot
-        cm_path = self.output_dir / "binary_confusion_matrix.png"
-        self._plot_confusion_matrix(
-            cm=cm,
-            labels=[f"{self.LABEL_YES}\n(Vulnerable)", f"{self.LABEL_NO}\n(Not Vulnerable)"],
-            title="Binary Vulnerability Detection",
-            save_path=cm_path,
-        )
-        logger.info(f"✅ Confusion matrix: {cm_path.name}")
-
-    def evaluate_cwe_classification(self, predictions: list[ParsedResponse], save_artifacts: bool = True) -> CWEEvaluationResults:
-        """Evaluate CWE identification performance on vulnerable samples.
-
-        Only evaluates samples where BOTH:
-        1. Ground truth is vulnerable (YES)
-        2. Prediction is vulnerable (YES) and parseable
-
-        This ensures fair evaluation.
-
-        Parameters
-        ----------
-        predictions : list[str]
-            Raw model predictions.
-        save_artifacts : bool
-            Whether to save reports and plots.
-
-        Returns
-        -------
-        CWEEvaluationResults
-            Per-CWE metrics and aggregated scores.
-        """
+    def evaluate_cwe_classification(self, save_artifacts: bool = True):
 
         logger.info("CWE CLASSIFICATION EVALUATION")
 
-        cwe_data = self._collect_cwe_pairs(predictions)
-        all_cwes = self._build_cwe_vocabulary(cwe_data)
-        y_true_bin, y_pred_bin = self._binarize_cwe_labels(cwe_data["ground_truth_cwes"], cwe_data["predicted_cwes"], all_cwes)
-        per_cwe_report = self._compute_per_cwe_metrics(y_true_bin, y_pred_bin, all_cwes)
-        micro_f1, macro_f1 = self._compute_aggregate_metrics(y_true_bin, y_pred_bin)
+        cwe_pairs = self._collect_cwe_pairs()
+        cwe_vocabulary: list[int] = self._build_cwe_vocabulary(cwe_pairs=cwe_pairs)
+        y_true_bin, y_pred_bin = self._binarize_cwe_labels(
+            cwe_pairs=cwe_pairs, vocabulary=cwe_vocabulary
+        )
+        per_cwe_report = self._compute_per_cwe_metrics(
+            y_true_bin, y_pred_bin, vocabulary=cwe_vocabulary # type: ignore
+        )
+        micro_f1, macro_f1 = self._compute_aggregate_metrics(y_true_bin, y_pred_bin) # type: ignore
 
-        self._log_cwe_summary(
-            per_cwe_report=per_cwe_report,
-            micro_f1=micro_f1,
-            macro_f1=macro_f1,
-            total_vulnerable=cwe_data["total_vulnerable"],
-            valid_samples=cwe_data["valid_samples"],
-            missing_cwes=cwe_data["samples_missing_cwes"],
+        results = CWEEvaluationResults(
+            per_cwe_metrics=per_cwe_report,
+            aggreate_metrics={"micro_f1": micro_f1, "macro_f1": macro_f1},
+            vocabulary=cwe_vocabulary,
+            n_samples=len(cwe_pairs),
+            n_classes=len(cwe_vocabulary),
         )
 
         if save_artifacts:
-            self._save_cwe_artifacts(
-                per_cwe_report=per_cwe_report,
-                micro_f1=micro_f1,
-                macro_f1=macro_f1,
-                all_cwes=all_cwes,
-                missing_cwe_samples=cwe_data["missing_cwe_samples"],
-            )
+            self._save_cwe_artifacts(results)
 
-        return CWEEvaluationResults(
-            total_vulnerable_samples=cwe_data["total_vulnerable"],
-            valid_samples=cwe_data["valid_samples"],
-            samples_missing_cwes=cwe_data["samples_missing_cwes"],
-            per_cwe_report=per_cwe_report,
-            micro_avg_f1=micro_f1,
-            macro_avg_f1=macro_f1,
-            all_cwes=all_cwes,
-        )
+    def _collect_cwe_pairs(self) -> list[CWEPair]:
+        return [
+            CWEPair(cwes_gt=entry["gt_cwes"], cwes_pred=entry["pred_cwes"])
+            for entry in self.results
+            if (entry["gt_vulnerable"] and entry["pred_vulnerable"])
+        ]
 
-    def _collect_cwe_pairs(self, predictions: list[ParsedResponse]) -> dict[str, Any]:
-        """Collect aligned ground truth and predicted CWE lists.
-
-        Only includes samples where:
-        - Ground truth is vulnerable (YES)
-        - Prediction is vulnerable (YES) and parseable
-
-        Returns
-        -------
-        dict
-            {
-                "ground_truth_cwes": list[list[str]],
-                "predicted_cwes": list[list[str]],
-                "total_vulnerable": int,
-                "valid_samples": int,
-                "samples_missing_cwes": int,
-                "missing_cwe_samples": list[dict],
-            }
-        """
-
-        logger.info("Collecting CWE pairs from vulnerable samples...")
-
-        ground_truth_cwes = []
-        predicted_cwes = []
-        missing_cwe_samples = []
-
-        total_vulnerable = 0  # Ground truth vulnerable
-        valid_samples = 0  # Both GT and pred are YES with CWEs
-        samples_missing_cwes = 0  # Pred is YES but no CWEs extracted
-
-        for i, parsed_pred in enumerate(predictions):
-            # ground-truth
-            sample = self.test_dataset[i]
-            gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
-            gt_cwes = sample.get("cwe", [])
-
-            if gt_label != self.LABEL_YES: # skip safe samples
-                continue
-            total_vulnerable += 1
-
-            # predictions
-            pred_label = 1 if parsed_pred.verdict.get("is_vulnerable") else 0
-            pred_cwes = parsed_pred.verdict.get("cwe_list")
-
-            if not parsed_pred.parse_error or pred_label != self.LABEL_YES:
-                # skip: either unparseable or predicted as NOT vulnerable
-                continue
-
-            if not pred_cwes:
-                samples_missing_cwes += 1
-                missing_cwe_samples.append({
-                    "index": i,
-                    "ground_truth_cwes": gt_cwes,
-                    "prediction_text": parsed_pred,
-                })
-
-            # even if pred_cwes is empty - it's a valid prediction
-            ground_truth_cwes.append(gt_cwes)
-            predicted_cwes.append(pred_cwes)
-            valid_samples += 1
-
-        logger.info(
-            f"Collected {valid_samples} valid CWE pairs "
-            f"from {total_vulnerable} vulnerable samples"
-        )
-
-        if samples_missing_cwes > 0:
-            logger.warning(
-                f"⚠️  {samples_missing_cwes} predictions marked YES "
-                f"but failed to extract CWEs"
-            )
-
-        return {
-            "ground_truth_cwes": ground_truth_cwes,
-            "predicted_cwes": predicted_cwes,
-            "total_vulnerable": total_vulnerable,
-            "valid_samples": valid_samples,
-            "samples_missing_cwes": samples_missing_cwes,
-            "missing_cwe_samples": missing_cwe_samples,
-        }
-
-    def _build_cwe_vocabulary(self, cwe_data: dict[str, Any]) -> list[str]:
+    def _build_cwe_vocabulary(self, cwe_pairs: list[CWEPair]) -> list[int]:
         """Build complete CWE vocabulary from ground truth and predictions.
 
         Returns
@@ -480,27 +692,26 @@ class Evaluator:
             Sorted list of unique CWE identifiers.
         """
 
-        all_cwes = set()
-        # collect
-        for cwe_list in cwe_data["ground_truth_cwes"]:
-            all_cwes.update(cwe_list)
-        for cwe_list in cwe_data["predicted_cwes"]:
-            all_cwes.update(cwe_list)
+        all_cwes: set[int] = set()
+        for cwe_pair in cwe_pairs:
+            all_cwes.update(cwe_pair.as_flatten_tuple)
 
-        sorted_cwes = sorted(list(all_cwes))
+        sorted_cwes = sorted(all_cwes)
 
         logger.info(f"CWE vocabulary: {len(sorted_cwes)} unique CWEs")
-        logger.debug(f"CWEs: {', '.join(sorted_cwes)}")
+        logger.debug(f"CWEs: {', '.join(map(str,sorted_cwes))}")
 
         return sorted_cwes
 
-    def _binarize_cwe_labels(
-        self,
-        ground_truth_cwes: list[list[str]],
-        predicted_cwes: list[list[str]],
-        all_cwes: list[str],
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _binarize_cwe_labels(self, cwe_pairs: list[CWEPair], vocabulary: list[int]):
         """Binarize multi-label CWE lists.
+
+        Parameters
+        ----------
+        cwe_pairs : list[CWEPair]
+            List of ground truth and predicted CWE pairs
+        all_cwes : list[int]
+            Complete vocabulary of CWE IDs
 
         Returns
         -------
@@ -509,15 +720,26 @@ class Evaluator:
             Shape: (n_samples, n_cwes)
         """
 
-        mlb = MultiLabelBinarizer(classes=all_cwes)
-        y_true_bin = mlb.fit_transform(ground_truth_cwes) # only on real ids
+        # must be iterable of iterables
+        ground_truth_cwes: list[list[int]] = [pair.cwes_gt for pair in cwe_pairs]
+        predicted_cwes: list[list[int]] = [pair.cwes_pred for pair in cwe_pairs]
+
+        mlb = MultiLabelBinarizer(classes=vocabulary)
+        y_true_bin = mlb.fit_transform(ground_truth_cwes)
         y_pred_bin = mlb.transform(predicted_cwes)
 
+        assert (
+            list(mlb.classes_) == vocabulary
+        ), f"Class order mismatch: {list(mlb.classes_)} != {vocabulary}"
+
         logger.debug(f"Binarized shape: {y_true_bin.shape}")
+        # logger.debug(f"Column order: {list(mlb.classes_[:5])}... (first 5)")
 
         return y_true_bin, y_pred_bin
 
-    def _compute_per_cwe_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, cwe_names: list[str]) -> dict[str, Any]:
+    def _compute_per_cwe_metrics(
+        self, y_true: np.ndarray, y_pred: np.ndarray, vocabulary: list[int]
+    ) -> dict[str, Any]:
         """Compute precision, recall, F1 for each CWE.
 
         Returns
@@ -526,14 +748,20 @@ class Evaluator:
             Per-CWE metrics from classification_report.
         """
 
+        target_names = [f"CWE-{idx}" for idx in vocabulary]
         report = classification_report(
             y_true,
             y_pred,
-            target_names=cwe_names,
+            target_names=target_names,
             output_dict=True,
             digits=4,
-            zero_division=0.0,
+            zero_division=0.0, # type: ignore
         )
+        report = cast(dict[str, Any], report)
+
+        logger.info(f"Computed metrics for {len(vocabulary)} CWE classes")
+
+        self._log_top_bottom_performers(report, n=5)
 
         return report
 
@@ -546,78 +774,61 @@ class Evaluator:
             (micro_f1, macro_f1)
         """
 
-        micro_f1 = f1_score(y_true, y_pred, average="micro", zero_division=0.0)
-        macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0.0)
+        micro_f1 = f1_score(y_true, y_pred, average="micro", zero_division=0.0) # type: ignore
+        macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0.0) # type: ignore
 
         return micro_f1, macro_f1
 
-    def _log_cwe_summary(
-        self,
-        per_cwe_report: dict[str, Any],
-        micro_f1: float,
-        macro_f1: float,
-        total_vulnerable: int,
-        valid_samples: int,
-        missing_cwes: int,
-    ) -> None:
-        """Log CWE evaluation summary."""
+    def _log_top_bottom_performers(self, report: dict[str, Any], n: int = 5):
+        """Log top and bottom performing CWEs."""
 
-        print(f"\n📊 CWE Classification Results:")
-        print(f"   Total vulnerable (GT): {total_vulnerable}")
-        print(f"   Valid TP samples:      {valid_samples}")
-        print(f"   Missing CWEs:          {missing_cwes}")
+        cwe_metrics = {
+            k: v
+            for k, v in report.items()
+            if k.startswith("CWE-") and isinstance(v, dict)
+        }
 
-        print(f"\n   Aggregate Metrics:")
-        print(f"      Micro-avg F1: {micro_f1:.4f}  (overall performance)")
-        print(f"      Macro-avg F1: {macro_f1:.4f}  (per-CWE average)")
+        sorted_cwes = sorted(
+            cwe_metrics.items(), key=lambda x: x[1].get("f1-score", 0), reverse=True
+        )
 
-        cwe_f1_scores = [
-            (cwe, metrics["f1-score"])
-            for cwe, metrics in per_cwe_report.items()
-            if cwe not in ["accuracy", "macro avg", "weighted avg", "micro avg", "samples avg"]
-        ]
-        cwe_f1_scores.sort(key=lambda x: x[1], reverse=True)
+        logger.info(f"\nTop {n} performing CWEs:")
+        for cwe, metrics in sorted_cwes[:n]:
+            logger.info(
+                f"  {cwe}: F1={metrics['f1-score']:.4f}, "
+                f"P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, "
+                f"Support={metrics['support']}"
+            )
 
-        if len(cwe_f1_scores) > 0:
-            print(f"\n   Top 5 CWEs by F1:")
-            for cwe, f1 in cwe_f1_scores[:5]:
-                support = per_cwe_report[cwe]["support"]
-                print(f"      {cwe}: {f1:.4f} (n={support})")
+        # Bottom performers (with support > 0)
+        bottom = [(cwe, m) for cwe, m in sorted_cwes if m["support"] > 0][-n:]
 
-            if len(cwe_f1_scores) > 5:
-                print(f"\n   Bottom 5 CWEs by F1:")
-                for cwe, f1 in cwe_f1_scores[-5:]:
-                    support = per_cwe_report[cwe]["support"]
-                    logger.info(f"      {cwe}: {f1:.4f} (n={support})")
+        if bottom:
+            logger.info(f"\nBottom {n} performing CWEs (with support > 0):")
+            for cwe, metrics in bottom:
+                logger.info(
+                    f"  {cwe}: F1={metrics['f1-score']:.4f}, "
+                    f"P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, "
+                    f"Support={metrics['support']}"
+                )
 
-    def _save_cwe_artifacts(
-        self,
-        per_cwe_report: dict[str, Any],
-        micro_f1: float,
-        macro_f1: float,
-        all_cwes: list[str],
-        missing_cwe_samples: list[dict],
-    ) -> None:
+    def _save_cwe_artifacts(self, results: CWEEvaluationResults) -> None:
         """Save CWE evaluation artifacts."""
 
         logger.info(f"--- Saving CWE Artifacts ---")
 
         report_path = self.output_dir / "cwe_classification_report.json"
         full_report = {
-            "micro_avg_f1": micro_f1,
-            "macro_avg_f1": macro_f1,
-            "per_cwe_metrics": per_cwe_report,
+            "micro_avg_f1": results.aggreate_metrics["micro_avg_f1"],
+            "macro_avg_f1": results.aggreate_metrics["macro_avg_f1"],
+            "per_cwe_metrics": results.per_cwe_metrics,
         }
         self._save_json(report_path, full_report)
         logger.info(f"✅ CWE report: {report_path.name}")
 
-        if missing_cwe_samples:
-            missing_path = self.output_dir / "cwe_missing_samples.json"
-            self._save_json(missing_path, missing_cwe_samples)
-            logger.info(f"✅ Missing CWE samples ({len(missing_cwe_samples)}): {missing_path.name}")
-
-        self._plot_per_cwe_performance(per_cwe_report, all_cwes)
-
+        self._plot_per_cwe_performance(
+            per_cwe_report=results.per_cwe_metrics, vocab=results.vocabulary
+        )
 
     def analyze_misclassifications(
         self,
@@ -930,20 +1141,21 @@ class Evaluator:
         try:
             with open(file=filepath, mode="w", encoding="utf-8") as f:
                 json.dump(obj, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to save JSON to {filepath}: {e}")
+        except Exception:
+            logger.exception(f"Failed to save JSON to {filepath}")
             raise
 
     def _plot_confusion_matrix(
         self,
         cm: np.ndarray,
-        labels: list[str],
         title: str,
         save_path: Path,
+        labels: Optional[list[str]] = None,
     ) -> None:
         """Generate and save confusion matrix heatmap."""
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        labels = labels if labels is not None else ["Vulnerable", "Safe"]
+        plt.figure(figsize=(8, 6))
         sns.heatmap(
             cm,
             annot=True,
@@ -952,49 +1164,52 @@ class Evaluator:
             xticklabels=labels,
             yticklabels=labels,
             cbar_kws={"label": "Count"},
-            ax=ax,
         )
-        ax.set_xlabel("Predicted Label", fontsize=12)
-        ax.set_ylabel("True Label", fontsize=12)
-        ax.set_title(title, fontsize=14, fontweight="bold")
 
+        plt.title(title, fontsize=14, fontweight="bold")
+        plt.ylabel("True Label", fontsize=12)
+        plt.xlabel("Predicted Label", fontsize=12)
         plt.tight_layout()
 
         try:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        except Exception as e:
-            logger.error(f"Failed to save confusion matrix: {e}")
+        except Exception:
+            logger.exception(f"Failed to save confusion matrix")
         finally:
-            plt.close(fig)
+            plt.close()
+
+        logger.info(f"Confusion matrix plot saved to {save_path}")
 
     def _plot_per_cwe_performance(
-        self,
-        per_cwe_report: dict[str, Any],
-        all_cwes: list[str],
+        self, per_cwe_report: dict[str, Any], vocab: list[int]
     ) -> None:
         """Create visualizations for per-CWE performance.
 
         Generates:
-        1. Bar chart: F1-scores per CWE
+        1. Bar chart: F1-scores per CWE (sorted by F1)
         2. Heatmap: Precision/Recall/F1 per CWE
         3. Support distribution: Sample counts per CWE
+        4. Radar chart: Top performing CWEs
 
         Parameters
         ----------
-        per_cwe_report : dict
+        per_cwe_report : dict[str, Any]
             Classification report with per-CWE metrics.
-        all_cwes : list[str]
-            List of all CWE identifiers.
+            Keys are "CWE-{id}" strings.
+        vocab : list[int]
+            List of CWE IDs (integers).
         """
 
         logger.info("Generating CWE performance visualizations...")
 
         cwe_metrics = []
-        for cwe in all_cwes:
-            if cwe in per_cwe_report:
-                metrics = per_cwe_report[cwe]
+        for cwe_id in vocab:
+            cwe_key = f"CWE-{cwe_id}"
+            if cwe_key in per_cwe_report:
+                metrics = per_cwe_report[cwe_key]
                 cwe_metrics.append({
-                    "cwe": cwe,
+                    "cwe": cwe_id,
+                    "cwe_label": cwe_key,
                     "precision": metrics["precision"],
                     "recall": metrics["recall"],
                     "f1-score": metrics["f1-score"],
@@ -1005,41 +1220,82 @@ class Evaluator:
             logger.warning("No CWE metrics to plot")
             return
 
-        cwe_metrics.sort(key=lambda x: x["f1-score"], reverse=True)
+        try:
+            self._plot_f1_bar_chart(cwe_metrics)
+            self._plot_metrics_heatmap(cwe_metrics)
+            self._plot_support_distribution(cwe_metrics)
+            logger.info(f"✅ Generated {4} CWE visualization plots")
+        except Exception:
+            logger.exception("Failed to generate CWE visualization")
 
-        self._plot_f1_bar_chart(cwe_metrics)
-        self._plot_metrics_heatmap(cwe_metrics)
-        self._plot_support_distribution(cwe_metrics)
-        self._plot_top_cwes_radar(cwe_metrics)
+    def _plot_f1_bar_chart(
+        self,
+        cwe_metrics: list[dict[str, Any]],
+        max_to_display: Optional[int] = None,
+    ) -> None:
+        """Bar chart showing F1-score for each CWE, sorted by performance.
 
-    def _plot_f1_bar_chart(self, cwe_metrics: list[dict[str, Any]]) -> None:
-        """Bar chart showing F1-score for each CWE, sorted by performance."""
+        Parameters
+        ----------
+        cwe_metrics : list[dict[str, Any]]
+            List of CWE metrics dictionaries
+        """
 
-        cwes = [m["cwe"] for m in cwe_metrics]
-        f1_scores = [m["f1-score"] for m in cwe_metrics]
-        supports = [m["support"] for m in cwe_metrics]
+        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        if max_to_display and len(sorted_metrics) > max_to_display:
+            sorted_metrics = sorted_metrics[:max_to_display]
+            title_suffix = f" (Top {max_to_display})"
+        else:
+            title_suffix = ""
 
-        fig, ax = plt.subplots(figsize=(12, max(6, len(cwes) * 0.4)))
+        df = pd.DataFrame(data=sorted_metrics)
 
-        bars = ax.barh(cwes, f1_scores, color="steelblue", edgecolor="black", linewidth=0.5)
+        fig, ax = plt.subplots(figsize=(12, min(max(6, len(sorted_metrics) * 0.4), 20)))
+        sns.barplot(
+            data=df,
+            y="cwe_label",
+            x="f1-score",
+            palette="RdYlGn",
+            edgecolot="black",
+            linewidth=0.5,
+            ax=ax
+        )
 
-        for bar, f1, support in zip(bars, f1_scores, supports):
-            width = bar.get_width()
+        for i, (_, row) in enumerate(df.iterrows()):
+            f1 = row["f1-score"]
+            support = row["support"]
+
+            if f1 > 0.15:
+                x_pos = f1 - 0.02
+                ha, color, weight = "right", "white", "bold"
+            else:
+                x_pos = f1 + 0.02
+                ha, color, weight = "left", "black", "normal"
+
             ax.text(
-                width + 0.02,
-                bar.get_y() + bar.get_height() / 2,
-                f"{f1:.3f} (n={support})",
-                ha="left",
+                x_pos,
+                i,
+                f"{f1:.3f} (n={support:,})",
+                ha=ha,
                 va="center",
                 fontsize=9,
+                color=color,
+                fontweight=weight,
             )
 
         # Styling
         ax.set_xlabel("F1-Score", fontsize=12, fontweight="bold")
         ax.set_ylabel("CWE", fontsize=12, fontweight="bold")
-        ax.set_title("Per-CWE F1-Score Performance", fontsize=14, fontweight="bold", pad=20)
-        ax.set_xlim(0, 1.1)
-        ax.axvline(x=0.5, color="red", linestyle="--", linewidth=1, alpha=0.5, label="0.5 threshold")
+        ax.set_title(
+            f"Per-CWE F1-Score Performance {title_suffix}",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        ax.set_xlim(0, 1.05)
+        ax.axvline(x=0.5, color="red", linestyle="--", linewidth=1.5,
+            alpha=0.5, label="0.5 threshold",
+        )
         ax.grid(axis="x", alpha=0.3, linestyle="--")
         ax.legend(loc="lower right")
 
@@ -1050,19 +1306,28 @@ class Evaluator:
         logger.info(f"✅ F1 bar chart: {save_path.name}")
         plt.close(fig)
 
-    def _plot_metrics_heatmap(self, cwe_metrics: list[dict[str, Any]]) -> None:
+    def _plot_metrics_heatmap(self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int]=30) -> None:
         """Heatmap showing Precision, Recall, and F1-score for each CWE."""
 
-        cwes = [m["cwe"] for m in cwe_metrics]
+        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        if max_to_display and len(sorted_metrics) > max_to_display:
+            sorted_metrics = sorted_metrics[:max_to_display]
+
+        cwes = [f"{m['cwe_label']} (n={m['support']:,})" for m in sorted_metrics]
+
         data = {
             "Precision": [m["precision"] for m in cwe_metrics],
             "Recall": [m["recall"] for m in cwe_metrics],
             "F1-Score": [m["f1-score"] for m in cwe_metrics],
         }
 
-        df = pd.DataFrame(data, index=cwes)
+        df = pd.DataFrame(data, index=cwes) # type: ignore
 
-        fig, ax = plt.subplots(figsize=(8, max(6, len(cwes) * 0.4)))
+        fig_height = min(max(6, len(cwes) * 0.5), 20)
+        fig, ax = plt.subplots(figsize=(10, fig_height))
+
+        annot_fontsize = max(6, min(10, 100 / len(cwes)))
+
         sns.heatmap(
             df,
             annot=True,
@@ -1070,17 +1335,25 @@ class Evaluator:
             cmap="RdYlGn",
             vmin=0,
             vmax=1,
-            cbar_kws={"label": "Score"},
+            cbar_kws={"label": "Score", "shrink": 0.8},
             linewidths=0.5,
             linecolor="gray",
             ax=ax,
+            annot_kws={"fontsize": annot_fontsize},
         )
 
         # Styling
-        ax.set_title("Per-CWE Metrics Heatmap", fontsize=14, fontweight="bold", pad=20)
+        ax.set_title(
+            "Per-CWE Metrics Heatmap (Sorted by F1-Score)",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
         ax.set_xlabel("Metric", fontsize=12, fontweight="bold")
         ax.set_ylabel("CWE", fontsize=12, fontweight="bold")
-        plt.yticks(rotation=0)
+
+        plt.xticks(rotation=0, fontsize=11)
+        plt.yticks(rotation=0, fontsize=9)
 
         plt.tight_layout()
 
@@ -1089,31 +1362,92 @@ class Evaluator:
         logger.info(f"✅ Metrics heatmap: {save_path.name}")
         plt.close(fig)
 
-    def _plot_support_distribution(self, cwe_metrics: list[dict[str, Any]]) -> None:
+    def _plot_metrics_clustermap(
+        self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int] = 30
+    ) -> None:
+        """Heatmap with clustering to show performance patterns."""
+
+        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        if max_to_display and len(sorted_metrics) > max_to_display:
+            sorted_metrics = sorted_metrics[:max_to_display]
+
+        cwes = [m["cwe_label"] for m in sorted_metrics]
+
+        data = {
+            "Precision": [m["precision"] for m in sorted_metrics],
+            "Recall": [m["recall"] for m in sorted_metrics],
+            "F1-Score": [m["f1-score"] for m in sorted_metrics],
+            "Support": [
+                m["support"] / max(m["support"] for m in sorted_metrics)
+                for m in sorted_metrics
+            ],
+        }
+
+        df = pd.DataFrame(data, index=cwes) # type: ignore
+
+        fig_height = min(max(8, len(cwes) * 0.5), 20)
+
+        g = sns.clustermap(
+            df,
+            annot=True,
+            fmt=".3f",
+            cmap="RdYlGn",
+            vmin=0,
+            vmax=1,
+            figsize=(12, fig_height),
+            cbar_kws={"label": "Score"},
+            linewidths=0.5,
+            linecolor="gray",
+            dendrogram_ratio=0.1,
+            row_cluster=True,
+            col_cluster=False,
+        )
+
+        g.figure.suptitle(
+            "Per-CWE Metrics Heatmap (Clustered by Performance)",
+            fontsize=14,
+            fontweight="bold",
+            y=0.98,
+        )
+
+        save_path = self.output_dir / "cwe_metrics_heatmap_clustered.png"
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info(f"✅ Clustered heatmap: {save_path.name}")
+        plt.close()
+
+    def _plot_support_distribution(
+        self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int] = 30
+    ) -> None:
         """Bar chart showing sample count (support) for each CWE. Helps identify class imbalance."""
 
         sorted_metrics = sorted(cwe_metrics, key=lambda x: x["support"], reverse=True)
+        if max_to_display and len(sorted_metrics) > max_to_display:
+            sorted_metrics = sorted_metrics[:max_to_display]
 
-        cwes = [m["cwe"] for m in sorted_metrics]
-        supports = [m["support"] for m in sorted_metrics]
-        f1_scores = [m["f1-score"] for m in sorted_metrics]
+        df = pd.DataFrame(sorted_metrics)
 
-        fig, ax = plt.subplots(figsize=(12, max(6, len(cwes) * 0.4)))
-        bars = ax.barh(cwes, supports, edgecolor="black", linewidth=0.5)
+        fig_height = min(max(6, len(sorted_metrics) * 0.4), 20)
+        fig, ax = plt.subplots(figsize=(12, fig_height))
 
-        norm = plt.Normalize(vmin=0, vmax=1)
-        sm = plt.cm.ScalarMappable(cmap="RdYlGn", norm=norm)
-        sm.set_array([])
+        sns.barplot(
+            data=df,
+            y="cwe_label",
+            x="support",
+            palette="RdYlGn",
+            hue="f1-score",
+            dodge=False,
+            edgecolor="black",
+            linewidth=0.5,
+            ax=ax,
+            legend=False,
+        )
 
-        for bar, f1 in zip(bars, f1_scores):
-            bar.set_color(sm.to_rgba(f1))
-
-        for bar, support in zip(bars, supports):
-            width = bar.get_width()
+        for i, (_, row) in enumerate(df.iterrows()):
+            support = row["support"]
             ax.text(
-                width + max(supports) * 0.01,
-                bar.get_y() + bar.get_height() / 2,
-                f"{support}",
+                support + df["support"].max() * 0.01,
+                i,
+                f"{support:,}",
                 ha="left",
                 va="center",
                 fontsize=9,
@@ -1130,9 +1464,13 @@ class Evaluator:
             pad=20,
         )
         ax.grid(axis="x", alpha=0.3, linestyle="--")
+        ax.invert_xaxis()
 
         # Add colorbar
-        cbar = plt.colorbar(sm, ax=ax)
+        norm = Normalize(vmin=0, vmax=1)
+        sm = plt.cm.ScalarMappable(cmap="RdYlGn", norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax, pad=0.02)
         cbar.set_label("F1-Score", fontsize=10, fontweight="bold")
 
         plt.tight_layout()
@@ -1141,87 +1479,3 @@ class Evaluator:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"✅ Support distribution: {save_path.name}")
         plt.close(fig)
-
-    def _plot_top_cwes_radar(self, cwe_metrics: list[dict[str, Any]], top_n: int = 5) -> None:
-        """Radar chart showing Precision/Recall/F1 for top N CWEs by support."""
-        top_metrics = sorted(cwe_metrics, key=lambda x: x["support"], reverse=True)[:top_n]
-
-        if len(top_metrics) < 3:
-            logger.warning("Not enough CWEs for radar chart (need at least 3)")
-            return
-
-        categories = ["Precision", "Recall", "F1-Score"]
-        num_vars = len(categories)
-
-        # Compute angle for each axis
-        angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
-        angles += angles[:1]  # Complete the circle
-
-        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection="polar"))
-        for metric in top_metrics:
-            values = [
-                metric["precision"],
-                metric["recall"],
-                metric["f1-score"],
-            ]
-            values += values[:1]  # Complete the circle
-
-            ax.plot(angles, values, "o-", linewidth=2, label=f"{metric['cwe']} (n={metric['support']})")
-            ax.fill(angles, values, alpha=0.15)
-
-        # Styling
-        ax.set_theta_offset(np.pi / 2)
-        ax.set_theta_direction(-1)
-        ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(categories, fontsize=11, fontweight="bold")
-        ax.set_ylim(0, 1)
-        ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-        ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=9)
-        ax.grid(True, linestyle="--", alpha=0.5)
-
-        plt.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=10)
-        plt.title(f"Top {top_n} CWEs: Metrics Comparison", fontsize=14, fontweight="bold", pad=30)
-
-        plt.tight_layout()
-
-        save_path = self.output_dir / "cwe_top_radar.png"
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-        logger.info(f"✅ Radar chart: {save_path.name}")
-        plt.close(fig)
-
-    def save_evaluation_summary(
-        self,
-        output_dir: Path,
-        binary_results,
-        cwe_results,
-        misclass_results,
-    ) -> None:
-        """Save a consolidated evaluation summary."""
-
-        summary = {
-            "evaluation_timestamp": datetime.now().isoformat(),
-            "binary_classification": {
-                "accuracy": binary_results.accuracy,
-                "f1_vulnerable": binary_results.f1_vulnerable,
-                "total_samples": binary_results.total_samples,
-                "valid_samples": binary_results.valid_samples,
-                "unparsable_samples": binary_results.unparsable_samples,
-            },
-            "cwe_classification": {
-                "macro_avg_f1": cwe_results.macro_avg_f1,
-                "micro_avg_f1": cwe_results.micro_avg_f1,
-                "num_unique_cwes": len(cwe_results.all_cwes),
-                "valid_samples": cwe_results.valid_samples,
-                "samples_missing_cwes": cwe_results.samples_missing_cwes,
-            },
-            "misclassifications": {
-                "total_errors": misclass_results.total_errors,
-                "error_rate": misclass_results.error_rate,
-                "false_positives": misclass_results.false_positives,
-                "false_negatives": misclass_results.false_negatives,
-            },
-        }
-
-        summary_path = output_dir / "evaluation_summary.json"
-        self._save_json(filepath=summary_path, obj=summary)
-        logger.info(f"✅ Evaluation summary saved to: {summary_path.name}")
