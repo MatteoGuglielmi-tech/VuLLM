@@ -216,9 +216,9 @@ def get_parser():
         help="Include full function code in misclassification reports",
     )
     inference_group.add_argument(
-        "--save_summary",
+        "--save_artifacts",
         action="store_true",
-        help="Save consolidated evaluation summary JSON",
+        help="Save evaluation artifacts",
     )
 
     return parser
@@ -250,7 +250,7 @@ def validate_args(args):
         "assets_dir",
         "use_batching",
         "include_code_in_reports",
-        "save_summary"
+        "save_artifacts"
     }
 
     # args shared between fine-tuning and HPO (not allowed/unnecessary in inference)
@@ -337,7 +337,7 @@ def validate_args(args):
         for arg in training_shared:
             value = getattr(args, arg)
             default = get_default_value(arg)
-            if arg == 'dataset_path':
+            if arg == "dataset_path":
                 if value is not None:
                     invalid_args.append(f"--{arg}")
             if value != default:
@@ -386,7 +386,7 @@ def get_default_value(arg_name):
         "assets_dir": None,
         "use_batching": False,
         "include_code_in_reports": False,
-        "save_summary": False
+        "save_artifacts": False
     }
     return defaults.get(arg_name)
 

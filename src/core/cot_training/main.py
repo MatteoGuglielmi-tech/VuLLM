@@ -163,15 +163,8 @@ if __name__ == "__main__":
 
             evaluator = Evaluator(output_dir=args.assets_dir, test_dataset=dataset_with_perdictions)
             evaluator.validate_cwe_format() # validate predicted cwe quality
-            binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=True) # address target performance
-            cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=True) # address cwe performance
-
-            # misclass_results = evaluator.analyze_misclassifications(
-            #     predictions=predictions,
-            #     save_artifacts=True,
-            #     include_code=args.include_code_in_reports,
-            #     max_response_length=args.max_tokens_per_answer,
-            # )
+            binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=args.save_artifacts) # address target performance
+            cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=args.save_artifacts) # address cwe performance
 
     except Exception as e:
         rich_exception()
