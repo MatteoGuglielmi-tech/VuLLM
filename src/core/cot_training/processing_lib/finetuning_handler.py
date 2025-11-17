@@ -12,6 +12,7 @@ import os
 import gc
 import torch
 
+from transformers import EarlyStoppingCallback
 from transformers.tokenization_utils import PreTrainedTokenizer
 # from transformers import DataCollatorForSeq2Seq
 from trl.trainer.sft_config import SFTConfig
@@ -203,7 +204,7 @@ class FineTuningHandler:
 
             print("=" * 50)
 
-    def create_trainer_with_params(self) -> SFTTrainer:
+    def create_trainer_with_params(self) -> SFTTrainer|WeightedCoTTrainer:
         """Create a new model and trainer with specific hyperparameters using your existing class."""
 
         model_loader = self.model_loader_class(
@@ -241,19 +242,26 @@ class FineTuningHandler:
         if is_main_process():
             print(f"📊 Model trainable parameters:")
             if hasattr(model, "print_trainable_parameters"):
-                model.print_trainable_parameters()
+                model.print_trainable_parameters() # type: ignore
 
         sft_args = self._ft_args()
 
         if not self.use_weighted_trainer:
             trainer = SFTTrainer(
-                model=model,
+                model=model, # type: ignore
                 processing_class=self.tokenizer,
                 train_dataset=dataset_dict["train"],
                 eval_dataset=dataset_dict["validation"],
                 args=sft_args,
-                # data_collator = DataCollatorForSeq2Seq(tokenizer = tokenizer),
                 # formatting_func=self.formatting_prompts_func,
+
+                # Early stopping callback
+                callbacks=[
+                    EarlyStoppingCallback(
+                        early_stopping_patience=3,
+                        early_stopping_threshold=0.001
+                    )
+                ]
             )
         else:
             trainer = WeightedCoTTrainer(
@@ -265,6 +273,15 @@ class FineTuningHandler:
                 reasoning_weight=1.0,
                 answer_weight=1.5,
                 answer_marker="Final Answer:",  # prompt-specific!
+
+                # Early stopping callback
+                callbacks=[
+                    EarlyStoppingCallback(
+                        early_stopping_patience=3,
+                        early_stopping_threshold=0.001
+                    )
+                ]
+
             )
 
         instruction_part, response_part = get_instruction_response_parts(tokenizer=self.tokenizer)
@@ -321,7 +338,7 @@ class FineTuningHandler:
 
         if not self.use_deepspeed:
             sft_config_params["optim"] = "paged_adamw_8bit"
-            sft_config_params["lr_scheduler_type"] = "cosine"
+            sft_config_params["lr_scheduler_type"] = "cosine_with_restarts"
 
         return SFTConfig(**sft_config_params)
 
