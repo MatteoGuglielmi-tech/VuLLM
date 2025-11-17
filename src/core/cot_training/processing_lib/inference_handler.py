@@ -6,15 +6,15 @@ import json
 import torch
 import logging
 
+from typing import Any
 from pathlib import Path
 from dataclasses import dataclass, field
-from tqdm import tqdm
 
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
-from ..utilities import is_main_process, rich_progress
+from ..utilities import is_main_process, rich_progress, rich_progress_manual
 
 
 logger = logging.getLogger(name=__name__)
@@ -279,42 +279,71 @@ class TestHandler:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model and tokenizer must be loaded.")
 
+        if not len(test_dataset) > 0:
+            raise ValueError("Provided dataset is emtpy")
+
+        self.n_samples: int = len(test_dataset)
+
         logger.info(
-            f"🔍 Evaluating on {len(test_dataset)} test samples "
+            f"🔍 Evaluating on {self.n_samples} test samples "
             f"(batch_size={batch_size}, batching={use_batching})..."
         )
 
         if use_batching:
-            predictions = self._batched_inference(test_dataset, batch_size)
+            predictions = self._batched_inference(
+                test_dataset=test_dataset, batch_size=batch_size
+            )
         else:
-            predictions = self._sequential_inference(test_dataset)
+            predictions = self._sequential_inference(test_dataset=test_dataset)
 
         # add predictions to dataset
-        results_dataset = test_dataset.add_column("model_prediction", predictions)
-
-        logger.info("✅ Evaluation complete.")
-
-        results_dataset.save_to_disk(fp="./DiverseVul/test_evaluations/")
+        results_dataset: Dataset = test_dataset.add_column( # type: ignore
+            name="model_prediction", column=predictions
+        )
+        results_dataset.save_to_disk(dataset_path="./DiverseVul/test_evaluations/")
 
         return results_dataset
 
-    def _sequential_inference(self, test_dataset: Dataset) -> list[ParsedResponse]:
+    def _sequential_inference(self, test_dataset: Dataset) -> list[dict[str, Any]]:
         """Run inference sequentially using run_inference() method."""
 
-        predictions: list[ParsedResponse] = []
-        for sample in tqdm(test_dataset, total=len(test_dataset), desc="Sequential Inference"):
-            try:
-                prediction = self.run_inference(sample["func"])
-                predictions.append(prediction)
-            except Exception:
-                logger.exception(f"Failed to evaluate sample")
-                predictions.append(
-                    ParsedResponse(
-                        reasoning={}, vulnerabilities=[], verdict={}, parse_error=True
+        predictions: list[dict[str, Any]] = []
+        n_failures: int = 0
+        n_ok: int = 0
+        with rich_progress_manual(
+            total=self.n_samples, description="Sequential Inference"
+        ) as pbar:
+            for index in range(self.n_samples):
+                try:
+                    prediction = self.run_inference(test_dataset[index]["func"])
+                    predictions.append(prediction.to_dict())
+                    n_ok += 1
+                except Exception:
+                    n_failures += 1
+                    predictions.append(
+                        ParsedResponse(
+                            reasoning={},
+                            vulnerabilities=[],
+                            verdict={},
+                            parse_error=True,
+                        ).to_dict()
                     )
-                )
+                finally:
+                    pbar.update(advance=1)
+                    pbar.set_postfix({
+                        "✓ Ok": n_ok,
+                        "✗ Error": n_failures,
+                        "% Error rate": (
+                            f"{(n_failures/self.n_samples):.1%}"
+                            if n_failures > 0
+                            else "0%"
+                        ),
+                    })
 
-        return predictions 
+                if index == self.n_samples-1:
+                    pbar.set_description(description="✅ Evaluation complete.")
+
+        return predictions
 
     def _create_message_batches(
         self, dataset: Dataset, *, batch_size: int
@@ -334,13 +363,13 @@ class TestHandler:
         if batch:
             yield batch
 
-    def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[ParsedResponse]:
+    def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[dict[str, Any]]:
         """Run batched inference for speed. Processes multiple samples simultaneously."""
 
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model and tokenizer must be loaded before running evaluation.")
 
-        all_predictions: list[ParsedResponse] = []
+        all_predictions: list[dict[str, Any]] = []
         num_batches = (len(test_dataset["func"]) + batch_size - 1) // batch_size
 
         for batch_messages in rich_progress(
@@ -353,14 +382,16 @@ class TestHandler:
                 batch_messages, tokenize=False, add_generation_prompt=True
             )
             inputs = self.tokenizer(
-                input_texts, return_tensors="pt", padding=True,
-                max_length=self.max_seq_length, truncation=True,
-            ).to(self.model.device)
+                input_texts, # type: ignore
+                return_tensors="pt",
+                padding=True,
+                max_length=self.max_seq_length,
+                truncation=True,
+            ).to(self.model.device)  # type: ignore
 
-            # generate
             try:
                 with torch.inference_mode():
-                    outputs = self.model.generate(
+                    outputs = self.model.generate( # type: ignore
                         **inputs,
                         max_new_tokens=self.max_new_tokens,
                         do_sample=True,
@@ -373,8 +404,17 @@ class TestHandler:
                     )
 
                 generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
-                decoded_predictions = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-                all_predictions.extend([self._parse_response(p.strip()) for p in decoded_predictions])
+                decoded_predictions = self.tokenizer.batch_decode(
+                    generated_tokens,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True,
+                )
+                all_predictions.extend(
+                    [
+                        self._parse_response(p.strip()).to_dict()
+                        for p in decoded_predictions
+                    ]
+                )
 
             except Exception:
                 # if generation fails, proceed with next batch
