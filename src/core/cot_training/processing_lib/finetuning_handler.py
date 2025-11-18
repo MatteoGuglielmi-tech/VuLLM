@@ -1,31 +1,49 @@
 from unsloth import is_bfloat16_supported
 from unsloth.chat_templates import train_on_responses_only
 
-from src.core.cot_training.loader_config import Loader
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
-from ..utilities import get_instruction_response_parts, is_main_process
+from ..loader_config import Loader
+from ..utilities import get_instruction_response_parts, is_main_process, build_table, rich_panel
 
 import logging
 import os
 import gc
 import torch
 
-from transformers import EarlyStoppingCallback
 from transformers.tokenization_utils import PreTrainedTokenizer
-# from transformers import DataCollatorForSeq2Seq
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from typing import Any
+from enum import Enum
+from typing import Any, Optional
 from pathlib import Path
 from datetime import datetime
+from dataclasses import dataclass
 from transformers import PreTrainedTokenizer
 from datasets import DatasetDict
 
 
 logger = logging.getLogger(name=__name__)
+
+
+class TrainingStrategy(Enum):
+    """Training presets"""
+    FAST = "fast"          # Quick iteration with early stopping
+    EXPLORE = "explore"    # Full warm restarts exploration
+    BALANCED = "balanced"  # Moderate approach
+
+
+@dataclass
+class StrategyConfig:
+    """Configuration overrides for training strategies."""
+    epochs: int
+    lr_scheduler_type: str
+    use_early_stopping: bool
+    early_stopping_patience: Optional[int] = None
+    early_stopping_threshold: Optional[float] = None
+    warmup_ratio: float = 0.05
 
 
 class FineTuningHandler:
@@ -48,12 +66,17 @@ class FineTuningHandler:
         use_loftq: bool,
         # -- fine-tuning HP --
         learning_rate: float,
-        epochs: int,
         per_device_train_batch_size: int,
         gradient_accumulation_steps: int,
         weight_decay: float,
-        eval_steps: float,
-        warmup_steps: int|None = None,
+
+        strategy: TrainingStrategy = TrainingStrategy.EXPLORE,
+        epochs: Optional[int] = None,
+        use_early_stopping: Optional[bool] = None,
+        early_stopping_patience: Optional[int] = None,
+        early_stopping_threshold: Optional[float]= None,
+        warmup_ratio: Optional[float] = None,
+
         logging_steps: int = 100,
         use_weighted_cot_trainer: bool = False,
         use_deepspeed: bool = False,
@@ -77,12 +100,33 @@ class FineTuningHandler:
         self.use_loftq = use_loftq
 
         self.lr = learning_rate
-        self.epochs = epochs
         self.per_device_train_batch_size = per_device_train_batch_size
         self.gradient_accumulation_steps = gradient_accumulation_steps
-        self.warmup_steps = warmup_steps
+
+
+        self.strategy_config = self._get_strategy_defaults(strategy)
+        self.epochs = epochs if epochs is not None else self.strategy_config.epochs
+        self.lr_scheduler_type = self.strategy_config.lr_scheduler_type
+        self.use_early_stopping = (
+            use_early_stopping
+            if use_early_stopping is not None
+            else self.strategy_config.epochs
+        )
+        self.early_stopping_patience = (
+            early_stopping_patience
+            if early_stopping_patience is not None
+            else self.strategy_config.early_stopping_patience
+        )
+        self.early_stopping_threshold = (
+            early_stopping_threshold
+            if early_stopping_threshold is not None
+            else self.strategy_config.early_stopping_threshold
+        )
+        self.warmup_ratio = (
+            warmup_ratio if warmup_ratio is not None else self.strategy_config.warmup_ratio
+        )
+
         self.logging_steps = logging_steps
-        self.eval_steps = eval_steps
         self.wd = weight_decay
         self.use_weighted_trainer = use_weighted_cot_trainer
         self.use_deepspeed = use_deepspeed
@@ -90,6 +134,58 @@ class FineTuningHandler:
         self.debug = debug
         self._dataset_dict = None
         self._base_tokenizer = None
+
+        self._log_settings(strategy=strategy)
+
+    def _log_settings(self, strategy: TrainingStrategy) -> None:
+        tb_dict = {
+            "TrainingStrategy": strategy.value,
+            "Epochs": self.epochs,
+            "LR scheduler": self.lr_scheduler_type,
+            "Early stopping?": self.use_early_stopping,
+            "Early stopping patience": self.early_stopping_patience if self.use_early_stopping else "None",
+            "Early stopping threshold": self.early_stopping_threshold if self.use_early_stopping else "None",
+            "Warm-up ratio (%)": self.warmup_ratio,
+        }
+        tb = build_table(data=tb_dict, columns=["Parameter", "Value"])
+        rich_panel(
+            tables=tb,
+            panel_title="🗺️ Fine-tuning strategy",
+            border_style="cornflower_blue",
+        )
+
+        del tb_dict, tb
+
+    @staticmethod
+    def _get_strategy_defaults(strategy: TrainingStrategy) -> StrategyConfig:
+        """Get configuration for a training strategy."""
+
+        configs = {
+            TrainingStrategy.FAST: StrategyConfig(
+                epochs=4,
+                lr_scheduler_type="cosine",
+                use_early_stopping=True,
+                early_stopping_patience=3,
+                early_stopping_threshold=0.001,
+                warmup_ratio=0.05,
+            ),
+            TrainingStrategy.EXPLORE: StrategyConfig(
+                epochs=7,
+                lr_scheduler_type="cosine_with_restarts",
+                use_early_stopping=False,
+                warmup_ratio=0.03,
+            ),
+            TrainingStrategy.BALANCED: StrategyConfig(
+                epochs=5,
+                lr_scheduler_type="cosine_with_restarts",
+                use_early_stopping=True,
+                early_stopping_patience=8,
+                early_stopping_threshold=0.0005,
+                warmup_ratio=0.05,
+            ),
+        }
+
+        return configs[strategy]
 
     def setup_paths(self) -> None:
         provider, model_id = self.base_model_name.split("/")
@@ -225,17 +321,6 @@ class FineTuningHandler:
 
         dataset_dict: DatasetDict = self._prepare_dataset_with_tokenizer(tokenizer=self.tokenizer)
 
-        if self.warmup_steps is None:
-            # Rule of thumb: 3-10% of total steps
-            total_steps = (
-                len(dataset_dict["train"])
-                // (self.per_device_train_batch_size * self.gradient_accumulation_steps)
-                * self.epochs
-            )
-            self.warmup_steps = int(0.05 * total_steps)  # 5% warmup
-            if self.debug:
-                logger.info(f"Warmup steps set to: {self.warmup_steps}")
-
         if self.debug:
             self.debug_fmt_dataset_structure(dataset_dict)
 
@@ -244,7 +329,8 @@ class FineTuningHandler:
             if hasattr(model, "print_trainable_parameters"):
                 model.print_trainable_parameters() # type: ignore
 
-        sft_args = self._ft_args()
+        sft_args: SFTConfig = self._ft_args(dataset_dict=dataset_dict)
+        callbacks = self.get_callbacks()
 
         if not self.use_weighted_trainer:
             trainer = SFTTrainer(
@@ -253,15 +339,7 @@ class FineTuningHandler:
                 train_dataset=dataset_dict["train"],
                 eval_dataset=dataset_dict["validation"],
                 args=sft_args,
-                # formatting_func=self.formatting_prompts_func,
-
-                # Early stopping callback
-                callbacks=[
-                    EarlyStoppingCallback(
-                        early_stopping_patience=3,
-                        early_stopping_threshold=0.001
-                    )
-                ]
+                callbacks=callbacks
             )
         else:
             trainer = WeightedCoTTrainer(
@@ -273,15 +351,7 @@ class FineTuningHandler:
                 reasoning_weight=1.0,
                 answer_weight=1.5,
                 answer_marker="Final Answer:",  # prompt-specific!
-
-                # Early stopping callback
-                callbacks=[
-                    EarlyStoppingCallback(
-                        early_stopping_patience=3,
-                        early_stopping_threshold=0.001
-                    )
-                ]
-
+                callbacks=callbacks
             )
 
         instruction_part, response_part = get_instruction_response_parts(tokenizer=self.tokenizer)
@@ -299,52 +369,183 @@ class FineTuningHandler:
 
         return trainer
 
-    def _ft_args(self) -> SFTConfig:
+    def calculate_training_steps(self, train_dataset_size: int) -> dict[str, int]:
+        """
+        Calculate training and warmup steps based on dataset size.
+
+        Parameters
+        ----------
+        train_dataset_size : int
+            Length of the training dataset
+
+        Returns
+        -------
+        dict[str, int]
+            Dictionary with 'total_steps', 'warmup_steps', 'steps_per_epoch'
+        """
+        steps_per_epoch = train_dataset_size // (
+            self.per_device_train_batch_size * self.gradient_accumulation_steps
+        )
+
+        total_steps = steps_per_epoch * self.epochs
+        warmup_steps = int(self.warmup_ratio * total_steps)
+
+        if self.debug:
+            tb_dict = {
+                "Dataset size": train_dataset_size,
+                "Batch size": self.per_device_train_batch_size,
+                "Gradient accumulation": self.gradient_accumulation_steps,
+                "Steps per epoch": steps_per_epoch,
+                "Total epochs": self.epochs,
+                "Total steps": total_steps,
+                "Warmup ratio": f"{self.warmup_ratio} ({warmup_steps} steps)",
+            }
+            tb = build_table(data=tb_dict, columns=["Info", "Value"])
+            rich_panel(tb, panel_title="Training steps calculation", border_style="medium_spring_green")
+            del tb_dict, tb
+
+        return {
+            "total_steps": total_steps,
+            "warmup_steps": warmup_steps,
+            "steps_per_epoch": steps_per_epoch,
+        }
+
+    def calculate_eval_steps(
+        self, train_dataset_size: int, evals_per_epoch: int = 4
+    ) -> int:
+        """
+        Calculate optimal eval_steps for step-based evaluation.
+
+        Parameters
+        ----------
+        train_dataset_size : int
+            Length of the TRAINING dataset only
+        evals_per_epoch : int
+            Desired number of evaluations per epoch (default: 4)
+
+        Returns
+        -------
+        int
+            Number of training steps between evaluations
+        """
+        steps_per_epoch = train_dataset_size // (
+            self.per_device_train_batch_size * self.gradient_accumulation_steps
+        )
+
+        eval_steps = max(steps_per_epoch // evals_per_epoch, 50)
+        actual_evals_per_epoch = steps_per_epoch / eval_steps
+
+        if self.debug:
+            tb_dict = {
+                "Steps per epoch": steps_per_epoch,
+                "Target evals/epoch": evals_per_epoch,
+                "Eval steps": eval_steps,
+                "Actual evals/epoch": f"{actual_evals_per_epoch:.1f}",
+                "Total evaluations": int(actual_evals_per_epoch * self.epochs)
+            }
+            tb = build_table(data=tb_dict, columns=["Info", "Value"])
+            rich_panel(tb, panel_title="Evaluation steps calculation", border_style="medium_spring_green")
+            del tb_dict, tb
+
+        return eval_steps
+
+    def _ft_args(self, *, dataset_dict: DatasetDict) -> SFTConfig:
         """Configures the training parameters for SFTTrainer."""
 
         if self.epochs <= 0:
-            logger.warning("No training duration has been specified. Fallback to 1")
-            self.epochs = 1
+            logger.warning("No training duration specified. Defaulting to StrategyConfig.epochs.")
+            self.epochs = self.strategy_config.epochs
 
+        train_size = len(dataset_dict["train"])
+        self.calculate_training_steps(train_size)
+        eval_steps = self.calculate_eval_steps(train_size)
         bfloat16_supported: bool = is_bfloat16_supported()
 
         sft_config_params: dict[str, Any] = {
-            # "assistant_only_loss": True,  # only on assistant generated tokens
+            # optimized kernel
             "use_liger_kernel": True,
+
+            # paths
             "output_dir": self.checkpoint_dir,
             "run_name": f"{self.base_model_name.split('/')[-1]}-epochs-{self.epochs}",
-            "num_train_epochs": self.epochs,
-            "per_device_train_batch_size": self.per_device_train_batch_size,
-            # "per_device_eval_batch_size": self.per_device_train_batch_size,
-            "gradient_accumulation_steps": self.gradient_accumulation_steps,
-            "warmup_steps": self.warmup_steps,
-            "learning_rate": self.lr,
-            "weight_decay": self.wd,
-            "max_grad_norm": 0.3,
-            "logging_steps": self.logging_steps,
-            "eval_strategy": "steps",
-            "eval_steps": self.eval_steps,
-            "save_strategy": "steps",  # "best"
-            "save_steps": self.eval_steps,
+
+            # model related args
             "fp16": not bfloat16_supported,
             "bf16": bfloat16_supported,
             "max_length": self.max_seq_length,
-            "dataset_text_field": "text",
-            "packing": False,
-            "report_to": "wandb",
+
+            # fine-tuning hps
+            "num_train_epochs": self.epochs,
+
+            # "train"
             "gradient_checkpointing": True,
-            "seed": 3407,
+            "per_device_train_batch_size": self.per_device_train_batch_size,
+            "per_device_eval_batch_size": self.per_device_train_batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+
+            "learning_rate": self.lr,
+            "weight_decay": self.wd,
+            "max_grad_norm": 0.3,
+
+            # warmup
+            "warmup_ratio": self.warmup_ratio,
+
+            # data handling
+            "packing": False,
+            "dataset_text_field": "text",
+
+            # evaluation step
+            "eval_strategy": "steps",
+            "eval_steps": eval_steps, 
+
+            # checkpointing
+            "save_strategy": "steps",
+            "save_steps": eval_steps,
+            "save_total_limit": 3,
+
+            # best model selection
             "load_best_model_at_end": True,
             "metric_for_best_model": "eval_loss",
             "greater_is_better": False,
-            "save_total_limit": 3,
+
+            #logging
+            "logging_steps": self.logging_steps, 
+            "report_to": "wandb",
+
+            # reproducibility
+            "seed": 3407,
         }
 
+        # Non-DeepSpeed specific optimizations
         if not self.use_deepspeed:
             sft_config_params["optim"] = "paged_adamw_8bit"
-            sft_config_params["lr_scheduler_type"] = "cosine_with_restarts"
+            sft_config_params["lr_scheduler_type"] = self.lr_scheduler_type
+
+            if self.lr_scheduler_type == "cosine_with_restarts" and self.epochs < 6:
+                logger.warning(
+                    f"Using cosine_with_restarts with only {self.epochs} epochs. "
+                    "Consider 6+ epochs for multiple restart cycles to fully benefit."
+                )
 
         return SFTConfig(**sft_config_params)
+
+    def get_callbacks(self) -> Optional[list]:
+        """Build callbacks list based on configuration."""
+        callbacks = []
+
+        if self.use_early_stopping:
+            from transformers import EarlyStoppingCallback
+
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping_patience=self.early_stopping_patience,
+                    early_stopping_threshold=self.early_stopping_threshold,
+                )
+            )
+        else:
+            pass
+
+        return callbacks if callbacks else None
 
     def debug_trainer(self, trainer):
 
@@ -429,6 +630,14 @@ class FineTuningHandler:
         logger.info("🚀 Starting training...")
         trainer.train()
         logger.info("✅ Training completed.")
+
+        if self.debug:
+            # Check trainer state
+            print("=== Training State ===")
+            print(f"Best metric: {trainer.state.best_metric}")
+            print(f"Best model checkpoint: {trainer.state.best_model_checkpoint}")
+            print(f"Total steps: {trainer.state.global_step} / {trainer.state.max_steps}")
+            print(f"Early stopped: {trainer.state.global_step < trainer.state.max_steps}")
 
         # save the LoRA adapters of best model
         logger.info(f"💾 Saving best model to {self.base_model_name}...")
