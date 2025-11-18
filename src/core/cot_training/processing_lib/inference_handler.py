@@ -10,7 +10,7 @@ from typing import Any
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from datasets import Dataset
+from datasets import Dataset, DatasetDict, load_from_disk
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
@@ -23,6 +23,7 @@ logger = logging.getLogger(name=__name__)
 @dataclass
 class TestHandler:
     lora_model_dir: Path|str
+    evaluated_testset_path: Path
     max_seq_length: int
     max_new_tokens: int
     chat_template: str|None = None
@@ -271,9 +272,8 @@ class TestHandler:
 
         Returns
         -------
-        tuple[Dataset, list[str]]
+        Dataset
             - Dataset with added 'model_prediction' column
-            - List of prediction strings (for evaluation)
         """
 
         if not self.model or not self.tokenizer:
@@ -300,9 +300,70 @@ class TestHandler:
         results_dataset: Dataset = test_dataset.add_column( # type: ignore
             name="model_prediction", column=predictions
         )
-        results_dataset.save_to_disk(dataset_path="./DiverseVul/test_evaluations/")
+
+        self.save_evaluation_results(results_dataset=results_dataset)
 
         return results_dataset
+
+    # todo: create utility function for this
+    # similar method in `DatasetHandler`
+    def save_evaluation_results(
+        self,
+        results_dataset: Dataset,
+        split_name: str = "test"
+    ):
+        """Save evaluation results with custom split name.
+
+        Parameters
+        ----------
+        results_dataset : Dataset
+            Dataset containing evaluation results
+        output_dir : Path
+            Directory to save to
+        split_name : str
+            Name of the split (e.g., "test", "validation", "test_ood")
+        """
+
+        dataset_dict = DatasetDict({split_name: results_dataset})
+
+        dataset_dict.save_to_disk(dataset_dict_path=self.evaluated_testset_path)
+        logger.info(
+            f"✅ Saved {len(results_dataset)} samples to {self.evaluated_testset_path} (split: {split_name})"
+        )
+
+    # todo: create utility function for this
+    # similar method in `DatasetHandler`
+    @staticmethod
+    def load_test_dataset(input_dir: Path, split_name: str = "test") -> Dataset:
+        """Load evaluation results from disk.
+        Dataset needs to be previously saved via [~TestHandler.save_evaluation_results].
+
+        Parameters
+        ----------
+        input_dir : Path
+            Directory to load from
+        split_name : str
+            Name of the split to load
+
+        Returns
+        -------
+        Dataset
+            Loaded dataset
+        """
+        loaded: Dataset|DatasetDict = load_from_disk(dataset_path=input_dir)
+
+        if isinstance(loaded, DatasetDict):
+            if split_name not in loaded:
+                raise KeyError(
+                    f"`{split_name}` split not found. Available: {list(loaded.keys())}"
+                )
+            return loaded["test"]
+        elif isinstance(loaded, Dataset):
+            return loaded
+        else:
+            raise TypeError(
+                f"Expected Dataset or DatasetDict, got {type(loaded).__name__}"
+            )
 
     def _sequential_inference(self, test_dataset: Dataset) -> list[dict[str, Any]]:
         """Run inference sequentially using run_inference() method."""

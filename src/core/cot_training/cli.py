@@ -37,7 +37,11 @@ def get_parser():
         "-c",
         type=str,
         required=True,
-        help="Chat template to use",
+        help=(
+            "Chat template to use:\n"
+            "  - fine-tuning and hpo modes: it represents the chat_template used to format input samples and extract delimiters for reponse only learning"
+            "  - inference mode: it represents the chat_template applied to test samples"
+        ),
     )
     common_group.add_argument(
         "--max_seq_length",
@@ -208,16 +212,15 @@ def get_parser():
         help="Maximum tokens per generated answer (inference only)",
     )
     inference_group.add_argument(
-        "--chat_template_inference",
-        "-ci",
-        type=str,
-        help="Chat template of the model used for inference",
-    )
-    inference_group.add_argument(
         "--assets_dir",
         "-ad",
         type=Path,
         help="Directory where to save the generated plots and reports to (inference only)",
+    )
+    inference_group.add_argument(
+        "--evaluated_test_path",
+        type=Path,
+        help="Directory where to save the test datset with evalutions to (inference only)",
     )
     inference_group.add_argument(
         "--use_batching",
@@ -233,6 +236,11 @@ def get_parser():
         "--save_artifacts",
         action="store_true",
         help="Save evaluation artifacts",
+    )
+    inference_group.add_argument(
+        "--load_test_from_disk",
+        action="store_true",
+        help="Whether to load a previously evaluated dataset from disk",
     )
 
     return parser
@@ -261,10 +269,12 @@ def validate_args(args):
     inference_only = {
         "lora_weights",
         "max_tokens_per_answer",
+        "evaluated_test_path",
         "assets_dir",
         "use_batching",
         "include_code_in_reports",
-        "save_artifacts"
+        "save_artifacts",
+        "load_test_from_disk"
     }
 
     # args shared between fine-tuning and HPO (not allowed/unnecessary in inference)
@@ -397,10 +407,12 @@ def get_default_value(arg_name):
         # Inference only
         "lora_weights": None,
         "max_tokens_per_answer": 2048,
+        "evaluated_test_path": None,
         "assets_dir": None,
         "use_batching": False,
         "include_code_in_reports": False,
-        "save_artifacts": False
+        "save_artifacts": False,
+        "load_test_from_disk": False
     }
     return defaults.get(arg_name)
 

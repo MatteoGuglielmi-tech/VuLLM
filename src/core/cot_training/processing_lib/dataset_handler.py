@@ -287,9 +287,13 @@ class DatasetHandler:
 
         return formatted_splits
 
+    # todo: create utility function for this
+    # similar method in `DatasetHandler`
     def save_to_disk(self, dataset_dict: DatasetDict, fp: Path):
         dataset_dict.save_to_disk(fp)
 
+    # todo: create utility function for this
+    # similar method in `DatasetHandler`
     @staticmethod
     def load_from_disk(fp: Path, split: str|None = None) -> DatasetDict|Dataset:
         """Loads a Dataset or DatasetDict from disk.

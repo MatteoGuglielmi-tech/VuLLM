@@ -104,6 +104,7 @@ if __name__ == "__main__":
         elif args.hpo:
             rich_rule(f"🚀 [bold][italic][light_salmon1] Starting HPO pipeline [/][/][/] 🚀")
 
+            #warning: I don't have enough resources for this
             # TODO: apply strategy changes and eval_batch_size to HPO
             optimizer = LLMHyperparameterOptimizer(
                 # Dataset parameters
@@ -149,19 +150,26 @@ if __name__ == "__main__":
         else:
             rich_rule(f"🚀 [bold][italic][light_sky_blue1] Starting inference pipeline [/][/][/] 🚀")
 
-            test_set = cast(Dataset, DatasetHandler.load_from_disk(fp=args.formatted_dataset_dir, split="test"))
-            test_handler = TestHandler(
-                lora_model_dir=args.lora_weights,
-                max_seq_length=args.max_seq_length,
-                max_new_tokens=args.max_tokens_per_answer,
-                chat_template=args.chat_template,
-            )
+            if not args.load_test_from_disk:
+                test_set = cast(Dataset, DatasetHandler.load_from_disk(fp=args.formatted_dataset_dir, split="test"))
+                test_handler = TestHandler(
+                    lora_model_dir=args.lora_weights,
+                    max_seq_length=args.max_seq_length,
+                    max_new_tokens=args.max_tokens_per_answer,
+                    chat_template=args.chat_template,
+                    evaluated_testset_path=args.evaluated_test_path
+                )
 
-            dataset_with_perdictions = test_handler.evaluate_on_test_set(
-                test_dataset=test_set,
-                batch_size=args.batch_size,
-                use_batching=args.use_batching,
-            )
+                dataset_with_perdictions: Dataset = test_handler.evaluate_on_test_set(
+                    test_dataset=test_set,
+                    batch_size=args.batch_size,
+                    use_batching=args.use_batching,
+                )
+
+            else:
+                dataset_with_perdictions: Dataset = TestHandler.load_test_dataset(
+                    input_dir=args.evaluated_test_path, split_name="test"
+                )
 
             evaluator = Evaluator(output_dir=args.assets_dir, test_dataset=dataset_with_perdictions)
             evaluator.validate_cwe_format() # validate predicted cwe quality
