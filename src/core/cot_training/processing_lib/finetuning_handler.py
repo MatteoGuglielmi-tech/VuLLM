@@ -242,7 +242,7 @@ class FineTuningHandler:
 
     def _log_settings(self, strategy: TrainingStrategy) -> None:
         tb_dict = {
-            "TrainingStrategy": strategy.value,
+            "TrainingStrategy": strategy,
             "Epochs": self.epochs,
             "LR scheduler": self.lr_scheduler_type,
             "Early stopping?": self.use_early_stopping,
