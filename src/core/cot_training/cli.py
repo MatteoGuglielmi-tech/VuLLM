@@ -82,7 +82,7 @@ def get_parser():
         "--base_model_name",
         "-n",
         type=str,
-        help="Name of the base model to use",
+        help="Name of the base mo,del to use",
     )
     shared_training_group.add_argument(
         "--epochs", "-e", type=int, default=3, help="Training epochs"
@@ -93,6 +93,13 @@ def get_parser():
         type=int,
         default=4,
         help="Gradient accumulation steps",
+    )
+    shared_training_group.add_argument(
+        "--strategy",
+        type=str,
+        choices=["fast", "explore", "balanced"],
+        default="explore",
+        help="Strategy to use during fine-tuning",
     )
     shared_training_group.add_argument(
         "--logging_steps",
@@ -251,6 +258,7 @@ def validate_args(args):
         "base_model_name",
         "epochs",
         "grad_acc_steps",
+        "strategy",
         "logging_steps",
         "use_rslora",
         "use_loftq",
@@ -355,6 +363,7 @@ def get_default_value(arg_name):
         "base_model_name": None,
         "epochs": 3,
         "grad_acc_steps": 4,
+        "strategy": "explore",
         "logging_steps": 50,
         "use_rslora": True,
         "use_loftq": False,

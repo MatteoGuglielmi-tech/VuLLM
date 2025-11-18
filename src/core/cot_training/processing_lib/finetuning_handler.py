@@ -16,8 +16,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -28,12 +27,11 @@ from datasets import DatasetDict
 logger = logging.getLogger(name=__name__)
 
 
-class TrainingStrategy(Enum):
-    """Training presets"""
-    FAST = "fast"          # Quick iteration with early stopping
-    EXPLORE = "explore"    # Full warm restarts exploration
-    BALANCED = "balanced"  # Moderate approach
-
+StrategyType = Literal[
+    "fast",     # Quick iteration with early stopping
+    "explore",  # Full warm restarts exploration
+    "balanced"  # Moderate approach
+]
 
 @dataclass
 class StrategyConfig:
@@ -70,7 +68,7 @@ class FineTuningHandler:
         gradient_accumulation_steps: int,
         weight_decay: float,
 
-        strategy: TrainingStrategy = TrainingStrategy.EXPLORE,
+        strategy: StrategyType = "explore",
         epochs: Optional[int] = None,
         use_early_stopping: Optional[bool] = None,
         early_stopping_patience: Optional[int] = None,
@@ -83,6 +81,106 @@ class FineTuningHandler:
         # -- general --
         debug: bool = False,
     ):
+        """
+        Initialize the fine-tuning handler.
+        
+        Parameters
+        ----------
+        dataset_handler_class: type[DatasetHandler]
+            DatasetHandler class object/reference
+
+        model_loader_class: type[ModelHandler]
+            ModelHandler class object/reference
+            
+        dataset_path: str
+            Path string leading to source dataset
+
+        formatted_dataset_dir: Path
+            Output directory where to save formatted dataset (after `apply_chat_template`) to
+
+        num_cpus: int
+            Number of cpu processes available for this task
+
+        base_model_name: str
+            Name of the model to load (from huggingface or unsloth)
+
+        chat_template: str
+            Chat template to apply to the tokenizer for correct tokenization and formatting
+
+        max_seq_length: int
+            Maximum sequence length the model needs to handle (input+output)
+
+        lora_rank: int
+            LoRA rank to use when patching model (reflects the capacity to capture complex patterns)
+
+        lora_alpha: int
+            LoRA parameter which scales magnitude of low-rank updates to the original weights.
+            Low alpha (α=8, r=16 → scale=0.5):
+                - LoRA changes are subtle
+                - Original model behavior mostly preserved
+                - Conservative adaptation
+
+            High alpha (α=64, r=16 → scale=4.0):
+                - LoRA changes are strong
+                - Can override original model behavior more
+                - Aggressive adaptation
+
+        lora_dropout: float
+            LoRA droupout regularization parameter, it specifies the amount of values (in %) to set to zero
+            during an update.
+            
+        use_rslora: bool
+            Enable smarter scaling for the LoRA weights (no lora_alpha needed)
+
+        use_loftq: bool
+            Enable smarter initialization for the LoRA weights (requires loading the entire module in memory)
+
+        learning_rate: float
+            Learning rate value to use (the higher the steeper the learning curve)
+
+        per_device_train_batch_size: int
+            Real batch size capacity
+
+        gradient_accumulation_steps: int
+            Represents how many steps to take before performing an update.
+            Virtual batch size = per_device_train_batch_size * gradient_accumulation_steps
+
+        weight_decay: float
+            L2 regularization penatly term
+
+        strategy : {"fast", "explore", "balanced"}
+            Training strategy preset:
+            - "fast": Quick iteration with early stopping (4 epochs, cosine scheduler)
+            - "explore": Full warm restarts exploration (7 epochs, no early stopping)
+            - "balanced": Moderate approach (5 epochs, gentle early stopping)
+
+        epochs : int, optional, default=None
+            Override strategy default epochs
+
+        use_early_stopping : bool, optional, default=None
+            Override strategy default early stopping behavior
+
+        early_stopping_patience: int, optional, default=None
+            Evaluation steps to wait without improvement before stopping
+
+        early_stopping_threshold: Optional[float]= None
+            Threshold defining whether an imporvement took place or not
+
+        warmup_ratio: Optional[float] = None
+            Scheduler parameter. Ratio of total training steps used for a linear warmup from 0 to learning_rate
+
+        logging_steps: int = 100
+            How often logging happens
+
+        use_weighted_cot_trainer: bool, default=False
+            Whether to use custom Trainer which weights parts of the prompt differently
+
+        use_deepspeed: bool, default=False
+            Whether deepspeed is used for the run or not
+
+        debug: bool, default=False
+            Enable debug logging
+        """
 
         self.dataset_handler_class = dataset_handler_class
         self.dataset_path = dataset_path
@@ -137,9 +235,9 @@ class FineTuningHandler:
 
         self._log_settings(strategy=strategy)
 
-    def _log_settings(self, strategy: TrainingStrategy) -> None:
+    def _log_settings(self, strategy: StrategyType) -> None:
         tb_dict = {
-            "TrainingStrategy": strategy.value,
+            "TrainingStrategy": strategy,
             "Epochs": self.epochs,
             "LR scheduler": self.lr_scheduler_type,
             "Early stopping?": self.use_early_stopping,
@@ -157,11 +255,11 @@ class FineTuningHandler:
         del tb_dict, tb
 
     @staticmethod
-    def _get_strategy_defaults(strategy: TrainingStrategy) -> StrategyConfig:
+    def _get_strategy_defaults(strategy: StrategyType) -> StrategyConfig:
         """Get configuration for a training strategy."""
 
         configs = {
-            TrainingStrategy.FAST: StrategyConfig(
+            "fast": StrategyConfig(
                 epochs=4,
                 lr_scheduler_type="cosine",
                 use_early_stopping=True,
@@ -169,13 +267,13 @@ class FineTuningHandler:
                 early_stopping_threshold=0.001,
                 warmup_ratio=0.05,
             ),
-            TrainingStrategy.EXPLORE: StrategyConfig(
+            "explore": StrategyConfig(
                 epochs=7,
                 lr_scheduler_type="cosine_with_restarts",
                 use_early_stopping=False,
                 warmup_ratio=0.03,
             ),
-            TrainingStrategy.BALANCED: StrategyConfig(
+            "balanced": StrategyConfig(
                 epochs=5,
                 lr_scheduler_type="cosine_with_restarts",
                 use_early_stopping=True,

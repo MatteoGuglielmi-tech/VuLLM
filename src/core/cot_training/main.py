@@ -90,6 +90,7 @@ if __name__ == "__main__":
                 per_device_train_batch_size=args.batch_size,
                 gradient_accumulation_steps=args.grad_acc_steps,
                 weight_decay=args.weight_decay,
+                strategy=args.strategy,
                 logging_steps=args.logging_steps,
                 use_deepspeed=args.deepspeed,
 
@@ -102,6 +103,7 @@ if __name__ == "__main__":
         elif args.hpo:
             rich_rule(f"🚀 [bold][italic][light_salmon1] Starting HPO pipeline [/][/][/] 🚀")
 
+            # TODO: apply strategy changes to HPO
             optimizer = LLMHyperparameterOptimizer(
                 # Dataset parameters
                 dataset_handler_class=DatasetHandler,
