@@ -90,7 +90,6 @@ if __name__ == "__main__":
                 per_device_train_batch_size=args.batch_size,
                 gradient_accumulation_steps=args.grad_acc_steps,
                 weight_decay=args.weight_decay,
-                eval_steps=args.eval_steps,
                 logging_steps=args.logging_steps,
                 use_deepspeed=args.deepspeed,
 
@@ -152,7 +151,7 @@ if __name__ == "__main__":
                 lora_model_dir=args.lora_weights,
                 max_seq_length=args.max_seq_length,
                 max_new_tokens=args.max_tokens_per_answer,
-                chat_template=args.chat_template_inference
+                chat_template=args.chat_template,
             )
 
             dataset_with_perdictions = test_handler.evaluate_on_test_set(

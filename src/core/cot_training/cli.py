@@ -33,6 +33,13 @@ def get_parser():
         help="Directory path wherein saving the formatted dataset (not tokenzied)",
     )
     common_group.add_argument(
+        "--chat_template",
+        "-c",
+        type=str,
+        required=True,
+        help="Chat template to use",
+    )
+    common_group.add_argument(
         "--max_seq_length",
         "-m",
         type=int,
@@ -75,14 +82,7 @@ def get_parser():
         "--base_model_name",
         "-n",
         type=str,
-        default="unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit",
         help="Name of the base model to use",
-    )
-    shared_training_group.add_argument(
-        "--chat_template",
-        "-c",
-        type=str,
-        help="Chat template to use",
     )
     shared_training_group.add_argument(
         "--epochs", "-e", type=int, default=3, help="Training epochs"
@@ -100,13 +100,6 @@ def get_parser():
         type=int,
         default=50,
         help="Interval training log is shown at",
-    )
-    shared_training_group.add_argument(
-        "--eval_steps",
-        "-v",
-        type=float,
-        default=100,
-        help="Interval of steps evaluation is performed at",
     )
     shared_training_group.add_argument(
         "--use_rslora",
@@ -246,7 +239,6 @@ def validate_args(args):
     inference_only = {
         "lora_weights",
         "max_tokens_per_answer",
-        "chat_template_inference",
         "assets_dir",
         "use_batching",
         "include_code_in_reports",
@@ -257,11 +249,9 @@ def validate_args(args):
     training_shared = {
         "dataset_path",
         "base_model_name",
-        "chat_template",
         "epochs",
         "grad_acc_steps",
         "logging_steps",
-        "eval_steps",
         "use_rslora",
         "use_loftq",
         "use_weighted_trainer",
@@ -269,10 +259,10 @@ def validate_args(args):
     }
 
     if args.finetune:
+        if args.base_model_name is None:
+            raise argparse.ArgumentTypeError("--base_model_name is required for --finetune mode")
         if args.dataset_path is None: # needs dataset path
             raise argparse.ArgumentTypeError("--dataset_path is required for --finetune mode")
-        if args.chat_template is None: # enforce chat_template for clarity
-            raise argparse.ArgumentTypeError("--chat_tempalte is required for --finetune mode")
 
         invalid_args = []
 
@@ -294,7 +284,9 @@ def validate_args(args):
             )
 
     elif args.hpo:
-        if args.dataset_path is None: # needs dataset path
+        if args.base_model_name is None:
+            raise argparse.ArgumentTypeError("--base_model_name is required for --hpo mode")
+        if args.dataset_path is None:
             raise argparse.ArgumentTypeError("--dataset_path is required for --hpo mode")
 
         invalid_args = []
@@ -319,6 +311,11 @@ def validate_args(args):
             )
 
     elif args.inference:
+        if args.lora_weights is None:
+            raise argparse.ArgumentTypeError(
+                "--lora_weights is required for --inference mode"
+            )
+
         invalid_args = []
 
         # Check fine-tuning-only arguments
@@ -348,11 +345,6 @@ def validate_args(args):
                 f"Arguments {', '.join(invalid_args)} cannot be used with --inference mode"
             )
 
-        # Validate that lora_weights is provided for inference
-        if args.lora_weights is None:
-            raise argparse.ArgumentTypeError(
-                "--lora_weights is required for --inference mode"
-            )
 
 
 def get_default_value(arg_name):
@@ -360,12 +352,10 @@ def get_default_value(arg_name):
     defaults = {
         # Shared training arguments
         "dataset_path": None,
-        "base_model_name": "unsloth/llama-3.1-8b-instruct-bnb-4bit",
-        "chat_template": None,
+        "base_model_name": None,
         "epochs": 3,
         "grad_acc_steps": 4,
         "logging_steps": 50,
-        "eval_steps": 100,
         "use_rslora": True,
         "use_loftq": False,
         "use_weighted_trainer": False,
@@ -382,7 +372,6 @@ def get_default_value(arg_name):
         # Inference only
         "lora_weights": None,
         "max_tokens_per_answer": 2048,
-        "chat_template_inference": None,
         "assets_dir": None,
         "use_batching": False,
         "include_code_in_reports": False,
