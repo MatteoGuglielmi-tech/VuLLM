@@ -16,7 +16,8 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from typing import Any, Optional, Literal
+from enum import StrEnum
+from typing import Any, Optional
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -27,11 +28,11 @@ from datasets import DatasetDict
 logger = logging.getLogger(name=__name__)
 
 
-StrategyType = Literal[
-    "fast",     # Quick iteration with early stopping
-    "explore",  # Full warm restarts exploration
-    "balanced"  # Moderate approach
-]
+class TrainingStrategy(StrEnum):
+    FAST = "fast"           # Quick iteration with early stopping
+    EXPLORE = "explore"     # Full warm restarts exploration
+    BALANCED = "balanced"   # Moderate approach
+
 
 @dataclass
 class StrategyConfig:
@@ -68,7 +69,7 @@ class FineTuningHandler:
         gradient_accumulation_steps: int,
         weight_decay: float,
 
-        strategy: StrategyType = "explore",
+        strategy: TrainingStrategy = "explore",
         epochs: Optional[int] = None,
         use_early_stopping: Optional[bool] = None,
         early_stopping_patience: Optional[int] = None,
@@ -83,7 +84,7 @@ class FineTuningHandler:
     ):
         """
         Initialize the fine-tuning handler.
-        
+
         Parameters
         ----------
         dataset_handler_class: type[DatasetHandler]
@@ -91,7 +92,7 @@ class FineTuningHandler:
 
         model_loader_class: type[ModelHandler]
             ModelHandler class object/reference
-            
+
         dataset_path: str
             Path string leading to source dataset
 
@@ -128,7 +129,7 @@ class FineTuningHandler:
         lora_dropout: float
             LoRA droupout regularization parameter, it specifies the amount of values (in %) to set to zero
             during an update.
-            
+
         use_rslora: bool
             Enable smarter scaling for the LoRA weights (no lora_alpha needed)
 
@@ -148,16 +149,16 @@ class FineTuningHandler:
         weight_decay: float
             L2 regularization penatly term
 
-        strategy : {"fast", "explore", "balanced"}
+        strategy: TrainingStrategy, options={"fast", "explore", "balanced"}
             Training strategy preset:
             - "fast": Quick iteration with early stopping (4 epochs, cosine scheduler)
             - "explore": Full warm restarts exploration (7 epochs, no early stopping)
             - "balanced": Moderate approach (5 epochs, gentle early stopping)
 
-        epochs : int, optional, default=None
+        epochs: int, optional, default=None
             Override strategy default epochs
 
-        use_early_stopping : bool, optional, default=None
+        use_early_stopping: bool, optional, default=None
             Override strategy default early stopping behavior
 
         early_stopping_patience: int, optional, default=None
@@ -208,7 +209,7 @@ class FineTuningHandler:
         self.use_early_stopping = (
             use_early_stopping
             if use_early_stopping is not None
-            else self.strategy_config.epochs
+            else self.strategy_config.early_stopping_patience
         )
         self.early_stopping_patience = (
             early_stopping_patience
@@ -235,9 +236,9 @@ class FineTuningHandler:
 
         self._log_settings(strategy=strategy)
 
-    def _log_settings(self, strategy: StrategyType) -> None:
+    def _log_settings(self, strategy: TrainingStrategy) -> None:
         tb_dict = {
-            "TrainingStrategy": strategy,
+            "TrainingStrategy": strategy.value,
             "Epochs": self.epochs,
             "LR scheduler": self.lr_scheduler_type,
             "Early stopping?": self.use_early_stopping,
@@ -255,11 +256,11 @@ class FineTuningHandler:
         del tb_dict, tb
 
     @staticmethod
-    def _get_strategy_defaults(strategy: StrategyType) -> StrategyConfig:
+    def _get_strategy_defaults(strategy: TrainingStrategy) -> StrategyConfig:
         """Get configuration for a training strategy."""
 
         configs = {
-            "fast": StrategyConfig(
+            TrainingStrategy.FAST: StrategyConfig(
                 epochs=4,
                 lr_scheduler_type="cosine",
                 use_early_stopping=True,
@@ -267,13 +268,13 @@ class FineTuningHandler:
                 early_stopping_threshold=0.001,
                 warmup_ratio=0.05,
             ),
-            "explore": StrategyConfig(
+            TrainingStrategy.EXPLORE: StrategyConfig(
                 epochs=7,
                 lr_scheduler_type="cosine_with_restarts",
                 use_early_stopping=False,
                 warmup_ratio=0.03,
             ),
-            "balanced": StrategyConfig(
+            TrainingStrategy.BALANCED: StrategyConfig(
                 epochs=5,
                 lr_scheduler_type="cosine_with_restarts",
                 use_early_stopping=True,
@@ -633,6 +634,7 @@ class FineTuningHandler:
 
         if self.use_early_stopping:
             from transformers import EarlyStoppingCallback
+            assert self.early_stopping_patience is not None
 
             callbacks.append(
                 EarlyStoppingCallback(
