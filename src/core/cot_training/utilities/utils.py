@@ -70,8 +70,8 @@ def build_table(
 
     for key, value in data.items():
         if isinstance(value, list):  # this assumes no nested dict
-            value = [str(v) for v in value]
-            table.add_row(key, *value)
+            value = ", ".join([str(v) for v in value])
+            table.add_row(key, value)
         else:
             table.add_row(key, str(value))
 
