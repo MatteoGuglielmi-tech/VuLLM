@@ -143,7 +143,11 @@ class Evaluator:
         if missing_fields:
             raise ValueError(f"Dataset missing fields: {missing_fields}")
 
-        if not isinstance(sample["model_prediction"], ParsedResponse):
+        try:
+            ParsedResponse(**sample["model_prediction"])
+        except KeyError as e:
+            raise e
+        except Exception:
             raise TypeError(
                 f"Expected model_prediction to be ParsedResponse, "
                 f"got {type(sample['model_prediction'])}"
