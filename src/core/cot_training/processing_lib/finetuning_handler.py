@@ -66,10 +66,11 @@ class FineTuningHandler:
         # -- fine-tuning HP --
         learning_rate: float,
         per_device_train_batch_size: int,
+        per_device_eval_batch_size: int,
         gradient_accumulation_steps: int,
         weight_decay: float,
 
-        strategy: TrainingStrategy = "explore",
+        strategy: TrainingStrategy,
         epochs: Optional[int] = None,
         use_early_stopping: Optional[bool] = None,
         early_stopping_patience: Optional[int] = None,
@@ -142,9 +143,12 @@ class FineTuningHandler:
         per_device_train_batch_size: int
             Real batch size capacity
 
+        per_device_eval_batch_size: int
+            Real batch size capacity for evaluation
+
         gradient_accumulation_steps: int
             Represents how many steps to take before performing an update.
-            Virtual batch size = per_device_train_batch_size * gradient_accumulation_steps
+            effective_batch_size = per_device_batch_size × gradient_accumulation_steps × num_gpus
 
         weight_decay: float
             L2 regularization penatly term
@@ -200,8 +204,8 @@ class FineTuningHandler:
 
         self.lr = learning_rate
         self.per_device_train_batch_size = per_device_train_batch_size
+        self.per_device_eval_batch_size = per_device_eval_batch_size
         self.gradient_accumulation_steps = gradient_accumulation_steps
-
 
         self.strategy_config = self._get_strategy_defaults(strategy)
         self.epochs = epochs if epochs is not None else self.strategy_config.epochs
@@ -579,7 +583,7 @@ class FineTuningHandler:
             # "train"
             "gradient_checkpointing": True,
             "per_device_train_batch_size": self.per_device_train_batch_size,
-            "per_device_eval_batch_size": self.per_device_train_batch_size,
+            "per_device_eval_batch_size": self.per_device_eval_batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
 
             "learning_rate": self.lr,

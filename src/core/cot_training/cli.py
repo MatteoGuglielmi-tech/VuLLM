@@ -50,8 +50,12 @@ def get_parser():
         "--batch_size",
         "-b",
         type=int,
-        default=2,
-        help="How many samples in a per device batch",
+        default=4,
+        help=( 
+            "How many samples in a per device batch:\n" 
+            "  - fine-tuning and hpo modes: it represents the batch used to teach the model"
+            "  - inference mode: it represents the number of samples evaluated per iteration"
+        ),
     )
     common_group.add_argument(
         "--debug",
@@ -85,7 +89,11 @@ def get_parser():
         help="Name of the base mo,del to use",
     )
     shared_training_group.add_argument(
-        "--epochs", "-e", type=int, default=3, help="Training epochs"
+        "--epochs",
+        "-e",
+        type=int,
+        default=None,
+        help="Number of epochs to finetune the model for",
     )
     shared_training_group.add_argument(
         "--grad_acc_steps",
@@ -155,6 +163,12 @@ def get_parser():
     )
     finetune_group.add_argument(
         "--lora_dropout", "-d", type=float, default=0, help="LoRa dropout (fine-tuning only)"
+    )
+    finetune_group.add_argument(
+        "--batch_size_eval",
+        type=int,
+        default=8,
+        help="How many samples in a per device batch for evaluation steps",
     )
 
     # ============================================================================
@@ -237,6 +251,7 @@ def validate_args(args):
         "lora_rank",
         "lora_alpha",
         "lora_dropout",
+        "batch_size_eval"
     }
 
     # hpo only args
@@ -361,7 +376,7 @@ def get_default_value(arg_name):
         # Shared training arguments
         "dataset_path": None,
         "base_model_name": None,
-        "epochs": 3,
+        "epochs": None,
         "grad_acc_steps": 4,
         "strategy": "explore",
         "logging_steps": 50,
@@ -375,6 +390,7 @@ def get_default_value(arg_name):
         "lora_rank": 16,
         "lora_alpha": 32,
         "lora_dropout": 0,
+        "batch_size_eval": 8,
         # HPO only
         "n_trials": 5,
         "run_cap": 100,

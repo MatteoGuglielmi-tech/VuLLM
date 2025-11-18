@@ -88,6 +88,7 @@ if __name__ == "__main__":
                 learning_rate=args.learning_rate,
                 epochs=args.epochs,
                 per_device_train_batch_size=args.batch_size,
+                per_device_eval_batch_size=args.batch_size_eval,
                 gradient_accumulation_steps=args.grad_acc_steps,
                 weight_decay=args.weight_decay,
                 strategy=args.strategy,
@@ -103,7 +104,7 @@ if __name__ == "__main__":
         elif args.hpo:
             rich_rule(f"🚀 [bold][italic][light_salmon1] Starting HPO pipeline [/][/][/] 🚀")
 
-            # TODO: apply strategy changes to HPO
+            # TODO: apply strategy changes and eval_batch_size to HPO
             optimizer = LLMHyperparameterOptimizer(
                 # Dataset parameters
                 dataset_handler_class=DatasetHandler,
