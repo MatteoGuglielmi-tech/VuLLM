@@ -55,8 +55,8 @@ def get_parser():
         "-b",
         type=int,
         default=4,
-        help=( 
-            "How many samples in a per device batch:\n" 
+        help=(
+            "How many samples in a per device batch:\n"
             "  - fine-tuning and hpo modes: it represents the batch used to teach the model"
             "  - inference mode: it represents the number of samples evaluated per iteration"
         ),

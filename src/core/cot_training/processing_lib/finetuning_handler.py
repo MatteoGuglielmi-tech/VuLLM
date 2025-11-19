@@ -298,7 +298,9 @@ class FineTuningHandler:
         common_suffix: str = os.path.join(provider, model_id, date, time)
         history_dir: str = "./checkpoints"
 
-        self.lora_best_model_dir: str = os.path.join(history_dir, "best_model")
+        self.lora_best_model_dir: str = os.path.join(
+            history_dir, "best_model", self.base_model_name, f"{date}-{time}"
+        )
         self.checkpoint_dir: str = os.path.join(history_dir, common_suffix)
         self.output_dir: str = os.path.join("./results", f"{model_id}_{date}_{time}")
 
