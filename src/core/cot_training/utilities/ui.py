@@ -1,7 +1,4 @@
 import os
-import logging
-import gc
-import torch
 
 from collections.abc import Sized as ABCSized
 from typing import Any, Iterable, Literal, TypeVar, Callable
@@ -31,7 +28,6 @@ from .detection import get_accelerator_config
 
 
 T = TypeVar("T")
-logger = logging.getLogger(__name__)
 _console = Console()
 
 
@@ -486,138 +482,6 @@ def rich_status(description: str, spinner: str = "clock"):
             s.stop()
             rich_exception()
             raise
-
-
-def get_instruction_response_parts(tokenizer) -> tuple[str, str]:
-    """Automatically extract instruction and response parts from chat template.
-
-    Returns
-    -------
-    tuple[str, str]
-        (instruction_part, response_part)
-    """
-
-    chat_template = tokenizer.chat_template
-
-    if not chat_template:
-        raise ValueError("Tokenizer has no chat template!")
-
-    patterns = {
-        # Llama 3+
-        "llama": (
-            "<|start_header_id|>user<|end_header_id|>\n\n",
-            "<|start_header_id|>assistant<|end_header_id|>\n\n",
-        ),
-        # Qwen 2.5
-        "qwen": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # ChatML (generic)
-        "chatml": (
-            "<|im_start|>user\n",
-            "<|im_start|>assistant\n",
-        ),
-        # Mistral
-        "mistral": (
-            "[INST]",
-            "[/INST]",
-        ),
-        # Zephyr
-        "zephyr": (
-            "<|user|>\n",
-            "<|assistant|>\n",
-        ),
-    }
-
-    # Detect based on template content
-    template_lower = chat_template.lower()
-
-    if "start_header_id" in template_lower:
-        return patterns["llama"]
-    elif "im_start" in template_lower or "qwen" in template_lower:
-        return patterns["qwen"]
-    elif "[inst]" in template_lower:
-        return patterns["mistral"]
-    elif "<|user|>" in template_lower:
-        return patterns["zephyr"]
-    else:
-        raise ValueError(
-            f"Could not detect chat template format. "
-            f"Please specify instruction_part and response_part manually.\n"
-            f"Template: {chat_template[:200]}"
-        )
-
-
-def cleanup_resources(accelerator):
-    """
-    Cleanup with Accelerate support.
-    """
-    logger.info("Cleaning up resources...")
-
-    try:
-        # Synchronize all processes
-        accelerator.wait_for_everyone()
-        logger.info("✓ Processes synchronized")
-    except Exception:
-        logger.exception(f"During waiting for everyone to align, an error has occured")
-
-    try:
-        # Free GPU memory
-        accelerator.free_memory()
-        logger.info("✓ GPU memory freed")
-    except Exception:
-        logger.exception(f"While freeing memory, an error has occured")
-
-    try:
-        # Destroy distributed process group
-        if accelerator.state.distributed_type != "NO":
-            import torch.distributed as dist
-
-            if dist.is_available() and dist.is_initialized():
-                dist.destroy_process_group()
-                logger.info("✓ Distributed process group destroyed")
-    except Exception:
-        logger.exception(f"During distribution cleanup, an error has occured")
-
-    try:
-        # Additional CUDA cleanup
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            logger.info("✓ CUDA cache cleared")
-    except Exception:
-        logger.exception(f"An error has occured during CUDA cleanup")
-
-    gc.collect()
-    logger.info("✓ Cleanup complete")
-
-
-def cleanup_single_gpu():
-    """
-    Cleanup for single-GPU jobs (without Accelerate).
-    """
-
-    with rich_status("Cleaning up resources...", spinner="arc"):
-        try:
-            # Check if distributed is initialized
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                logger.info("Destroying distributed process group...")
-                torch.distributed.destroy_process_group()
-                logger.info("✓ Distributed cleaned up")
-        except Exception as e:
-            logger.debug(f"Distributed cleanup: {e}")
-
-        try:
-            # CUDA cleanup
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logger.info("✓ CUDA cleared")
-        except Exception as e:
-            logger.debug(f"CUDA cleanup: {e}")
-
-        gc.collect()
 
 
 @main_process_only
