@@ -5,7 +5,7 @@ from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
 from ..loader_config import Loader
-from ..utilities import get_instruction_response_parts, is_main_process, build_table, rich_panel
+from ..utilities import is_main_process, build_table, rich_panel
 
 import logging
 import os
@@ -17,7 +17,7 @@ from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -327,81 +327,65 @@ class FineTuningHandler:
             self._dataset_dict = dataset_handler.run_pipeline()
         return self._dataset_dict
 
-    def formatting_prompts_func(self, examples):
-        """Format messages into text using the tokenizer's chat template.
-        Handles both batched and single-conversation inputs robustly.
+    def get_instruction_response_parts(self) -> tuple[str, str]:
+        """Automatically extract instruction and response parts from chat template.
+
+        Returns
+        -------
+        tuple[str, str]
+            (instruction_part, response_part)
         """
 
-        if "messages" not in examples:
-            raise ValueError("Dataset must contain 'messages' field")
+        chat_template = cast(str, self.tokenizer.chat_template)
 
-        conversations = examples["messages"]
+        if not chat_template:
+            raise ValueError("Tokenizer has no chat template!")
 
-        if not isinstance(conversations, list):
-            raise TypeError(f"Expected 'messages' to be a list, got {type(conversations)}")
+        patterns = {
+            # Llama 3+
+            "llama": (
+                "<|start_header_id|>user<|end_header_id|>\n\n",
+                "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            ),
+            # Qwen 2.5
+            "qwen": (
+                "<|im_start|>user\n",
+                "<|im_start|>assistant\n",
+            ),
+            # ChatML (generic)
+            "chatml": (
+                "<|im_start|>user\n",
+                "<|im_start|>assistant\n",
+            ),
+            # Mistral
+            "mistral": (
+                "[INST]",
+                "[/INST]",
+            ),
+            # Zephyr
+            "zephyr": (
+                "<|user|>\n",
+                "<|assistant|>\n",
+            ),
+        }
 
-        if len(conversations) == 0: # check format
-            return []
+        # Detect based on template content
+        template_lower = chat_template.lower()
 
-        # if first element is a dict with 'role' key, it's a single conversation
-        if isinstance(conversations[0], dict) and "role" in conversations[0]:
-            # Single conversation format: [{"role": "system", ...}, {"role": "user", ...}]
-            conversations = [conversations] # enforce batch of 1
-
-        texts = []
-        for idx, conversation in enumerate(conversations):
-            try:
-                text = self.tokenizer.apply_chat_template(
-                    conversation,
-                    tokenize=False,
-                    add_generation_prompt=False,
-                )
-                texts.append(text)
-            except Exception as e:
-                print(f"Error processing conversation {idx}: {e}")
-                print(f"Conversation type: {type(conversation)}")
-                print(f"Conversation: {conversation}")
-                raise
-
-        return texts
-
-    def debug_fmt_dataset_structure(self, dataset_dict: DatasetDict):
-        if is_main_process():
-            print("=" * 50)
-            print("DEBUGGING DATASET STRUCTURE")
-            print("=" * 50)
-
-            # Check a single sample
-            sample = dataset_dict["train"][0]
-            print(f"\n1. Single sample keys: {sample.keys()}")
-            print(f"2. Type of 'messages': {type(sample['messages'])}")
-            print(f"3. Length of messages: {len(sample['messages'])}")
-            print(f"4. First message: {sample['messages'][0]}")
-            print(f"5. All messages:\n{sample['messages']}")
-
-            # Check batched data (how SFTTrainer will see it)
-            batch = dataset_dict["train"][:2]
-            print(f"\n6. Batch keys: {batch.keys()}")
-            print(f"7. Type of batch['messages']: {type(batch['messages'])}")
-            print(f"8. Length of batch['messages']: {len(batch['messages'])}")
-            print(f"9. Type of first conversation: {type(batch['messages'][0])}")
-            print(f"10. First conversation:\n{batch['messages'][0]}")
-
-            # Test the formatting function
-            print("\n" + "=" * 50)
-            print("TESTING FORMATTING FUNCTION")
-            print("=" * 50)
-            try:
-                formatted_texts = self.formatting_prompts_func(batch)
-                print(f"✓ Formatting successful!")
-                print(f"✓ Generated {len(formatted_texts)} texts")
-                print(f"\nFirst formatted text (truncated):\n{formatted_texts[0][:500]}...")
-            except Exception as e:
-                print(f"✗ Formatting failed: {e}")
-                import traceback
-                traceback.print_exc()
-
-            print("=" * 50)
+        if "start_header_id" in template_lower:
+            return patterns["llama"]
+        elif "im_start" in template_lower or "qwen" in template_lower:
+            return patterns["qwen"]
+        elif "[inst]" in template_lower:
+            return patterns["mistral"]
+        elif "<|user|>" in template_lower:
+            return patterns["zephyr"]
+        else:
+            raise ValueError(
+                f"Could not detect chat template format. "
+                f"Please specify instruction_part and response_part manually.\n"
+                f"Template: {chat_template[:200]}"
+            )
 
     def create_trainer_with_params(self) -> SFTTrainer|WeightedCoTTrainer:
         """Create a new model and trainer with specific hyperparameters using your existing class."""
@@ -423,9 +407,6 @@ class FineTuningHandler:
         model, self.tokenizer = model_loader.obtain_components()
 
         dataset_dict: DatasetDict = self._prepare_dataset_with_tokenizer(tokenizer=self.tokenizer)
-
-        if self.debug:
-            self.debug_fmt_dataset_structure(dataset_dict)
 
         if is_main_process():
             print(f"📊 Model trainable parameters:")
@@ -457,7 +438,7 @@ class FineTuningHandler:
                 callbacks=callbacks
             )
 
-        instruction_part, response_part = get_instruction_response_parts(tokenizer=self.tokenizer)
+        instruction_part, response_part = self.get_instruction_response_parts()
         trainer = train_on_responses_only(
             trainer,
             instruction_part=instruction_part,
@@ -470,7 +451,7 @@ class FineTuningHandler:
         logger.info(f"   Instruction marker: {instruction_part}")
         logger.info(f"   Response marker: {response_part}")
 
-        return trainer
+        return cast(SFTTrainer, trainer)
 
     def calculate_training_steps(self, train_dataset_size: int) -> dict[str, int]:
         """
