@@ -149,7 +149,7 @@ class Evaluator:
             raise e
         except Exception:
             raise TypeError(
-                f"Expected model_prediction to be ParsedResponse, "
+                f"Expected `model_prediction` to be ParsedResponse, "
                 f"got {type(sample['model_prediction'])}"
             )
 
@@ -199,7 +199,7 @@ class Evaluator:
             for idx in range(self.n_samples):
                 sample: dict[str, Any] = self.test_dataset[idx]
                 try:
-                    prediction: ParsedResponse = sample["model_prediction"]
+                    prediction: ParsedResponse = ParsedResponse(**sample["model_prediction"])
                     if prediction.parse_error:
                         parse_errors += 1
                         pbar.update(advance=1)
@@ -315,12 +315,14 @@ class Evaluator:
             description="Extracting predictions and ground truths...",
         ) as pbar:
             for idx in range(self.n_samples):
-                sample = self.test_dataset[idx]
+                sample: dict[str, Any] = self.test_dataset[idx]
 
-                prediction: ParsedResponse = sample["model_prediction"]
+                prediction: ParsedResponse = ParsedResponse(**sample["model_prediction"])
                 gt_binary_label: bool = bool(sample["target"])
                 gt_cwes: list[int] = (
-                    list(map(lambda x: int(x.split("-")[1]), sample["cwe"]))
+                    list(
+                        map(lambda x: int(x.replace("CWE-", "").strip()), sample["cwe"])
+                    )
                     if sample["cwe"]
                     else []
                 )
@@ -338,7 +340,7 @@ class Evaluator:
                             "gt_cwes": gt_cwes,
                             "error": "Parse failure - invalid JSON or missing verdict",
                             "raw_verdict": (
-                                prediction.verdict if not prediction.parse_error else None
+                                prediction.verdict if not prediction.parse_error else {}
                             ),
                         }
                     )
@@ -358,7 +360,6 @@ class Evaluator:
 
                 is_pred_vulnerable: bool = prediction.is_vulnerable
                 pred_cwe_list: list[int] = prediction.cwe_list
-                pred_confidence: Optional[float] = prediction.confidence
 
                 result = {
                     "index": idx,
@@ -366,9 +367,6 @@ class Evaluator:
                     "gt_cwes": set(gt_cwes),
                     "pred_vulnerable": is_pred_vulnerable,
                     "pred_cwes": set(pred_cwe_list),
-                    "confidence": (
-                        pred_confidence if pred_confidence is not None else 0.0
-                    ),
                     "correct_binary": (gt_binary_label == is_pred_vulnerable),
                     "correct_cwes": (
                         (set(gt_cwes) == set(pred_cwe_list))
@@ -407,58 +405,6 @@ class Evaluator:
         else:
             logger.info("✅ No parse failures detected")
 
-    def _analyze_confidence_distribution(self) -> None:
-        """Analyze confidence score distribution for valid predictions."""
-        if not self.results:
-            logger.warning("No results to analyze confidence")
-            return
-
-        confidences: list[float] = [r["confidence"] for r in self.results]
-
-        correct_confidences = [
-            r["confidence"] for r in self.results if r["correct_binary"]
-        ]
-        incorrect_confidences = [
-            r["confidence"] for r in self.results if not r["correct_binary"]
-        ]
-
-        mean_conf_correct = float(f"{np.mean(correct_confidences):.3f}")
-        mean_conf_incorrect = float(f"{np.mean(incorrect_confidences):.3f}")
-
-        stats = {
-            "Mean": np.mean(confidences),
-            "Median": np.median(confidences),
-            "STD": np.std(confidences),
-            "Min": np.min(confidences),
-            "Max": np.max(confidences),
-            "Q25": np.percentile(confidences, 25),
-            "Q75": np.percentile(confidences, 75),
-            "Q90": np.percentile(confidences, 90),
-            "Q95": np.percentile(confidences, 95),
-            "Q99": np.percentile(confidences, 99),
-            "Mean (correct)": mean_conf_correct,
-            "Mean (incorrect)": mean_conf_incorrect
-        }
-
-        tb = build_table(data=stats, columns=["Statistic index", "Value"])
-        rich_panel(
-            tables=tb,
-            panel_title="Confidence statistics in predictions",
-            border_style="pale_turquoise1",
-        )
-        del tb
-
-        # Calibration check: High confidence should mean high accuracy
-        high_conf = [r for r in self.results if r["confidence"] > 0.9]
-        if high_conf:
-            high_conf_accuracy = sum(r["correct_binary"] for r in high_conf) / len(
-                high_conf
-            )
-            logger.info(
-                f"  Accuracy when confidence > 0.9: {high_conf_accuracy:.2%} "
-                f"({len(high_conf)} samples)"
-            )
-
     def _save_parse_failures(self) -> None:
         """Save parse failures to JSON for debugging."""
 
@@ -469,7 +415,9 @@ class Evaluator:
 
             logger.info(f"Parse failures saved to {failures_file}")
 
-    def _compute_classification_report(self, y_true: list[str], y_pred: list[str]) -> dict[str, Any]:
+    def _compute_classification_report(
+        self, y_true: list[str], y_pred: list[str]
+    ) -> dict[str, Any]:
         """
         Compute classification report with all metrics.
 
@@ -496,7 +444,9 @@ class Evaluator:
 
         return report # type: ignore
 
-    def _compute_confusion_matrix(self, y_true: list[str], y_pred: list[str]) -> np.ndarray:
+    def _compute_confusion_matrix(
+        self, y_true: list[str], y_pred: list[str]
+    ) -> np.ndarray:
         """
         Compute confusion matrix.
 
