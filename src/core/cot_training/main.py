@@ -151,7 +151,6 @@ if __name__ == "__main__":
             rich_rule(f"🚀 [bold][italic][light_sky_blue1] Starting inference pipeline [/][/][/] 🚀")
 
             if not args.load_test_from_disk:
-                test_set = cast(Dataset, DatasetHandler.load_from_disk(fp=args.formatted_dataset_dir, split="test"))
                 test_handler = TestHandler(
                     lora_model_dir=args.lora_weights,
                     max_seq_length=args.max_seq_length,
@@ -159,7 +158,7 @@ if __name__ == "__main__":
                     chat_template=args.chat_template,
                     evaluated_testset_path=args.evaluated_test_path
                 )
-
+                test_set: Dataset = TestHandler.load_test_dataset(input_dir=args.formatted_dataset_dir)
                 dataset_with_perdictions: Dataset = test_handler.evaluate_on_test_set(
                     test_dataset=test_set,
                     batch_size=args.batch_size,
