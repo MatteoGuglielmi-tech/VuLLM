@@ -10,11 +10,11 @@ from typing import Any
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from datasets import Dataset, DatasetDict, load_from_disk
+from datasets import Dataset, DatasetDict
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
-from ..utilities import is_main_process, rich_progress, rich_progress_manual
+from ..utilities import is_main_process, rich_progress_manual
 
 
 logger = logging.getLogger(name=__name__)
@@ -91,8 +91,11 @@ class TestHandler:
         - Encoder-decoder (T5, BART): Right padding
         """
 
+        if self.model is None or self.tokenizer is None: # to silence diagnostics
+            raise RuntimeError("Model or tokenizer not loaded")
+
         decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"}
-        model_type = getattr(self.model.config, "model_type", "").lower()
+        model_type = getattr(self.model.config, "model_type", "").lower() # type: ignore
 
         if any(arch in model_type for arch in decoder_only_models):
             self.tokenizer.padding_side = "left"
@@ -305,34 +308,23 @@ class TestHandler:
 
         return results_dataset
 
-    # todo: create utility function for this
-    # similar method in `DatasetHandler`
-    def save_evaluation_results(
-        self,
-        results_dataset: Dataset,
-        split_name: str = "test"
-    ):
+    def save_evaluation_results(self, results_dataset: Dataset) -> None:
         """Save evaluation results with custom split name.
 
         Parameters
         ----------
         results_dataset : Dataset
             Dataset containing evaluation results
-        output_dir : Path
-            Directory to save to
-        split_name : str
-            Name of the split (e.g., "test", "validation", "test_ood")
         """
 
-        dataset_dict = DatasetDict({split_name: results_dataset})
+        from ..utilities import save_dataset
 
-        dataset_dict.save_to_disk(dataset_dict_path=self.evaluated_testset_path)
-        logger.info(
-            f"✅ Saved {len(results_dataset)} samples to {self.evaluated_testset_path} (split: {split_name})"
+        save_dataset(
+            dataset=results_dataset,
+            output_location=self.evaluated_testset_path,
+            split_name="test",
         )
 
-    # todo: create utility function for this
-    # similar method in `DatasetHandler`
     @staticmethod
     def load_test_dataset(input_dir: Path, split_name: str = "test") -> Dataset:
         """Load evaluation results from disk.
@@ -349,21 +341,20 @@ class TestHandler:
         -------
         Dataset
             Loaded dataset
-        """
-        loaded: Dataset|DatasetDict = load_from_disk(dataset_path=input_dir)
 
-        if isinstance(loaded, DatasetDict):
-            if split_name not in loaded:
-                raise KeyError(
-                    f"`{split_name}` split not found. Available: {list(loaded.keys())}"
-                )
-            return loaded["test"]
-        elif isinstance(loaded, Dataset):
-            return loaded
+        Raise
+        -----
+        ValueError 
+            Shouldn't happen but it's here for safety in case of type mismatched
+        """
+
+        from ..utilities import load_dataset
+
+        test_data: Dataset | DatasetDict = load_dataset(input_dir=input_dir, split_name=split_name)
+        if not isinstance(test_data, Dataset):
+            raise ValueError("Somehow, test dataset has not been loaded as `Dataset` instance.")
         else:
-            raise TypeError(
-                f"Expected Dataset or DatasetDict, got {type(loaded).__name__}"
-            )
+            return test_data
 
     def _sequential_inference(self, test_dataset: Dataset) -> list[dict[str, Any]]:
         """Run inference sequentially using run_inference() method."""
@@ -383,7 +374,7 @@ class TestHandler:
                     n_failures += 1
                     predictions.append(
                         ParsedResponse(
-                            reasoning={},
+                            reasoning="",
                             vulnerabilities=[],
                             verdict={},
                             parse_error=True,
@@ -431,57 +422,75 @@ class TestHandler:
             raise RuntimeError("Model and tokenizer must be loaded before running evaluation.")
 
         all_predictions: list[dict[str, Any]] = []
+        n_failures: int = 0
+        n_ok: int = 0
         num_batches = (len(test_dataset["func"]) + batch_size - 1) // batch_size
 
-        for batch_messages in rich_progress(
-            self._create_message_batches(test_dataset, batch_size=batch_size),
+        with rich_progress_manual(
             total=num_batches,
             description="Batched Inference",
-            status_fn=lambda b: f"{len(b)} samples"
-        ):
-            input_texts = self.tokenizer.apply_chat_template(
-                batch_messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = self.tokenizer(
-                input_texts, # type: ignore
-                return_tensors="pt",
-                padding=True,
-                max_length=self.max_seq_length,
-                truncation=True,
-            ).to(self.model.device)  # type: ignore
+            initial_status="Initializing...",
+        ) as pbar:
+            for idx, batch_messages in enumerate(
+                self._create_message_batches(test_dataset, batch_size=batch_size)
+            ):
 
-            try:
-                with torch.inference_mode():
-                    outputs = self.model.generate( # type: ignore
-                        **inputs,
-                        max_new_tokens=self.max_new_tokens,
-                        do_sample=True,
-                        temperature=0.2,
-                        top_p=0.95,
-                        min_p=0.1,
-                        repetition_penalty=1.05,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
+                input_texts = self.tokenizer.apply_chat_template(
+                    batch_messages, tokenize=False, add_generation_prompt=True
+                )
+                inputs = self.tokenizer(
+                    input_texts, # type: ignore
+                    return_tensors="pt",
+                    padding=True,
+                    max_length=self.max_seq_length,
+                    truncation=True,
+                ).to(self.model.device)  # type: ignore
+
+                try:
+                    with torch.inference_mode():
+                        outputs = self.model.generate( # type: ignore
+                            **inputs,
+                            max_new_tokens=self.max_new_tokens,
+                            do_sample=True,
+                            temperature=0.2,
+                            top_p=0.95,
+                            min_p=0.1,
+                            repetition_penalty=1.05,
+                            pad_token_id=self.tokenizer.pad_token_id,
+                            eos_token_id=self.tokenizer.eos_token_id,
+                        )
+
+                    generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
+                    decoded_predictions = self.tokenizer.batch_decode(
+                        generated_tokens,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=True,
                     )
+                    all_predictions.extend(
+                        [
+                            self._parse_response(p.strip()).to_dict()
+                            for p in decoded_predictions
+                        ]
+                    )
+                    n_ok +=1
 
-                generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
-                decoded_predictions = self.tokenizer.batch_decode(
-                    generated_tokens,
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True,
-                )
-                all_predictions.extend(
-                    [
-                        self._parse_response(p.strip()).to_dict()
-                        for p in decoded_predictions
-                    ]
-                )
-
-            except Exception:
-                # if generation fails, proceed with next batch
-                # hopefully this never happens
-                logger.exception(f"Batch inference failed")
-                continue
+                except Exception:
+                    # if generation fails, proceed with next batch
+                    logger.exception(f"Batch inference failed")
+                    n_failures +=1
+                    continue
+                finally:
+                    pbar.update(advance=len(batch_messages))
+                    pbar.set_postfix({
+                        "Batch": f"{idx}/{num_batches}",
+                        "✓ Ok": n_ok,
+                        "✗ Error": n_failures,
+                        "% Error rate": (
+                            f"{(n_failures/self.n_samples):.1%}"
+                            if n_failures > 0
+                            else "0%"
+                        ),
+                    })
 
         return all_predictions
 
@@ -520,28 +529,8 @@ class TestHandler:
 
         except (json.JSONDecodeError, ValueError, KeyError):
             return ParsedResponse(
-                reasoning={},
+                reasoning="",
                 vulnerabilities=[],
                 verdict={},
                 parse_error=True,
             )
-
-
-# Perform Detailed Error Analysis
-# Find False Positives (model predicted 1, but the label was 0):
-# false_positives = results.filter(
-#     lambda ex: ex["target"] == 0 and ex["predicted_label"] == 1
-# )
-# Find False Negatives (model predicted 0, but the label was 1):
-# false_negatives = results.filter(
-#     lambda ex: ex["target"] == 1 and ex["predicted_label"] == 0
-# )
-#
-# You can analyze if the model has biases or performs differently on subsets of your data.
-# df = results.to_pandas()
-# # Calculate accuracy for each project
-# project_accuracy = df.groupby("project").apply(
-#     lambda x: (x["target"] == x["predicted_label"]).mean()
-# )
-# print(project_accuracy)
-
