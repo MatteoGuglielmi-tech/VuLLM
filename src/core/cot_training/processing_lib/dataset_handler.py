@@ -1,17 +1,29 @@
 import logging
 import random
+import json
 
+from typing import TypedDict, Optional
 from pathlib import Path
 from dataclasses import dataclass
+from numpy import full
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict, Dataset, load_from_disk
 from collections import defaultdict
 
 
-from .prompt_config import VulnerabilityPromptConfig
+from .prompt_config import Message, VulnInfo, ResponseStruct, VulnerabilityPromptConfig
 from ..utilities import rich_table, is_main_process
 
 logger = logging.getLogger(name=__name__)
+
+
+class DatasetExample(TypedDict, total=True):
+    func: str
+    target: int
+    project: str
+    reasoning: str
+    cwe: list[str]
+    cwe_desc: list[str]
 
 
 @dataclass
@@ -233,6 +245,71 @@ class DatasetHandler:
                 "test": test_dataset,
             }
         )
+    
+    def _formatting_func(self, example: DatasetExample) -> Message:
+        """
+        Format a single example for training with the simplified JSON structure.
+
+        Parameters
+        ----------
+        example : DatasetExample
+            Dataset entry with fileds: 'func', 'reasoning', 'target', 'cwe', 'cwe_desc'
+
+        Returns
+        -------
+        dict
+            Formatted example with 'text' field
+        """
+
+        vulnerabilities: list[VulnInfo] = []
+        cwe_list: list[int] = []
+
+        if example["target"] == 1 and example["cwe"]:
+            cwes = example["cwe"]
+            cwe_descs = example["cwe_desc"]
+
+            if len(cwe_descs) != len(cwes):
+                logger.warning(
+                    f"CWE/description count mismatch: {len(cwes)} CWEs, "
+                    f"{len(cwe_descs)} descriptions"
+                )
+
+            for i, cwe in enumerate(cwes):
+                try:
+                    cwe_id = int(cwe.replace("CWE-", "").strip())
+                    cwe_list.append(cwe_id)
+
+                    description = (
+                        cwe_descs[i] if i < len(cwe_descs)
+                        else f"CWE-{cwe_id} vulnerability"
+                    )
+
+                    vulnerabilities.append({
+                        "cwe_id": cwe_id,
+                        "description": description
+                    })
+
+                except ValueError:
+                    logger.exception(f"Error parsing for CWE '{cwe}`")
+                    continue
+
+        # build structured response matching prompt schema
+        response_data: ResponseStruct = {
+            "reasoning": example["reasoning"].strip(),
+            "vulnerabilities": vulnerabilities,
+            "verdict": {
+                "is_vulnerable": bool(example["target"]),
+                "cwe_list": cwe_list
+            }
+        }
+
+        # convert to formatted JSON
+        ground_truth: str = json.dumps(response_data, indent=2, ensure_ascii=False)
+        messages = self.prompt_config.as_messages(
+            func_code=example["func"], ground_truth=ground_truth
+        )
+
+        return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
 
     def format_dataset(self, dataset_dict: DatasetDict) -> DatasetDict:
         """Applies CoT prompt formatting to train/validation splits and leaves the
@@ -249,30 +326,13 @@ class DatasetHandler:
         """
         logger.info("🥼 Formatting train and validation splits with Chain-of-Thought template... 🥼")
 
-        def formatting_func(example: dict):
-            """Formats a single example for Chain-of-Thought fine-tuning."""
-            if example["target"] == 1 and example.get("cwe"):
-                cwe_string = ", ".join(example["cwe"])
-                final_answer = f" YES ({cwe_string})"
-            else:
-                final_answer = " NO"
-
-            ground_truth = f"{example['reasoning']}\n\nFinal Answer:{final_answer}"
-
-            messages = self.prompt_config.as_messages(
-                func_code=example["func"], ground_truth=ground_truth
-            )
-
-            return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
-            # return {"messages": messages}
-
         formatted_splits = DatasetDict()
 
         # Apply formatting to training and validation splits
         for split_name in ["train", "validation"]:
             if split_name in dataset_dict:
                 formatted_splits[split_name] = dataset_dict[split_name].map(
-                    formatting_func,
+                    self._formatting_func,
                     remove_columns=list(dataset_dict[split_name].features),
                     num_proc=self.num_cpus
                 )
@@ -287,43 +347,27 @@ class DatasetHandler:
 
         return formatted_splits
 
-    # todo: create utility function for this
-    # similar method in `DatasetHandler`
-    def save_to_disk(self, dataset_dict: DatasetDict, fp: Path):
-        dataset_dict.save_to_disk(fp)
+    def save_to_disk(self,  dataset_dict: DatasetDict) -> None:
+        """Save formatted dataset.
 
-    # todo: create utility function for this
-    # similar method in `DatasetHandler`
-    @staticmethod
-    def load_from_disk(fp: Path, split: str|None = None) -> DatasetDict|Dataset:
-        """Loads a Dataset or DatasetDict from disk.
-
-        Paramters
-        ---------
-        fp: Path
-            The root directory of the saved dataset.
-        split: str, default None
-            The name of the split to load ("train", "validation", "test").
-            If None, loads the entire DatasetDict.
-
-        Returns
-        -------
-            The specified Dataset split or the entire DatasetDict.
+        Parameters
+        ----------
+        dataset_dict : DatasetDict
+            DatasetDict instance to save
         """
 
-        if split:
-            split_path = fp / split
-            if not split_path.exists():
-                raise FileNotFoundError(f"Split '{split}' not found at {split_path}")
-            return load_from_disk(split_path)
-        else:
-            return load_from_disk(fp)
+        from ..utilities import save_dataset
+
+        save_dataset(
+            dataset=dataset_dict,
+            output_location=self.formatted_dataset_dir,
+        )
 
     def run_pipeline(self) -> DatasetDict:
         dataset_dict: DatasetDict = self.load_and_split_dataset()
-        formatted_dataset_dict = self.format_dataset(dataset_dict=dataset_dict)
+        formatted_dataset_dict: DatasetDict = self.format_dataset(dataset_dict=dataset_dict)
 
         self.formatted_dataset_dir.mkdir(exist_ok=True, parents=True)
-        self.save_to_disk(formatted_dataset_dict, fp=self.formatted_dataset_dir)
+        self.save_to_disk(dataset_dict=formatted_dataset_dict)
 
         return formatted_dataset_dict
