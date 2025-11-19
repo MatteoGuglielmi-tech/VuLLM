@@ -1,7 +1,28 @@
-from typing import Any, Optional
+from typing import Any, NotRequired, Optional, TypedDict
 from dataclasses import dataclass, field
+from transformers import BatchEncoding
 
+
+Message = dict[str, str | list[int] | list[str] | list[list[int]] | BatchEncoding]
 Messages = list[dict[str,str]]
+
+
+class VulnInfo(TypedDict, total=True):
+    cwe_id: int
+    description: str
+
+
+class VerdictStruct(TypedDict):
+    # NotRequired allows empty verdict in case
+    # of exception during response parsing
+    is_vulnerable: NotRequired[bool]
+    cwe_list: NotRequired[list[int]]
+
+
+class ResponseStruct(TypedDict, total=True):
+    reasoning: str
+    vulnerabilities: list[VulnInfo]
+    verdict: VerdictStruct
 
 
 @dataclass
@@ -29,46 +50,40 @@ class VulnerabilityPromptConfig:
             "--- CODE END ---\n\n"
 
             "**Analysis Framework:**\n"
-            "Follow these steps systematically:\n\n"
-            "1. **Data Flow Analysis:** Identify input sources and trace how data flows through the function\n"
-            "2. **Dangerous Pattern Detection:** Identify unsafe functions (strcpy, gets, sprintf, etc.), unchecked operations, and potential overflows\n"
-            "3. **Security Controls Assessment:** Check for bounds checking, input validation, error handling, and sanitization\n"
+            "Follow these steps systematically in your reasoning:\n\n"
+            "1. **Trace Data Flow:** Identify input sources and trace/analyze how external data flows through the function\n"
+            "2. **Identify Dangerous Patterns:** Look for unsafe functions (strcpy, gets, sprintf, etc.), unchecked operations, potential overflows and possible dangerous steps\n"
+            "3. **Check Security Controls:** Assess bounds checking, input validation, error handling, and sanitization\n"
             "4. **Vulnerability Classification:** Map any identified issues to specific CWE categories\n\n"
 
             "**Output Format:**\n"
-            "Provide your analysis as valid JSON in the following exact structure:\n\n"
+            "Provide your analysis as valid JSON:\n\n"
             "```json\n"
             "{{\n"
-            '  "reasoning": {{\n'
-            '    "data_flow": "<string: describe input sources and data flow>",\n'
-            '    "dangerous_patterns": "<string: list unsafe functions/operations found>",\n'
-            '    "security_controls": "<string: describe protections present or missing>",\n'
-            '    "classification": "<string: CWE mapping and severity assessment>"\n'
-            "  }},\n"
+            '  "reasoning": "<string: your step-by-step security analysis>",\n'
             '  "vulnerabilities": [\n'
             "    {{\n"
-            '      "description": "<string: what is the vulnerability>",\n'
-            '      "location": "<string: where in the code (line/function)>",\n'
-            '      "cwe_id": <int: CWE number, e.g., 119>,\n'
-            '      "severity": "<string: low|medium|high|critical>"\n'
+            '      "cwe_id": <int: CWE number without prefix, e.g., 119>,\n'
+            '      "description": "<string: brief description of this specific vulnerability and what it is>"\n'
             "    }}\n"
             "  ],\n"
             '  "verdict": {{\n'
             '    "is_vulnerable": <boolean: true if vulnerabilities found, false otherwise>,\n'
-            '    "cwe_list": [<int: list of CWE numbers, e.g., [119, 120]>],\n'
-            '    "confidence": <float: 0.0-1.0, your confidence in this analysis>,\n'
-            '    "summary": "<string: 2-3 sentence summary of findings>"\n'
+            '    "cwe_list": [<int: list of CWE numbers, e.g., [119, 120]>]\n'
             "  }}\n"
             "}}\n"
             "```\n\n"
 
             "**Critical Requirements:**\n"
-            "- Output ONLY valid JSON in the exact structure shown above\n"
+            "- Output ONLY valid JSON in the exact structure above\n"
             "- Do not include any text before or after the JSON\n"
-            "- Ensure all strings are properly quoted and escaped\n"
-            "- The vulnerabilities array should be empty [] if no vulnerabilities are found\n"
-            "- All fields are required - do not omit any\n"
-            "- CWE IDs must be integers without the 'CWE-' prefix\n"
+            "- The 'reasoning' field must contain your complete analysis as a single text block\n"
+            "- Include all four analysis steps in your reasoning (data flow, patterns, controls, classification)\n"
+            "- The 'vulnerabilities' array should list each identified CWE with its description\n"
+            "- The 'cwe_list' in verdict should mirror the CWE IDs from vulnerabilities array\n"
+            "- If no vulnerabilities: set 'vulnerabilities' to [] and 'is_vulnerable' to false\n"
+            "- CWE IDs must be integers (e.g., 119, not 'CWE-119')\n"
+            "- Ensure proper JSON escaping"
             "- DO NOT use '>' or '<' to encapsulate field values"
         ).strip(),
         repr=False,
@@ -92,38 +107,42 @@ class VulnerabilityPromptConfig:
         """Format user prompt with function code."""
         return self.USER_PROMPT.format(func_code=func_code)
 
-    def as_messages(self, func_code: str, ground_truth: str | None = None) -> Messages:
+    def as_messages(
+        self, func_code: str, ground_truth: Optional[str] = None
+    ) -> Messages:
         """
-        Format as messages list for chat models.
+        Create chat messages for training.
 
         Parameters
         ----------
-        func_code: str
-            C function source code
+        func_code : str
+            The C function code to analyze
+        ground_truth : str, optional, default=None
+            The expected JSON response (already formatted)
 
         Returns
         -------
-            List of message dicts for chat API
+        list[dict[str, str]]
+            Messages in chat format [{"role": "...", "content": "..."}]
         """
-
-        scheleton = [
+        messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "user", "content": self.format_user_prompt(func_code)},
+            {"role": "user", "content": self.format_user_prompt(func_code=func_code)},
         ]
 
         if ground_truth is not None:
-            scheleton.append({"role": "assistant", "content": ground_truth})
+            messages.append({"role": "assistant", "content": ground_truth})
 
-        return scheleton
+        return messages
 
 
 @dataclass
 class ParsedResponse:
     """Container for json response"""
 
-    reasoning: dict[str, str]
-    vulnerabilities: list[dict[str, str | int]]
-    verdict: dict[str, Any]
+    reasoning: str
+    vulnerabilities: list[VulnInfo]
+    verdict: VerdictStruct
     parse_error: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -135,15 +154,15 @@ class ParsedResponse:
         }
 
     @property
-    def reasoning_info(self):
+    def reasoning_info(self) -> str:
         return self.reasoning
 
     @property
-    def vul_info(self):
+    def vul_info(self) -> list[VulnInfo]:
         return self.vulnerabilities
 
     @property
-    def verdict_info(self):
+    def verdict_info(self) -> VerdictStruct:
         return self.verdict
 
     @property
@@ -158,10 +177,3 @@ class ParsedResponse:
         if self.parse_error:
             return []
         return self.verdict.get("cwe_list", [])
-
-    @property
-    def confidence(self) -> Optional[float]:
-        """Extract confidence from verdict, handling parse errors."""
-        if self.parse_error:
-            return None
-        return self.verdict.get("confidence")
