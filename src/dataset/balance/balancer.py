@@ -74,13 +74,18 @@ class Balancer:
 
     def _assemble_final_df(self, df_vuln: pd.DataFrame, df_non_vuln_sampled: pd.DataFrame):
         combined_df = pd.concat([df_vuln, df_non_vuln_sampled])
-        cols_to_drop = ["cyclomatic_complexity", "token_count", "complexity_bin", "token_bin"]
-        existing_cols_to_drop = [ col for col in cols_to_drop if col in combined_df.columns ]
-        self.df_balanced = cast(pd.DataFrame, combined_df.drop(columns=existing_cols_to_drop))
-        self.df_balanced = self.df_balanced.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
+        # cols_to_drop = ["cyclomatic_complexity", "token_count", "complexity_bin", "token_bin"]
+        # existing_cols_to_drop = [ col for col in cols_to_drop if col in combined_df.columns ]
+        # self.df_balanced = cast(pd.DataFrame, combined_df.drop(columns=existing_cols_to_drop))
+        # self.df_balanced = self.df_balanced.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
+        self.df_balanced = combined_df.sample(
+            frac=1, random_state=self.random_state
+        ).reset_index(drop=True)
 
     def _perform_stratified_sampling(self):
         """Performs stratified sampling to balance vulnerable and non-vulnerable functions."""
+
+        assets_dir = self.output_fp.parent
 
         logger.info("Performing stratified sampling...")
 
@@ -107,29 +112,37 @@ class Balancer:
         df_non_vuln = cast(pd.DataFrame, self.df[self.df["target"] == 0].copy())
 
         quantiles: list[float] = [0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
-        df_vuln_stats = df_vuln[['cyclomatic_complexity', 'token_count']].describe(percentiles=quantiles)
-        df_non_vuln_stats = df_non_vuln[['cyclomatic_complexity', 'token_count']].describe(percentiles=quantiles)
+        df_vuln_stats = df_vuln[["cyclomatic_complexity", "token_count"]].describe(
+            percentiles=quantiles
+        )
+        df_non_vuln_stats = df_non_vuln[
+            ["cyclomatic_complexity", "token_count"]
+        ].describe(percentiles=quantiles)
 
-        dfi.export(cast(pd.DataFrame, df_vuln_stats), './assets/vulnerable_stats.png', table_conversion='matplotlib')
-        dfi.export(cast(pd.DataFrame, df_non_vuln_stats ), './assets/non_vulnerable_stats.png', table_conversion='matplotlib')
+        dfi.export(
+            cast(pd.DataFrame, df_vuln_stats),
+            assets_dir / "vulnerable_stats_before.png" ,
+            table_conversion="matplotlib",
+        )
+        dfi.export(
+            cast(pd.DataFrame, df_non_vuln_stats),
+            assets_dir / "non_vulnerable_stats_before.png",
+            table_conversion="matplotlib",
+        )
 
         logger.debug(f"Found {len(df_vuln)} vulnerable functions (target: 1).")
         logger.debug(f"Found {len(df_non_vuln)} non-vulnerable functions (target: 0).")
 
         try:
             # quantile cut: divide into a set number of equal-sized groups
-            # df_vuln["complexity_bin"], complexity_bins = pd.qcut(
             _, complexity_bins = pd.qcut(
-                # df_vuln.get("cyclomatic_complexity"),
                 self.df["cyclomatic_complexity"],
                 q=self.n_bins,
                 labels=False,
                 retbins=True,
                 duplicates="drop",  # if fails to create q bins, merge the problematic bins
             )
-            # df_vuln["token_bin"], token_bins = pd.qcut(
             _, token_bins = pd.qcut(
-                # df_vuln.get("token_count"),
                 self.df["token_count"],
                 q=self.n_bins,
                 labels=False,
@@ -143,16 +156,13 @@ class Balancer:
 
             # value cut: divides based on pre-defined bins
             # apply same bin edges to non-vulnerable data
-            # df_non_vuln["complexity_bin"] = pd.cut(
             self.df["complexity_bin"] = pd.cut(
-                # df_vuln.get("cyclomatic_complexity"),
                 self.df["cyclomatic_complexity"],
                 bins=complexity_bins,
                 labels=False,
                 include_lowest=True,
             )
             self.df["token_bin"] = pd.cut(
-                # df_vuln.get("token_count"),
                 self.df["token_count"],
                 bins=token_bins,
                 labels=False,
@@ -167,9 +177,6 @@ class Balancer:
             df_vuln = cast(pd.DataFrame, self.df[self.df["target"] == 1].copy())
             df_non_vuln = cast(pd.DataFrame, self.df[self.df["target"] == 0].copy())
 
-            # df_non_vuln = df_non_vuln.dropna(subset=["complexity_bin", "token_bin"])  # type: ignore
-            # df_non_vuln["complexity_bin"] = df_non_vuln["complexity_bin"].astype(int)
-            # df_non_vuln["token_bin"] = df_non_vuln["token_bin"].astype(int)
             # count targets in each bin
             target_counts = df_vuln.groupby(["complexity_bin", "token_bin"]).size()
 
@@ -206,6 +213,28 @@ class Balancer:
         except ValueError:
             logger.warning("\n⚠️  Distribution matching failed due to incompatible data for binning.")
             self._perform_fallback_sampling(df_vuln, df_non_vuln)
+
+        finally:
+            df_vuln = cast(pd.DataFrame, self.df_balanced[self.df_balanced["target"] == 1].copy())
+            df_non_vuln = cast(pd.DataFrame, self.df_balanced[self.df_balanced["target"] == 0].copy())
+
+            df_vuln_stats = df_vuln[
+                ["cyclomatic_complexity", "token_count"]
+            ].describe(percentiles=quantiles)
+            df_non_vuln_stats = df_non_vuln[
+                ["cyclomatic_complexity", "token_count"]
+            ].describe(percentiles=quantiles)
+
+            dfi.export(
+                cast(pd.DataFrame, df_vuln_stats),
+                assets_dir / "vulnerable_stats_after.png",
+                table_conversion="matplotlib",
+            )
+            dfi.export(
+                cast(pd.DataFrame, df_non_vuln_stats),
+                assets_dir / "non_vulnerable_stats_after.png",
+                table_conversion="matplotlib",
+            )
 
         logger.info("Balancing complete.")
         if self.df_balanced is not None:
