@@ -25,6 +25,10 @@ tiktoken = ">=0.11.0, <0.12"
 openai = ">=2.1.0, <3"
 rich = ">=14.2.0, <15"
 kaleido = ">=1.1.0, <2"
+dataframe-image = ">=0.2.7, <0.3"
+
+# [feature.dev.dependencies]
+# black = "*"
 
 [target.linux-64.pypi-dependencies]
 unsloth = ">=2025.9.7, <2026"
