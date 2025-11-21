@@ -16,7 +16,9 @@ from typing import cast
 from . import utils
 from .logging_config import setup_logger
 from .cli import get_parser
-from .ui import rich_exception, rich_status
+from .ui import rich_exception, rich_print, rich_status
+from .status import CWEStatusAnalyzer
+
 
 logger = logging.getLogger(name=__name__)
 
@@ -30,9 +32,11 @@ plt.style.use("ggplot")
 
 
 class DataDistribution:
-    def __init__(self, pth2jsonl: str, output_dir: str) -> None:
+    def __init__(self, pth2jsonl: str, output_dir: str, mitre_file: Path) -> None:
         self.output_dir: Path = Path(output_dir)
-        self.__data_dict: list[utils.JsonlEntry] = utils.read_jsonl(input_file_path=Path(pth2jsonl))
+        self.mitre_file: Path = mitre_file
+        self.dataset_path: Path = Path(pth2jsonl)
+        self.__data_dict: list[utils.JsonlEntry] = utils.read_jsonl(input_file_path=self.dataset_path)
         self.data_df: pd.DataFrame = pd.DataFrame(data=self.__data_dict)
 
     def _validate_4plots(self) -> None:
@@ -103,7 +107,7 @@ class DataDistribution:
 
         try:
             plt.savefig(fig_path, dpi=300)
-            plt.show()
+            # plt.show()
 
             logger.info(f"Distribution pie chart saved to `{fig_path}`")
         except Exception:
@@ -223,9 +227,13 @@ class DataDistribution:
         )
 
         plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-        plt.savefig(self.output_dir / "cwe_distr.png", dpi=300)
+        try:
+            plt.savefig(self.output_dir / "cwe_distr.png", dpi=300)
+            # plt.show()
 
-        plt.show()
+            logger.info(f"Distribution pie chart saved to `{self.output_dir / "cwe_distr.png"}`")
+        except Exception:
+            rich_exception(show_locals=True)
 
     def generate_4plots(self):
 
@@ -438,17 +446,43 @@ class DataDistribution:
 
         plt.tight_layout(rect=(0.05, 0.05, 0.95, 0.90))
 
-        plt.savefig(self.output_dir / filename, dpi=300)
-        plt.show()
+        try:
+            plt.savefig(self.output_dir / filename, dpi=300)
+            # plt.show()
+
+            logger.info(f"Distribution pie chart saved to `{self.output_dir / filename}`")
+        except Exception:
+            rich_exception(show_locals=True)
+
+    def deprecation_analysis(self):
+        logger.info("Starting deprecation analysis ...")
+        analyzer = CWEStatusAnalyzer(
+            dataset_path=self.dataset_path,
+            cwe_status_csv=self.mitre_file,
+            output_dir=self.output_dir,
+        )
+
+        stats = analyzer.run_analysis()
+
+        logger.info(f"Deprecated CWEs: {stats['deprecated']['count']}")
+        logger.info(f"Unknown CWEs: {stats['unknown']['count']}")
+        logger.info(
+            f"Functions with deprecated labels: {stats['deprecated']['func_count']}"
+        )
 
     def generate_all(self):
         with rich_status(
             description="Generating Pie chart for binary label distribution"
         ):
             self._pie_chart_target()
+
         with rich_status("Generating CWE IDs distribution (barplot)"):
             self._barplot_vulnerability()
-        self.generate_4plots()
+
+        with rich_status("Generating violin plots after stratified sampling"):
+            self.generate_4plots()
+
+        self.deprecation_analysis()
 
 
 if __name__ == "__main__":
@@ -456,7 +490,7 @@ if __name__ == "__main__":
     args = get_parser().parse_args()
 
     logger.debug("🚀 Starting routine...🚀")
-    data = DataDistribution(pth2jsonl=args.source, output_dir=args.target)
+    data = DataDistribution(
+        pth2jsonl=args.source, output_dir=args.target, mitre_file=args.mitre_file
+    )
     data.generate_all()
-
-    logger.info("✅ Process completed successfully! ✅")
