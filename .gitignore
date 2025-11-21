@@ -49,6 +49,7 @@ src/dataset/restructure
 
 # src/dataset/analysis
 src/dataset/analysis/analysis/run/
+src/dataset/analysis/distribution/assets
 src/dataset/analysis/analysis/distribution/assets/
 src/dataset/analysis/sequence_length_analysis/__pycache__/
 src/dataset/analysis/sequence_length_analysis/results/assessment/selected/safe
