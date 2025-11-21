@@ -1,3 +1,4 @@
+import time
 from collections.abc import Sized as ABCSized
 from typing import Any, Iterable, Literal, TypeVar, Callable
 from argparse import Namespace
@@ -38,6 +39,7 @@ def create_progress() -> Progress:
         TimeRemainingColumn(elapsed_when_finished=True),
         TextColumn("•"),
         TextColumn("[cyan]{task.fields[status]}"),  # Custom field
+        transient=False
     )
 
 
@@ -411,6 +413,47 @@ def rich_progress_manual(
         )
         controller = ProgressController(progress, task)
         yield controller
+
+
+@contextmanager
+def stateless_progress(description: str, spinner: str = "dots", transient: bool = True):
+    """Drop-in replacement for rich_status with completion message and no progression indicator."""
+
+    start_time = time.perf_counter()
+    progress = Progress(
+        SpinnerColumn(spinner),
+        TextColumn("[yellow]{task.description}"),
+        transient=transient,
+    )
+
+    completed: bool = False
+    end_time: float = 0.
+
+    with progress:
+        task = progress.add_task(description, total=None)
+
+        class StatusLike:
+            def update(self, new_description: str):
+                progress.update(task, description=f"[yellow]{new_description}")
+
+            def stop(self):
+                nonlocal completed, end_time
+                completed = True
+                end_time = time.perf_counter()
+
+        status = StatusLike()
+        try:
+            yield status
+        except Exception:
+            rich_exception()
+            raise
+
+    if completed:
+        duration = end_time - start_time
+        formatted_duration = time.strftime("%H:%M:%S", time.gmtime(duration))
+        _console.print(
+            f"[bold green]✓[/bold green] {description} -> [green]Done[/green] [yellow](took {formatted_duration})[/yellow]"
+        )
 
 
 def rich_progress(
