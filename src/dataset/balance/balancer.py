@@ -75,10 +75,14 @@ class Balancer:
     def _assemble_final_df(self, df_vuln: pd.DataFrame, df_non_vuln_sampled: pd.DataFrame):
         combined_df = pd.concat([df_vuln, df_non_vuln_sampled])
         # cols_to_drop = ["cyclomatic_complexity", "token_count", "complexity_bin", "token_bin"]
-        # existing_cols_to_drop = [ col for col in cols_to_drop if col in combined_df.columns ]
-        # self.df_balanced = cast(pd.DataFrame, combined_df.drop(columns=existing_cols_to_drop))
-        # self.df_balanced = self.df_balanced.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
-        self.df_balanced = combined_df.sample(
+        cols_to_drop = ["complexity_bin", "token_bin"]
+        existing_cols_to_drop = [
+            col for col in cols_to_drop if col in combined_df.columns
+        ]
+        self.df_balanced = cast(
+            pd.DataFrame, combined_df.drop(columns=existing_cols_to_drop)
+        )
+        self.df_balanced = self.df_balanced.sample(
             frac=1, random_state=self.random_state
         ).reset_index(drop=True)
 
