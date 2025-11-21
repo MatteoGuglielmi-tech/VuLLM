@@ -1,12 +1,12 @@
+import sys
 import re
 import logging
-import tiktoken
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from tqdm import tqdm
 from pathlib import Path
 from collections import Counter
 from matplotlib import font_manager as fm
@@ -15,13 +15,9 @@ from typing import cast
 
 from . import utils
 from .logging_config import setup_logger
-# from src.common.common_typedef import Captures
-# from src.common.tree_sitter_parser import TreeSitterParser
 from .cli import get_parser
-import dataframe_image as dfi
+from .ui import rich_exception, rich_status
 
-# setup logger
-setup_logger()
 logger = logging.getLogger(name=__name__)
 
 fpath_italic = "/usr/share/fonts/TTF/CascadiaCodeNFItalic.ttf"
@@ -34,51 +30,30 @@ plt.style.use("ggplot")
 
 
 class DataDistribution:
-    def __init__(self, pth2jsonl: Path) -> None:
-        self.__data_dict: list[utils.JsonlEntry] = utils._read_jsonl(input_file_path=pth2jsonl)
+    def __init__(self, pth2jsonl: str, output_dir: str) -> None:
+        self.output_dir: Path = Path(output_dir)
+        self.__data_dict: list[utils.JsonlEntry] = utils.read_jsonl(input_file_path=Path(pth2jsonl))
         self.data_df: pd.DataFrame = pd.DataFrame(data=self.__data_dict)
-        # self.data_df = self.data_df.drop(labels=[ "func", "hash", "size", "commit_id", "message", "project" ], axis=1)
-        self.__nb_samples: int = len(self.data_df["cwe"])
-        self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        # self.tsp: TreeSitterParser = TreeSitterParser(language_name="ext_c")
 
-    def _get_token_count(self, code_string: str) -> int:
-        return len(self.tokenizer.encode(code_string))
+    def _validate_4plots(self) -> None:
+        expected_columns: list[str] = sorted([
+            "project", "cwe", "cwe_desc", "func",
+            "target", "cyclomatic_complexity", "token_count" 
+        ])
+        columns = sorted(self.data_df.columns.tolist())
 
-    def _get_cyclomatic_complexity(self, code_string: str) -> int:
-        query_str = """[
-                (if_statement)
-                (while_statement)
-                (do_statement)
-                (for_statement)
-                (case_statement)
-
-                ; Expression-level decisions
-                (conditional_expression)
-                (binary_expression operator: "&&" )
-                (binary_expression operator: "||" )
-
-                ; custom
-                (smartlist_foreach_statement)
-                (control_flow_macro_statement)
-              ] @decision
-            """
-
-        tree = self.tsp.parse(code=code_string)
-        captures: Captures = self.tsp.run_query_on_tree(tree=tree, query_str=query_str)
-        decisions = captures.get("decision", [])
-
-        if not decisions:
-            return 0
-        else:
-            return 1 + len(decisions)
+        try:
+            if expected_columns != columns:
+                raise ValueError("Oh boy, columns mismatch!!")
+        except ValueError:
+            rich_exception(show_locals=True)
+            sys.exit(1)
 
     def _pie_chart_target(self) -> None:
-        palette = sns.color_palette(
-            palette="pastel", n_colors=len(self.data_df["target"])
-        )
+        n_colors = len(set(self.data_df["target"]))
+        palette = sns.color_palette(palette="pastel", n_colors=n_colors)
 
-        target_df: pd.DataFrame = self.data_df.drop(labels=["cwe"], axis=1)
+        target_df = self.data_df[["target"]]
         class_counts = target_df.groupby(by="target").size()
         counts = class_counts.values.tolist()
         label_names = class_counts.index.values.tolist()
@@ -120,19 +95,29 @@ class DataDistribution:
         )
 
         names = ["Non-Vulnerable", "Vulnerable"]
-        plt.legend(wedges, names, loc="upper right", facecolor="white", font=prop)
+        plt.legend(wedges, names, loc="upper right", facecolor="white")
         plt.tight_layout()
-        plt.savefig("./assets/pie_target.svg", dpi=300)
-        plt.show()
 
-        logger.info("Distribution pie chart saved to `./assets/pie_target.png`")
+        fig_path: Path = self.output_dir / "pie_target.svg"
+        fig_path.parent.mkdir(exist_ok=True, parents=True)
+
+        try:
+            plt.savefig(fig_path, dpi=300)
+            plt.show()
+
+            logger.info(f"Distribution pie chart saved to `{fig_path}`")
+        except Exception:
+            rich_exception(show_locals=True)
 
     def _barplot_vulnerability(self) -> None:
         # filter non-vulnerable targets
         vulnerable_df: pd.DataFrame = self.data_df.loc[self.data_df["target"] != 0]
+        n_vul: int = len(vulnerable_df)
         vulnerable_df = vulnerable_df.drop(labels=["target"], axis=1)
 
-        # subsitute empty CWE field
+        logger.info(f"Dropped {n_vul - len(vulnerable_df)} vulnerable entries")
+
+        # subsitute empty CWE field with None
         vulnerable_df.loc[:, "cwe"] = vulnerable_df["cwe"].replace(
             to_replace="", value="None", regex=True
         )
@@ -142,7 +127,7 @@ class DataDistribution:
         for el in vulnerable_df["cwe"]:
             if isinstance(el, list):
                 for e in el:
-                    cwe_extended.append(re.sub(pattern=r"\s*", repl="", string=e))
+                    cwe_extended.append(e.replace(" ", "").strip())
             else:
                 cwe_extended.append(el)
 
@@ -238,60 +223,57 @@ class DataDistribution:
         )
 
         plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-        plt.savefig("./assets/cwe_distr.png", dpi=300)
+        plt.savefig(self.output_dir / "cwe_distr.png", dpi=300)
 
         plt.show()
 
     def generate_4plots(self):
+
+        def _save_stats(obj, *, filename: str, mode: str="w"):
+            with open(file=self.output_dir / filename, mode=mode) as f:
+                json.dump(obj, f, indent=2)
+
+        self._validate_4plots()
         self.data_df["target"] = self.data_df["target"].astype("int")
-
-        # tqdm.pandas(desc="Calculating Cyclomatic Complexity")
-        # self.data_df["complexity"] = self.data_df["func"].progress_apply(
-        #     self._get_cyclomatic_complexity
-        # )
-        tqdm.pandas(desc="Calculating Token Count")
-        self.data_df["token_count"] = self.data_df["func"].progress_apply(
-            self._get_token_count
+        token_stats = self.data_df["token_count"].describe(
+            percentiles=[0.1, 0.5, 0.9, 0.99]
         )
-        # logger.info("Feature extraction complete.")
-        token_stats = self.data_df['token_count'].describe(percentiles=[0.1, 0.5, 0.9, 0.99])
-        print(token_stats)
+        _save_stats(token_stats.to_dict(), filename="stats.json")
 
-        dfi.export(token_stats, 'vulnerable_stats.png', table_conversion='matplotlib')
-
-        exit()
         df_vuln = cast(pd.DataFrame, self.data_df[self.data_df["target"] == 1].copy())
-        df_non_vuln = cast(
-            pd.DataFrame, self.data_df[self.data_df["target"] == 0].copy()
-        )
+        vul_stats = df_vuln["token_count"].describe(percentiles=[0.1, 0.5, 0.9, 0.99])
+        _save_stats(vul_stats.to_dict(), filename="stats.json", mode="a")
+        df_non_vuln = cast(pd.DataFrame, self.data_df[self.data_df["target"] == 0].copy())
+        non_vul_stats = df_non_vuln["token_count"].describe(percentiles=[0.1, 0.5, 0.9, 0.99])
+        _save_stats(non_vul_stats.to_dict(), filename="stats.json", mode="a")
 
         self.generate_violin(
             df=df_vuln,
             x_col_content="Token Count",
             y_col_name="token_count",
             title="Distribution of token counts in vulnerable functions",
-            filename="./assets/distr_token_count_vul.svg",
+            filename="distr_token_count_vul.svg",
         )
         self.generate_violin(
             df=df_vuln,
             x_col_content="Complexity",
-            y_col_name="complexity",
+            y_col_name="cyclomatic_complexity",
             title="Distribution of cyclomatic complexity scores across vulnerable functions",
-            filename="./assets/distr_complexity_vul.svg",
+            filename="distr_complexity_vul.svg",
         )
         self.generate_violin(
             df=df_non_vuln,
             x_col_content="Token Count",
             y_col_name="token_count",
             title="Distribution of token counts across non-vulnerable functions",
-            filename="./assets/dist_token_count_non_vul.svg",
+            filename="dist_token_count_non_vul.svg",
         )
         self.generate_violin(
             df=df_non_vuln,
             x_col_content="Complexity",
-            y_col_name="complexity",
+            y_col_name="cyclomatic_complexity",
             title="Distribution of cyclomatic complexity scores across non-vulnerable functions",
-            filename="./assets/distr_complexity_non_vul.svg",
+            filename="distr_complexity_non_vul.svg",
         )
 
     def generate_violin(
@@ -304,7 +286,7 @@ class DataDistribution:
     ):
         fig, ax = plt.subplots(figsize=(10, 15))
         category_df = pd.DataFrame(
-            [x_col_content] * df[y_col_name].size, columns=["Category"]
+            [x_col_content] * df[y_col_name].size, columns=["Category"] # type: ignore
         )
         extended_df = pd.concat([df.copy(), category_df], axis=1)
 
@@ -404,18 +386,18 @@ class DataDistribution:
         print(f"Plotting: {title}\n{stats_text}")
 
         # place text box
-        # ax.text(
-        #     0.97,
-        #     0.97,
-        #     stats_text,
-        #     transform=ax.transAxes,
-        #     fontsize=11,
-        #     verticalalignment="top",
-        #     horizontalalignment="right",
-        #     bbox=dict(
-        #         boxstyle="round,pad=0.5", fc="#fefefe", ec="#cccccc", lw=1, alpha=0.9
-        #     ),
-        # )
+        ax.text(
+            0.97,
+            0.97,
+            stats_text,
+            transform=ax.transAxes,
+            fontsize=11,
+            verticalalignment="top",
+            horizontalalignment="right",
+            bbox=dict(
+                boxstyle="round,pad=0.5", fc="#fefefe", ec="#cccccc", lw=1, alpha=0.9
+            ),
+        )
 
         # refine grid and spines
         ax.grid(
@@ -456,33 +438,25 @@ class DataDistribution:
 
         plt.tight_layout(rect=(0.05, 0.05, 0.95, 0.90))
 
-        plt.savefig(filename, dpi=300)
+        plt.savefig(self.output_dir / filename, dpi=300)
         plt.show()
 
-    def __debug(self):
-        with open("./misc/debug.txt", "a") as f:
-            for i, item in enumerate(self.data_df["cwe"].tolist()):
-                print(f"{i} : {item}", file=f)
-
     def generate_all(self):
-        # with Loader("Generating pie char for binary targets"): self._pie_chart_target()
-        # with Loader("Generating CWE IDs distribution (barplot)"): self._barplot_vulnerability()
+        with rich_status(
+            description="Generating Pie chart for binary label distribution"
+        ):
+            self._pie_chart_target()
+        with rich_status("Generating CWE IDs distribution (barplot)"):
+            self._barplot_vulnerability()
         self.generate_4plots()
 
 
-def create_dirs():
-    dirs = [Path("./misc"), Path("./assets")]
-    for p in dirs:
-        p.mkdir(exist_ok=True)
-    logger.info(msg=f"Created destination directorie")
-
-
 if __name__ == "__main__":
-    create_dirs()
+    setup_logger()
     args = get_parser().parse_args()
 
     logger.debug("🚀 Starting routine...🚀")
-    data = DataDistribution(pth2jsonl=args.source)
+    data = DataDistribution(pth2jsonl=args.source, output_dir=args.target)
     data.generate_all()
 
     logger.info("✅ Process completed successfully! ✅")

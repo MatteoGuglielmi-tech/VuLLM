@@ -1,41 +1,12 @@
 import sys
 import logging
+
 from pathlib import Path
-from dataclasses import dataclass
 from datetime import datetime
-
-
-MY_PENCIL: dict[str,str] = {
-    "blue": "\u001b[38;5;69m",
-    "purple": "\u001b[38;5;189m",
-    "yellow": "\u001b[38;5;220m",
-    "red": "\u001b[38;5;160m",
-    "green": "\u001b[38;5;34m",
-    "bold_red": "\u001b[1m\u001b[38;5;1m",
-    "reset": "\u001b[0m",
-}
-
-
-@dataclass
-class LogFMT(logging.Formatter):
-    fmt: str = '| %(levelname)-8s | %(asctime)s | %(name)s:%(lineno)d | "%(message)s"'
-
-    # -- pre-create the formatters --
-    def __post_init__(self):
-        super().__init__(self.fmt) # init parent class
-        self.default_formatter = logging.Formatter(self.fmt) # default formatter for fallback
-
-        reset: str = MY_PENCIL["reset"]
-        self.FORMATTERS = {
-            logging.DEBUG: logging.Formatter(MY_PENCIL["blue"] + self.fmt + reset),
-            logging.INFO: logging.Formatter(MY_PENCIL["purple"] + self.fmt + reset),
-            logging.WARNING: logging.Formatter(MY_PENCIL["yellow"] + self.fmt + reset),
-            logging.ERROR: logging.Formatter(MY_PENCIL["red"]  + self.fmt + reset),
-            logging.CRITICAL: logging.Formatter(MY_PENCIL["bold_red"] + self.fmt + reset),
-        }
-
-    def format(self, record: logging.LogRecord):
-        return self.FORMATTERS.get(record.levelno, self.default_formatter).format(record=record)
+from rich.logging import RichHandler
+from rich.console import Console
+from rich.style import Style
+from rich.theme import Theme
 
 
 def setup_logger(level: int = logging.DEBUG):
@@ -49,53 +20,60 @@ def setup_logger(level: int = logging.DEBUG):
 
     date: str = datetime.today().strftime("%Y-%m-%d")
     time: str = datetime.now().strftime("%H-%M-%S")
-    log_dir = Path(__file__).parent / f"run/{date}/{time}"
-    log_dir.mkdir(exist_ok=True, parents=True)
-    log_file = log_dir / "app.log"
+    log_file = Path(__file__).parent / f"run/{date}/{time}/app.log"
+    log_file.parent.mkdir(exist_ok=True, parents=True)
 
-    # capture warnings from `warnings` built-in Python module
+    custom_theme = Theme(
+        {
+            "logging.level.notset": Style(dim=True),
+            "logging.level.debug": Style(color="blue"),
+            "logging.level.info": Style(color="green"),
+            "logging.level.warning": Style(color="yellow"),
+            "logging.level.error": Style(color="red", bold=True),
+            "logging.level.critical": Style(color="red", bold=True, reverse=True),
+        }
+    )
+    console = Console(theme=custom_theme)
+
     logging.captureWarnings(True)
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-
-    # handler for console log
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(level)
-    sh.setFormatter(LogFMT())
-
-    # handler for file log
-    fh = logging.FileHandler(log_file, mode="w")
-    fh.setLevel(logging.DEBUG)
-    # File handler should use a standard, non-colored formatter
-    file_formatter = logging.Formatter('| %(levelname)-8s | %(asctime)s | %(name)s:%(lineno)d | "%(message)s"')
-    fh.setFormatter(file_formatter)
-
-    # add handlers
-    root_logger.addHandler(sh)
-    root_logger.addHandler(fh)
-
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",
+        # datefmt="[%X]",
+        handlers=[
+            RichHandler(
+                console=console,
+                rich_tracebacks=True,
+                tracebacks_show_locals=True,
+                show_time=True,
+                show_level=True,
+                show_path=True,
+                markup=True,
+            ),
+        ],
+        force=True,
+    )
     # =================================================================
     # == SILENCE NOISY LIBRARIES ==
     # =================================================================
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-    logging.getLogger("bitsandbytes").setLevel(logging.WARNING)
-    logging.getLogger("transformers").setLevel(logging.WARNING)
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    logging.getLogger("fsspec").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("filelock").setLevel(logging.WARNING)
-    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
-    logging.getLogger("git.util").setLevel(logging.WARNING)
-    logging.getLogger("git.cmd").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
-    logging.getLogger("graphviz").setLevel(logging.WARNING)
-    logging.getLogger("kaleido").setLevel(logging.WARNING)
-    logging.getLogger("choreographer").setLevel(logging.WARNING)
-    logging.getLogger("browser_proc").setLevel(logging.WARNING)
+    for logger_name in [
+        "urllib3",
+        "huggingface_hub",
+        "bitsandbytes",
+        "transformers",
+        "matplotlib",
+        "fsspec",
+        "filelock",
+        "PIL.PngImagePlugin",
+        "git.util",
+        "git.cmd",
+        "asyncio",
+        "graphviz",
+        "kaleido",
+        "choreographer",
+        "browser_proc",
+    ]:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
     # =================================================================
 
     logging.info(f"Logging configured. Outputting to console and '{log_file}'.")
