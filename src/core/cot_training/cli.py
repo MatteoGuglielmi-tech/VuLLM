@@ -29,14 +29,14 @@ def get_parser():
         "--formatted_dataset_dir",
         "-o",
         type=Path,
-        required=True,
+        # required=True,
         help="Directory path wherein saving the formatted dataset (not tokenzied)",
     )
     common_group.add_argument(
         "--chat_template",
         "-c",
         type=str,
-        required=True,
+        # required=True,
         help=(
             "Chat template to use:\n"
             "  - fine-tuning and hpo modes: it represents the chat_template used to format input samples and extract delimiters for reponse only learning"
@@ -246,6 +246,20 @@ def get_parser():
     return parser
 
 
+from dataclasses import dataclass
+@dataclass(frozen=True)
+class FlagInfo:
+    attr_name: str
+    flag: str
+
+
+def check_required_args(args, required: list[FlagInfo]):
+    """Check if required arguments are present."""
+    for info in required:
+        if getattr(args, info.attr_name) is None:
+            yield info.flag
+
+
 def validate_args(args):
     """
     Validates that only mode-specific arguments are used with their respective modes.
@@ -291,11 +305,22 @@ def validate_args(args):
         "deepspeed",
     }
 
+    required: list[FlagInfo] = [
+        FlagInfo(attr_name="formatted_dataset_dir", flag="--formatted_dataset_dir"),
+        FlagInfo(attr_name="chat_template", flag="--chat_template"),
+
+    ]
+
     if args.finetune:
-        if args.base_model_name is None:
-            raise argparse.ArgumentTypeError("--base_model_name is required for --finetune mode")
-        if args.dataset_path is None: # needs dataset path
-            raise argparse.ArgumentTypeError("--dataset_path is required for --finetune mode")
+        required.extend([
+            FlagInfo(attr_name="base_model_name", flag="--base_model_name"),
+            FlagInfo(attr_name="dataset_path", flag="--dataset_path"),
+        ])
+        missing = list(check_required_args(args=args, required=required))
+        if missing:
+            raise argparse.ArgumentTypeError(
+                f"Required for --finetune mode: {', '.join(missing)}"
+            )
 
         invalid_args = []
 
@@ -317,10 +342,15 @@ def validate_args(args):
             )
 
     elif args.hpo:
-        if args.base_model_name is None:
-            raise argparse.ArgumentTypeError("--base_model_name is required for --hpo mode")
-        if args.dataset_path is None:
-            raise argparse.ArgumentTypeError("--dataset_path is required for --hpo mode")
+        required.extend([
+            FlagInfo(attr_name="base_model_name", flag="--base_model_name"),
+            FlagInfo(attr_name="dataset_path", flag="--dataset_path"),
+        ])
+        missing = list(check_required_args(args=args, required=required))
+        if missing:
+            raise argparse.ArgumentTypeError(
+                f"Required for --hpo mode: {', '.join(missing)}"
+            )
 
         invalid_args = []
 
@@ -344,10 +374,15 @@ def validate_args(args):
             )
 
     elif args.inference:
-        if args.lora_weights is None:
-            raise argparse.ArgumentTypeError(
-                "--lora_weights is required for --inference mode"
-            )
+        if not args.load_test_from_disk:
+            required.extend([
+                FlagInfo(attr_name="lora_weights", flag="--lora_weights"),
+            ])
+            missing = list(check_required_args(args=args, required=required))
+            if missing:
+                raise argparse.ArgumentTypeError(
+                    f"Required for --inference mode: {', '.join(missing)}"
+                )
 
         invalid_args = []
 
