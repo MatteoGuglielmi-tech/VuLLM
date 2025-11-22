@@ -213,6 +213,7 @@ class Evaluator:
                                 else "0.0%"
                             ),
                         })
+                        continue
 
                     pred_cwes: list[int] = prediction.cwe_list
                     is_pred_vulnerable: Optional[bool] = prediction.is_vulnerable
@@ -290,10 +291,10 @@ class Evaluator:
                 logger.info("✅ All CWEs properly formatted and consistent")
 
             stats = {
-                "total_samples": self.n_samples,
-                "invalid_format": len(invalid_cwes),
-                "inconsistencies": len(warnings),
-                "valid": self.n_samples - len(invalid_cwes),
+                "Total samples": self.n_samples,
+                "✗ Invalid format": len(invalid_cwes),
+                "⚠ Inconsistencies": len(warnings),
+                "✓ Valid": self.n_samples - len(invalid_cwes),
             }
 
             tb = build_table(data=stats, columns=["Stat", "Value"])

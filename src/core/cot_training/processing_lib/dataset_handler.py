@@ -2,12 +2,11 @@ import logging
 import random
 import json
 
-from typing import TypedDict, Optional
+from typing import TypedDict
 from pathlib import Path
 from dataclasses import dataclass
-from numpy import full
 from transformers import PreTrainedTokenizer
-from datasets import load_dataset, DatasetDict, Dataset, load_from_disk
+from datasets import load_dataset, DatasetDict
 from collections import defaultdict
 
 
@@ -91,7 +90,7 @@ class DatasetHandler:
         target_test_clean = int(total_clean * test_size)
         target_val_vulnerable = int(total_vulnerable * val_size)
         target_val_clean = int(total_clean * val_size)
-  
+
         # Create list of (project, vulnerable_count, clean_count) and shuffle
         projects_with_stats = [
             (project, stats["vulnerable"], stats["clean"])
@@ -245,7 +244,7 @@ class DatasetHandler:
                 "test": test_dataset,
             }
         )
-    
+
     def _formatting_func(self, example: DatasetExample) -> Message:
         """
         Format a single example for training with the simplified JSON structure.
@@ -284,10 +283,9 @@ class DatasetHandler:
                         else f"CWE-{cwe_id} vulnerability"
                     )
 
-                    vulnerabilities.append({
-                        "cwe_id": cwe_id,
-                        "description": description
-                    })
+                    vulnerabilities.append(
+                        {"cwe_id": cwe_id, "description": description}
+                    )
 
                 except ValueError:
                     logger.exception(f"Error parsing for CWE '{cwe}`")
@@ -297,10 +295,7 @@ class DatasetHandler:
         response_data: ResponseStruct = {
             "reasoning": example["reasoning"].strip(),
             "vulnerabilities": vulnerabilities,
-            "verdict": {
-                "is_vulnerable": bool(example["target"]),
-                "cwe_list": cwe_list
-            }
+            "verdict": {"is_vulnerable": bool(example["target"]), "cwe_list": cwe_list},
         }
 
         # convert to formatted JSON
@@ -334,7 +329,7 @@ class DatasetHandler:
                 formatted_splits[split_name] = dataset_dict[split_name].map(
                     self._formatting_func,
                     remove_columns=list(dataset_dict[split_name].features),
-                    num_proc=self.num_cpus
+                    num_proc=self.num_cpus,
                 )
 
         if self.debug_mode and is_main_process():
@@ -347,7 +342,7 @@ class DatasetHandler:
 
         return formatted_splits
 
-    def save_to_disk(self,  dataset_dict: DatasetDict) -> None:
+    def save_to_disk(self, dataset_dict: DatasetDict) -> None:
         """Save formatted dataset.
 
         Parameters
