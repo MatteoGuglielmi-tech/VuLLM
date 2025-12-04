@@ -22,6 +22,7 @@ trainer/
 checkpoints/
 unused/
 tests/
+scripts/
 
 src/core/chunking_and_streaming
 src/core/cot_training__
@@ -64,3 +65,4 @@ src/dataset/balance/assets/
 
 ####### RUST #######
 rusty/target
+rusty/src/mitre

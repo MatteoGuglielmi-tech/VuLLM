@@ -1,6 +1,5 @@
 [workspace]
-authors = ["MatteoGuglielmi-tech <matteo.guglielmi.ma.gu@gmail.com>"]
-channels = ["conda-forge"]
+authors = ["MatteoGuglielmi-tech <matteo.guglielmi.ma.gu@gmail.com>"] channels = ["conda-forge"]
 name = "VuLLM"
 platforms = ["linux-64", "osx-arm64"]
 version = "0.1.0"
@@ -19,6 +18,7 @@ graphviz = ">=13.1.2,<14"
 plotly = ">=6.3.0,<7"
 optuna = ">=4.5.0,<5"
 python-telegram-bot = ">=22.5,<23"
+outlines = ">=1.2.9,<2"
 
 [pypi-dependencies]
 tiktoken = ">=0.11.0, <0.12"
@@ -37,3 +37,10 @@ wandb = ">=0.22.0, <0.23"
 weave = ">=0.52.8, <0.53"
 trl = ">=0.22.2, <0.23"
 deepspeed = ">=0.18.1, <0.19"
+
+[feature.dev.dependencies]
+debugpy = "*"
+tk = "*"
+
+[environments]
+dev = { features = ["dev"], solve-group = "default" }
