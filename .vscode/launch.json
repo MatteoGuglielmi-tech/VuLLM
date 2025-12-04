@@ -5,9 +5,12 @@
       "type": "python",
       "request": "launch",
       "name": "Python: Run as Module",
-      "module": "src.dataset.restructure.vulcan_run",
+      "module": "src.core.cot_training.main",
       "console": "integratedTerminal",
-      "justMyCode": true
+      "justMyCode": true,
+      "env": {
+        "MPLBACKEND": "Agg"
+      }
     }
   ]
 }
