@@ -7,7 +7,7 @@ import dataframe_image as dfi
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias, cast
-from logging_config import setup_logger
+from .logging_config import setup_logger
 
 
 JsonlEntry: TypeAlias = dict[str, Any]
@@ -94,7 +94,7 @@ class Balancer:
         logger.info("Performing stratified sampling...")
 
         min_tokens = self.df["token_count"].quantile(self.lower_quantile)
-        min_complexity = self.df["cyclomatic_complexity"].quantile(self.lower_quantile)
+        min_complexity = max(2, self.df["cyclomatic_complexity"].quantile(self.lower_quantile))
 
         max_tokens = self.df["token_count"].quantile(self.upper_quantile)
         max_complexity = self.df["cyclomatic_complexity"].quantile(self.upper_quantile)
