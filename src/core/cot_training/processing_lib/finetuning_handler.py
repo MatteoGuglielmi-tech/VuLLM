@@ -1,10 +1,10 @@
+from rich.table import Table
 from unsloth import is_bfloat16_supported
 from unsloth.chat_templates import train_on_responses_only
 
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
-from ..loader_config import Loader
 from ..utilities import is_main_process, build_table, rich_panel
 
 import logging
@@ -238,9 +238,7 @@ class FineTuningHandler:
         self._dataset_dict = None
         self._base_tokenizer = None
 
-        self._log_settings(strategy=strategy)
-
-    def _log_settings(self, strategy: TrainingStrategy) -> None:
+    def _strat_settings(self, strategy: TrainingStrategy) -> Table:
         tb_dict = {
             "TrainingStrategy": strategy,
             "Epochs": self.epochs,
@@ -250,14 +248,8 @@ class FineTuningHandler:
             "Early stopping threshold": self.early_stopping_threshold if self.use_early_stopping else "None",
             "Warm-up ratio (%)": self.warmup_ratio,
         }
-        tb = build_table(data=tb_dict, columns=["Parameter", "Value"])
-        rich_panel(
-            tables=tb,
-            panel_title="🗺️ Fine-tuning strategy",
-            border_style="cornflower_blue",
-        )
-
-        del tb_dict, tb
+        tb = build_table(data=tb_dict, columns=["Parameter", "Value"], title="Fine-tuning strategy")
+        return tb
 
     @staticmethod
     def _get_strategy_defaults(strategy: TrainingStrategy) -> StrategyConfig:
@@ -314,19 +306,15 @@ class FineTuningHandler:
             logger.info("♻️ Reusing cached dataset")
             return self._dataset_dict
 
-        with Loader(
-            "📚 Preparing dataset with tokenizer...",
-            "✅ Dataset prepared and cached for reuse",
-            logger=logger,
-        ):
-            dataset_handler = self.dataset_handler_class(
-                dataset_path=self.dataset_path,
-                formatted_dataset_dir=self.formatted_dataset_dir,
-                tokenizer=tokenizer,
-                num_cpus=self.num_cpus,
-                debug_mode=self.debug,
-            )
-            self._dataset_dict = dataset_handler.run_pipeline()
+        dataset_handler = self.dataset_handler_class(
+            dataset_path=self.dataset_path,
+            formatted_dataset_dir=self.formatted_dataset_dir,
+            tokenizer=tokenizer,
+            num_cpus=self.num_cpus,
+            debug_mode=self.debug,
+        )
+        self._dataset_dict = dataset_handler.run_pipeline()
+
         return self._dataset_dict
 
     def get_instruction_response_parts(self) -> tuple[str, str]:

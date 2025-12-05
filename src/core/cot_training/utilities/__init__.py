@@ -12,7 +12,9 @@ from .ui import (
     build_table,
     build_panel,
     rich_panels_grid,
-    display_env_info,
+    get_env_info,
+    stateless_progress,
+    RichColors
 )
 
 from .resources import (
@@ -21,7 +23,7 @@ from .resources import (
 )
 
 from .disk import (
-    load_dataset,
+    load_dataset_from_disk,
     save_dataset
 )
 
@@ -43,11 +45,13 @@ __all__ = [
     "build_table",
     "build_panel",
     "rich_panels_grid",
-    "display_env_info",
+    "get_env_info",
+    "stateless_progress",
+    "RichColors",
     # resources
     "cleanup_resources",
     "cleanup_single_gpu",
     # disk
-    "load_dataset",
+    "load_dataset_from_disk",
     "save_dataset"
 ]

@@ -1,4 +1,3 @@
-from collections.abc import Generator
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
@@ -6,15 +5,21 @@ import json
 import torch
 import logging
 
-from typing import Any
+from typing import Literal, overload
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
-from ..utilities import is_main_process, rich_progress_manual
+from .prompt_config import VulnerabilityPromptConfig
+from .datatypes import TestDatasetSchema, TypedDataset
+from .schema_generation import JSONGenerator
+from ..utilities import is_main_process
+
+# from typing import Any, cast
+# from .prompt_config import Messages, ParsedResponse, VulnerabilityPromptConfig
+# from ..utilities import rich_progress_manual
 
 
 logger = logging.getLogger(name=__name__)
@@ -44,6 +49,17 @@ class TestHandler:
         logger.info(f"   Custom chat template: {self.chat_template is not None}")
 
         self._load_finetuned_model()
+        self.json_generator = JSONGenerator(
+            model=self.model, # type: ignore
+            tokenizer=self.tokenizer, # type: ignore
+            prompt_config=self.prompt_config,
+            max_new_tokens=self.max_new_tokens,
+            do_sample=True,
+            temperature=0.2,
+            top_p=0.95,
+            min_p=0.1,
+            repetition_penalty=1.05,
+        )
 
     def _validate_inputs(self):
         """Validate constructor inputs."""
@@ -192,76 +208,76 @@ class TestHandler:
             logger.critical(f"❌ Failed to load model: {e}")
             raise
 
-    def run_inference(self, c_code_input: str) -> ParsedResponse:
-        """Performs inference on a single C code snippet using the CoT format.
-
-        Parameters
-        ----------
-        c_code_input : str
-            The raw C function code to be analyzed.
-
-        Returns
-        -------
-        str
-            The model's generated reasoning and final answer (assistant response only).
-
-        Raises
-        ------
-        RuntimeError
-            If model/tokenizer not loaded or if generation fails.
-        """
-
-        if not self.model or not self.tokenizer:
-            raise RuntimeError("Model and tokenizer must be loaded before running inference.")
-
-        # build message structure
-        messages: list[dict] = self.prompt_config.as_messages(func_code=c_code_input)
-
-        input_text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        inputs = self.tokenizer(
-            input_text,  # type: ignore
-            return_tensors="pt",
-            # padding=True,
-            padding=False,
-            max_length=self.max_seq_length,
-            truncation=True,
-        ).to(self.model.device)  # type: ignore
-
-        # Generate response
-        try:
-            with torch.inference_mode():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=True,
-                    temperature=0.2,
-                    top_p=0.95,
-                    min_p=0.1,
-                    repetition_penalty=1.05,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
-        except Exception as e:
-            logger.error(f"Generation failed: {e}")
-            raise RuntimeError(f"Model generation failed: {e}") from e
-
-        generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
-        decoded_output = self.tokenizer.batch_decode(
-            generated_tokens, skip_special_tokens=True, cleanup_tokenization_spaces=True
-        )[0]
-
-        return self._parse_response(decoded_output.strip())
+    # def run_inference(self, c_code_input: str) -> ParsedResponse:
+    #     """Performs inference on a single C code snippet using the CoT format.
+    #
+    #     Parameters
+    #     ----------
+    #     c_code_input : str
+    #         The raw C function code to be analyzed.
+    #
+    #     Returns
+    #     -------
+    #     str
+    #         The model's generated reasoning and final answer (assistant response only).
+    #
+    #     Raises
+    #     ------
+    #     RuntimeError
+    #         If model/tokenizer not loaded or if generation fails.
+    #     """
+    #
+    #     if not self.model or not self.tokenizer:
+    #         raise RuntimeError("Model and tokenizer must be loaded before running inference.")
+    #
+    #     # build message structure
+    #     messages: list[dict] = self.prompt_config.as_messages(func_code=c_code_input)
+    #
+    #     input_text = self.tokenizer.apply_chat_template(
+    #         messages,
+    #         tokenize=False,
+    #         add_generation_prompt=True,
+    #     )
+    #     inputs = self.tokenizer(
+    #         input_text,  # type: ignore
+    #         return_tensors="pt",
+    #         # padding=True,
+    #         padding=False,
+    #         max_length=self.max_seq_length,
+    #         truncation=True,
+    #     ).to(self.model.device)  # type: ignore
+    #
+    #     # Generate response
+    #     try:
+    #         with torch.inference_mode():
+    #             outputs = self.model.generate( # type: ignore
+    #                 **inputs,
+    #                 max_new_tokens=self.max_new_tokens,
+    #                 do_sample=True,
+    #                 temperature=0.2,
+    #                 top_p=0.95,
+    #                 min_p=0.1,
+    #                 repetition_penalty=1.05,
+    #                 pad_token_id=self.tokenizer.pad_token_id,
+    #                 eos_token_id=self.tokenizer.eos_token_id,
+    #             )
+    #     except Exception as e:
+    #         logger.error(f"Generation failed: {e}")
+    #         raise RuntimeError(f"Model generation failed: {e}") from e
+    #
+    #     generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
+    #     decoded_output = self.tokenizer.batch_decode(
+    #         generated_tokens, skip_special_tokens=True, cleanup_tokenization_spaces=True
+    #     )[0]
+    #
+    #     return self._parse_response(decoded_output.strip())
 
     def evaluate_on_test_set(
         self,
         test_dataset: Dataset,
         batch_size: int,
         use_batching: bool = True,
-    ) -> Dataset:
+    ) -> TypedDataset[TestDatasetSchema]:
         """Run inference on test dataset and return predictions.
 
         Parameters
@@ -292,12 +308,9 @@ class TestHandler:
             f"(batch_size={batch_size}, batching={use_batching})..."
         )
 
-        if use_batching:
-            predictions = self._batched_inference(
-                test_dataset=test_dataset, batch_size=batch_size
-            )
-        else:
-            predictions = self._sequential_inference(test_dataset=test_dataset)
+        predictions = self.json_generator.evaluate_test_set(
+            test_dataset=test_dataset, batch_size=batch_size, use_batching=use_batching
+        )
 
         # add predictions to dataset
         results_dataset: Dataset = test_dataset.add_column( # type: ignore
@@ -306,10 +319,12 @@ class TestHandler:
 
         self.save_evaluation_results(results_dataset=results_dataset)
 
-        return results_dataset
+        return TypedDataset[TestDatasetSchema](results_dataset)
 
     def save_evaluation_results(self, results_dataset: Dataset) -> None:
         """Save evaluation results with custom split name.
+        It saved the datset both in a hugging face compatible format as well
+        as in json line format for human inspection.
 
         Parameters
         ----------
@@ -319,14 +334,36 @@ class TestHandler:
 
         from ..utilities import save_dataset
 
+        huggingface: Path = self.evaluated_testset_path / "huggingface"
+        jsonl: Path = self.evaluated_testset_path / "json"
+        huggingface.mkdir(exist_ok=True, parents=True)
+
         save_dataset(
             dataset=results_dataset,
-            output_location=self.evaluated_testset_path,
+            output_location=huggingface,
             split_name="test",
         )
 
+        jsonl.mkdir(exist_ok=True, parents=True)
+        results_dataset.to_json(path_or_buf=(jsonl / "eval_test.jsonl"))
+
     @staticmethod
-    def load_test_dataset(input_dir: Path, split_name: str = "test") -> Dataset:
+    @overload
+    def load_test_dataset(
+        input_dir: Path, split_name: str = "test", *, with_eval: Literal[True]
+    ) -> TypedDataset[TestDatasetSchema]: ...
+
+    @staticmethod
+    @overload
+    def load_test_dataset(
+        input_dir: Path, split_name: str = "test", *, with_eval: Literal[False] = False
+    ) -> Dataset: ...
+
+
+    @staticmethod
+    def load_test_dataset(
+        input_dir: Path, split_name: str = "test", *, with_eval: bool = False
+    ) -> Dataset | TypedDataset[TestDatasetSchema]:
         """Load evaluation results from disk.
         Dataset needs to be previously saved via [~TestHandler.save_evaluation_results].
 
@@ -344,193 +381,190 @@ class TestHandler:
 
         Raise
         -----
-        ValueError 
+        ValueError
             Shouldn't happen but it's here for safety in case of type mismatched
         """
 
-        from ..utilities import load_dataset
+        from ..utilities import load_dataset_from_disk
 
-        test_data: Dataset | DatasetDict = load_dataset(input_dir=input_dir, split_name=split_name)
-        if not isinstance(test_data, Dataset):
-            raise ValueError("Somehow, test dataset has not been loaded as `Dataset` instance.")
-        else:
-            return test_data
+        test_data: Dataset = load_dataset_from_disk(input_dir=input_dir, split_name=split_name)
+        return TypedDataset[TestDatasetSchema](test_data) if with_eval else test_data
 
-    def _sequential_inference(self, test_dataset: Dataset) -> list[dict[str, Any]]:
-        """Run inference sequentially using run_inference() method."""
+    # def _sequential_inference(self, test_dataset: Dataset) -> list[dict[str, Any]]:
+    #     """Run inference sequentially using run_inference() method."""
+    #
+    #     predictions: list[dict[str, Any]] = []
+    #     n_failures: int = 0
+    #     n_ok: int = 0
+    #     with rich_progress_manual(
+    #         total=self.n_samples, description="Sequential Inference"
+    #     ) as pbar:
+    #         for index in range(self.n_samples):
+    #             try:
+    #                 prediction = self.run_inference(test_dataset[index]["func"])
+    #                 predictions.append(prediction.to_dict())
+    #                 n_ok += 1
+    #             except Exception:
+    #                 n_failures += 1
+    #                 predictions.append(
+    #                     ParsedResponse(
+    #                         reasoning="",
+    #                         vulnerabilities=[],
+    #                         verdict={},
+    #                         parse_error=True,
+    #                     ).to_dict()
+    #                 )
+    #             finally:
+    #                 pbar.update(advance=1)
+    #                 pbar.set_postfix({
+    #                     "✓ Ok": n_ok,
+    #                     "✗ Error": n_failures,
+    #                     "% Error rate": (
+    #                         f"{(n_failures/self.n_samples):.1%}"
+    #                         if n_failures > 0
+    #                         else "0%"
+    #                     ),
+    #                 })
+    #
+    #             if index == self.n_samples-1:
+    #                 pbar.set_description(description="✅ Evaluation complete.")
+    #
+    #     return predictions
 
-        predictions: list[dict[str, Any]] = []
-        n_failures: int = 0
-        n_ok: int = 0
-        with rich_progress_manual(
-            total=self.n_samples, description="Sequential Inference"
-        ) as pbar:
-            for index in range(self.n_samples):
-                try:
-                    prediction = self.run_inference(test_dataset[index]["func"])
-                    predictions.append(prediction.to_dict())
-                    n_ok += 1
-                except Exception:
-                    n_failures += 1
-                    predictions.append(
-                        ParsedResponse(
-                            reasoning="",
-                            vulnerabilities=[],
-                            verdict={},
-                            parse_error=True,
-                        ).to_dict()
-                    )
-                finally:
-                    pbar.update(advance=1)
-                    pbar.set_postfix({
-                        "✓ Ok": n_ok,
-                        "✗ Error": n_failures,
-                        "% Error rate": (
-                            f"{(n_failures/self.n_samples):.1%}"
-                            if n_failures > 0
-                            else "0%"
-                        ),
-                    })
+    # def _create_message_batches(
+    #     self, dataset: Dataset, *, batch_size: int
+    # ) -> Iterator[list[Messages]]:
+    #     """Generate batches of formatted messages for inference."""
+    #
+    #     batch: list[Messages] = []
+    #
+    #     for func in dataset["func"]:
+    #         messages = self.prompt_config.as_messages(func_code=func)
+    #         batch.append(messages)
+    #
+    #         if len(batch) == batch_size:
+    #             yield batch
+    #             batch = []
+    #
+    #     if batch:
+    #         yield batch
 
-                if index == self.n_samples-1:
-                    pbar.set_description(description="✅ Evaluation complete.")
+    # def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[dict[str, Any]]:
+    #     """Run batched inference for speed. Processes multiple samples simultaneously."""
+    #
+    #     if not self.model or not self.tokenizer:
+    #         raise RuntimeError("Model and tokenizer must be loaded before running evaluation.")
+    #
+    #     all_predictions: list[dict[str, Any]] = []
+    #     n_failures: int = 0
+    #     n_ok: int = 0
+    #     num_batches = (len(test_dataset["func"]) + batch_size - 1) // batch_size
+    #
+    #     with rich_progress_manual(
+    #         total=num_batches,
+    #         description="Batched Inference",
+    #         initial_status="Initializing...",
+    #     ) as pbar:
+    #         for idx, batch_messages in enumerate(
+    #             self._create_message_batches(test_dataset, batch_size=batch_size)
+    #         ):
+    #
+    #             input_texts = self.tokenizer.apply_chat_template(
+    #                 batch_messages, tokenize=False, add_generation_prompt=True
+    #             )
+    #             inputs = self.tokenizer(
+    #                 input_texts, # type: ignore
+    #                 return_tensors="pt",
+    #                 padding=True,
+    #                 max_length=self.max_seq_length,
+    #                 truncation=True,
+    #             ).to(self.model.device)  # type: ignore
+    #
+    #             try:
+    #                 with torch.inference_mode():
+    #                     outputs = self.model.generate( # type: ignore
+    #                         **inputs,
+    #                         max_new_tokens=self.max_new_tokens,
+    #                         do_sample=True,
+    #                         temperature=0.2,
+    #                         top_p=0.95,
+    #                         min_p=0.1,
+    #                         repetition_penalty=1.05,
+    #                         pad_token_id=self.tokenizer.pad_token_id,
+    #                         eos_token_id=self.tokenizer.eos_token_id,
+    #                     )
+    #
+    #                 generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
+    #                 decoded_predictions = self.tokenizer.batch_decode(
+    #                     generated_tokens,
+    #                     skip_special_tokens=True,
+    #                     clean_up_tokenization_spaces=True,
+    #                 )
+    #                 all_predictions.extend(
+    #                     [
+    #                         self._parse_response(p.strip()).to_dict()
+    #                         for p in decoded_predictions
+    #                     ]
+    #                 )
+    #                 n_ok +=1
+    #
+    #             except Exception:
+    #                 # if generation fails, proceed with next batch
+    #                 logger.exception(f"Batch inference failed")
+    #                 n_failures +=1
+    #                 continue
+    #             finally:
+    #                 pbar.update(advance=len(batch_messages))
+    #                 pbar.set_postfix({
+    #                     "Batch": f"{idx}/{num_batches}",
+    #                     "✓ Ok": n_ok,
+    #                     "✗ Error": n_failures,
+    #                     "% Error rate": (
+    #                         f"{(n_failures/self.n_samples):.1%}"
+    #                         if n_failures > 0
+    #                         else "0%"
+    #                     ),
+    #                 })
+    #
+    #     return all_predictions
 
-        return predictions
-
-    def _create_message_batches(
-        self, dataset: Dataset, *, batch_size: int
-    ) -> Generator[list[Messages], None, None]:
-        """Generate batches of formatted messages for inference."""
-
-        batch: list[Messages] = []
-
-        for func in dataset["func"]:
-            messages = self.prompt_config.as_messages(func_code=func)
-            batch.append(messages)
-
-            if len(batch) == batch_size:
-                yield batch
-                batch = []
-
-        if batch:
-            yield batch
-
-    def _batched_inference(self, test_dataset: Dataset, batch_size: int) -> list[dict[str, Any]]:
-        """Run batched inference for speed. Processes multiple samples simultaneously."""
-
-        if not self.model or not self.tokenizer:
-            raise RuntimeError("Model and tokenizer must be loaded before running evaluation.")
-
-        all_predictions: list[dict[str, Any]] = []
-        n_failures: int = 0
-        n_ok: int = 0
-        num_batches = (len(test_dataset["func"]) + batch_size - 1) // batch_size
-
-        with rich_progress_manual(
-            total=num_batches,
-            description="Batched Inference",
-            initial_status="Initializing...",
-        ) as pbar:
-            for idx, batch_messages in enumerate(
-                self._create_message_batches(test_dataset, batch_size=batch_size)
-            ):
-
-                input_texts = self.tokenizer.apply_chat_template(
-                    batch_messages, tokenize=False, add_generation_prompt=True
-                )
-                inputs = self.tokenizer(
-                    input_texts, # type: ignore
-                    return_tensors="pt",
-                    padding=True,
-                    max_length=self.max_seq_length,
-                    truncation=True,
-                ).to(self.model.device)  # type: ignore
-
-                try:
-                    with torch.inference_mode():
-                        outputs = self.model.generate( # type: ignore
-                            **inputs,
-                            max_new_tokens=self.max_new_tokens,
-                            do_sample=True,
-                            temperature=0.2,
-                            top_p=0.95,
-                            min_p=0.1,
-                            repetition_penalty=1.05,
-                            pad_token_id=self.tokenizer.pad_token_id,
-                            eos_token_id=self.tokenizer.eos_token_id,
-                        )
-
-                    generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
-                    decoded_predictions = self.tokenizer.batch_decode(
-                        generated_tokens,
-                        skip_special_tokens=True,
-                        clean_up_tokenization_spaces=True,
-                    )
-                    all_predictions.extend(
-                        [
-                            self._parse_response(p.strip()).to_dict()
-                            for p in decoded_predictions
-                        ]
-                    )
-                    n_ok +=1
-
-                except Exception:
-                    # if generation fails, proceed with next batch
-                    logger.exception(f"Batch inference failed")
-                    n_failures +=1
-                    continue
-                finally:
-                    pbar.update(advance=len(batch_messages))
-                    pbar.set_postfix({
-                        "Batch": f"{idx}/{num_batches}",
-                        "✓ Ok": n_ok,
-                        "✗ Error": n_failures,
-                        "% Error rate": (
-                            f"{(n_failures/self.n_samples):.1%}"
-                            if n_failures > 0
-                            else "0%"
-                        ),
-                    })
-
-        return all_predictions
-
-    def _parse_response(self, response: str) -> ParsedResponse:
-        """Parse judge response into structured ParsedResponse.
-
-        Parameters
-        ----------
-        response : str
-            Raw text response from the judge model
-
-        Returns
-        -------
-        ParsedResponse
-            Parsed text for generated output
-        """
-
-        try:
-            # extract json content
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                result = json.loads(json_str)
-            else:
-                self._counter_fails += 1
-                raise ValueError("No JSON found in response")
-
-            return ParsedResponse(
-                reasoning=result.get("reasoning"),
-                vulnerabilities=result.get("vulnerabilities"),
-                verdict=result.get("verdict"),
-                parse_error=False,
-            )
-
-        except (json.JSONDecodeError, ValueError, KeyError):
-            return ParsedResponse(
-                reasoning="",
-                vulnerabilities=[],
-                verdict={},
-                parse_error=True,
-            )
+    # def _parse_response(self, response: str) -> ParsedResponse:
+    #     """Parse judge response into structured ParsedResponse.
+    #
+    #     Parameters
+    #     ----------
+    #     response : str
+    #         Raw text response from the judge model
+    #
+    #     Returns
+    #     -------
+    #     ParsedResponse
+    #         Parsed text for generated output
+    #     """
+    #
+    #     try:
+    #         # extract json content
+    #         json_start = response.find("{")
+    #         json_end = response.rfind("}") + 1
+    #
+    #         if json_start >= 0 and json_end > json_start:
+    #             json_str = response[json_start:json_end]
+    #             result = json.loads(json_str)
+    #         else:
+    #             self._counter_fails += 1
+    #             raise ValueError("No JSON found in response")
+    #
+    #         return ParsedResponse(
+    #             reasoning=result.get("reasoning"),
+    #             vulnerabilities=result.get("vulnerabilities"),
+    #             verdict=result.get("verdict"),
+    #             parse_error=False,
+    #         )
+    #
+    #     except (json.JSONDecodeError, ValueError, KeyError):
+    #         return ParsedResponse(
+    #             reasoning="",
+    #             vulnerabilities=[],
+    #             verdict={},
+    #             parse_error=True,
+    #         )

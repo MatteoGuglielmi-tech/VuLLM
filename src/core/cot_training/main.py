@@ -13,11 +13,13 @@ from .utilities import (
     rich_table,
     rich_exception,
     rich_rule,
+    rich_panel,
     is_main_process,
     cleanup_resources,
     cleanup_single_gpu,
     init_accelerator,
-    display_env_info,
+    get_env_info,
+    RichColors
 )
 from .processing_lib import (
     DatasetHandler,
@@ -25,6 +27,8 @@ from .processing_lib import (
     FineTuningHandler,
     LLMHyperparameterOptimizer,
     TestHandler,
+    TypedDataset,
+    TestDatasetSchema,
     Evaluator,
 )
 from .logging_config import setup_logger
@@ -32,7 +36,7 @@ from . import cli
 
 import torch
 
-install(show_locals=True)
+install()
 
 
 warnings.filterwarnings(
@@ -56,12 +60,14 @@ if __name__ == "__main__":
 
     cpus_allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
     accelerator = init_accelerator()
-    display_env_info(parser=parser, args=args)
     gc.collect()
 
     try:
         if not args.inference and not args.hpo:
-            rich_rule(f"🚀 [bold][italic][green] Starting fine-tuning pipeline [/green][/italic][/bold] 🚀")
+            rich_rule(
+                f"🌩️ [bold][italic][cornflower_blue]Starting fine-tuning pipeline[/cornflower_blue][/italic][/bold] 🌩️",
+                style="cornflower_blue",
+            )
 
             # --- Fine-Tuning ---
             fine_tuner = FineTuningHandler(
@@ -97,8 +103,18 @@ if __name__ == "__main__":
                 # -- flags --
                 debug=args.debug,
             )
+
+            run_tb = get_env_info(parser=parser, args=args)
+            strategy_tb = fine_tuner._strat_settings(args.strategy)
+            run_tb.append(strategy_tb)
+            rich_panel(
+                tables=run_tb,
+                panel_title="Run settings",
+                border_style="sea_green3",
+            )
+
             fine_tuner.fine_tune()
-            rich_rule(style="green")
+            rich_rule(style="cornflower_blue")
 
         elif args.hpo:
             rich_rule(f"🚀 [bold][italic][light_salmon1] Starting HPO pipeline [/][/][/] 🚀")
@@ -145,7 +161,7 @@ if __name__ == "__main__":
                     post_desc=f"📉 Best validation loss: {best_score:.4f}",
                 )
 
-            rich_rule(syle="light_salmon1")
+            rich_rule(style=RichColors.SALMON1)
         else:
             rich_rule(f"🚀 [bold][italic][light_sky_blue1] Starting inference pipeline [/][/][/] 🚀")
 
@@ -158,18 +174,18 @@ if __name__ == "__main__":
                     evaluated_testset_path=args.evaluated_test_path
                 )
                 test_set: Dataset = TestHandler.load_test_dataset(input_dir=args.formatted_dataset_dir)
-                dataset_with_perdictions: Dataset = test_handler.evaluate_on_test_set(
+                pred_testset: TypedDataset[TestDatasetSchema] = test_handler.evaluate_on_test_set(
                     test_dataset=test_set,
                     batch_size=args.batch_size,
                     use_batching=args.use_batching,
                 )
 
             else:
-                dataset_with_perdictions: Dataset = TestHandler.load_test_dataset(
-                    input_dir=args.evaluated_test_path, split_name="test"
+                pred_testset: TypedDataset[TestDatasetSchema] = TestHandler.load_test_dataset(
+                    input_dir=args.evaluated_test_path, split_name="test", with_eval=True
                 )
 
-            evaluator = Evaluator(output_dir=args.assets_dir, test_dataset=dataset_with_perdictions)
+            evaluator = Evaluator(output_dir=args.assets_dir, test_typeddataset=pred_testset)
             evaluator.validate_cwe_format() # validate predicted cwe quality
             binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=args.save_artifacts) # address target performance
             cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=args.save_artifacts) # address cwe performance

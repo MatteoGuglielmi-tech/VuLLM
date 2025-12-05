@@ -1,14 +1,16 @@
 import os
+import time
 
+from enum import StrEnum
 from collections.abc import Sized as ABCSized
-from typing import Any, Iterable, Literal, TypeVar, Callable
+from typing import Any, Iterable, Literal, TypeVar, Callable, TypedDict, cast
 from argparse import ArgumentParser, Namespace
 from contextlib import contextmanager
 
 from rich.pretty import Pretty
 from rich.align import AlignMethod, Align
 from rich.console import Console, HighlighterType, JustifyMethod, Group, OverflowMethod
-from rich.style import StyleType
+from rich.style import StyleType, Style
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
@@ -31,6 +33,232 @@ T = TypeVar("T")
 _console = Console()
 
 
+class RichColors(StrEnum):
+    NONE = ""
+    RED = "red"
+    GREEN = "green"
+    YELLOW = "yellow"
+    BLUE = "blue"
+    MAGENTA = "magenta"
+    CYAN = "cyan"
+    WHITE = "white"
+    BRIGHT_BLACK = "bright_black"
+    BRIGHT_RED = "bright_red"
+    BRIGHT_GREEN = "bright_green"
+    BRIGHT_YELLOW = "bright_yellow"
+    BRIGHT_BLUE = "bright_blue"
+    BRIGHT_MAGENTA = "bright_magenta"
+    BRIGHT_CYAN = "bright_cyan"
+    BRIGHT_WHITE = "bright_white"
+    GREY0 = "grey0"
+    NAVY_BLUE = "navy_blue"
+    DARK_BLUE = "dark_blue"
+    BLUE3 = "blue3"
+    BLUE1 = "blue1"
+    DARK_GREEN = "dark_green"
+    DEEP_SKY_BLUE4 = "deep_sky_blue4"
+    DODGER_BLUE3 = "dodger_blue3"
+    DODGER_BLUE2 = "dodger_blue2"
+    GREEN4 = "green4"
+    SPRING_GREEN4 = "spring_green4"
+    TURQUOISE4 = "turquoise4"
+    DEEP_SKY_BLUE3 = "deep_sky_blue3"
+    DODGER_BLUE1 = "dodger_blue1"
+    DARK_CYAN = "dark_cyan"
+    LIGHT_SEA_GREEN = "light_sea_green"
+    DEEP_SKY_BLUE2 = "deep_sky_blue2"
+    DEEP_SKY_BLUE1 = "deep_sky_blue1"
+    GREEN3 = "green3"
+    SPRING_GREEN3 = "spring_green3"
+    CYAN3 = "cyan3"
+    DARK_TURQUOISE = "dark_turquoise"
+    TURQUOISE2 = "turquoise2"
+    GREEN1 = "green1"
+    SPRING_GREEN2 = "spring_green2"
+    SPRING_GREEN1 = "spring_green1"
+    MEDIUM_SPRING_GREEN = "medium_spring_green"
+    CYAN2 = "cyan2"
+    CYAN1 = "cyan1"
+    PURPLE4 = "purple4"
+    PURPLE3 = "purple3"
+    BLUE_VIOLET = "blue_violet"
+    GREY37 = "grey37"
+    MEDIUM_PURPLE4 = "medium_purple4"
+    SLATE_BLUE3 = "slate_blue3"
+    ROYAL_BLUE1 = "royal_blue1"
+    CHARTREUSE4 = "chartreuse4"
+    PALE_TURQUOISE4 = "pale_turquoise4"
+    STEEL_BLUE = "steel_blue"
+    STEEL_BLUE3 = "steel_blue3"
+    CORNFLOWER_BLUE = "cornflower_blue"
+    DARK_SEA_GREEN4 = "dark_sea_green4"
+    CADET_BLUE = "cadet_blue"
+    SKY_BLUE3 = "sky_blue3"
+    CHARTREUSE3 = "chartreuse3"
+    SEA_GREEN3 = "sea_green3"
+    AQUAMARINE3 = "aquamarine3"
+    MEDIUM_TURQUOISE = "medium_turquoise"
+    STEEL_BLUE1 = "steel_blue1"
+    SEA_GREEN2 = "sea_green2"
+    SEA_GREEN1 = "sea_green1"
+    DARK_SLATE_GRAY2 = "dark_slate_gray2"
+    DARK_RED = "dark_red"
+    DARK_MAGENTA = "dark_magenta"
+    ORANGE4 = "orange4"
+    LIGHT_PINK4 = "light_pink4"
+    PLUM4 = "plum4"
+    MEDIUM_PURPLE3 = "medium_purple3"
+    SLATE_BLUE1 = "slate_blue1"
+    WHEAT4 = "wheat4"
+    GREY53 = "grey53"
+    LIGHT_SLATE_GREY = "light_slate_grey"
+    MEDIUM_PURPLE = "medium_purple"
+    LIGHT_SLATE_BLUE = "light_slate_blue"
+    YELLOW4 = "yellow4"
+    DARK_SEA_GREEN = "dark_sea_green"
+    LIGHT_SKY_BLUE3 = "light_sky_blue3"
+    SKY_BLUE2 = "sky_blue2"
+    CHARTREUSE2 = "chartreuse2"
+    PALE_GREEN3 = "pale_green3"
+    DARK_SLATE_GRAY3 = "dark_slate_gray3"
+    SKY_BLUE1 = "sky_blue1"
+    CHARTREUSE1 = "chartreuse1"
+    LIGHT_GREEN = "light_green"
+    AQUAMARINE1 = "aquamarine1"
+    DARK_SLATE_GRAY1 = "dark_slate_gray1"
+    DEEP_PINK4 = "deep_pink4"
+    MEDIUM_VIOLET_RED = "medium_violet_red"
+    DARK_VIOLET = "dark_violet"
+    PURPLE = "purple"
+    MEDIUM_ORCHID3 = "medium_orchid3"
+    MEDIUM_ORCHID = "medium_orchid"
+    DARK_GOLDENROD = "dark_goldenrod"
+    ROSY_BROWN = "rosy_brown"
+    GREY63 = "grey63"
+    MEDIUM_PURPLE2 = "medium_purple2"
+    MEDIUM_PURPLE1 = "medium_purple1"
+    DARK_KHAKI = "dark_khaki"
+    NAVAJO_WHITE3 = "navajo_white3"
+    GREY69 = "grey69"
+    LIGHT_STEEL_BLUE3 = "light_steel_blue3"
+    LIGHT_STEEL_BLUE = "light_steel_blue"
+    DARK_OLIVE_GREEN3 = "dark_olive_green3"
+    DARK_SEA_GREEN3 = "dark_sea_green3"
+    LIGHT_CYAN3 = "light_cyan3"
+    LIGHT_SKY_BLUE1 = "light_sky_blue1"
+    GREEN_YELLOW = "green_yellow"
+    DARK_OLIVE_GREEN2 = "dark_olive_green2"
+    PALE_GREEN1 = "pale_green1"
+    DARK_SEA_GREEN2 = "dark_sea_green2"
+    PALE_TURQUOISE1 = "pale_turquoise1"
+    RED3 = "red3"
+    DEEP_PINK3 = "deep_pink3"
+    MAGENTA3 = "magenta3"
+    DARK_ORANGE3 = "dark_orange3"
+    INDIAN_RED = "indian_red"
+    HOT_PINK3 = "hot_pink3"
+    HOT_PINK2 = "hot_pink2"
+    ORCHID = "orchid"
+    ORANGE3 = "orange3"
+    LIGHT_SALMON3 = "light_salmon3"
+    LIGHT_PINK3 = "light_pink3"
+    PINK3 = "pink3"
+    PLUM3 = "plum3"
+    VIOLET = "violet"
+    GOLD3 = "gold3"
+    LIGHT_GOLDENROD3 = "light_goldenrod3"
+    TAN = "tan"
+    MISTY_ROSE3 = "misty_rose3"
+    THISTLE3 = "thistle3"
+    PLUM2 = "plum2"
+    YELLOW3 = "yellow3"
+    KHAKI3 = "khaki3"
+    LIGHT_YELLOW3 = "light_yellow3"
+    GREY84 = "grey84"
+    LIGHT_STEEL_BLUE1 = "light_steel_blue1"
+    YELLOW2 = "yellow2"
+    DARK_OLIVE_GREEN1 = "dark_olive_green1"
+    DARK_SEA_GREEN1 = "dark_sea_green1"
+    HONEYDEW2 = "honeydew2"
+    LIGHT_CYAN1 = "light_cyan1"
+    RED1 = "red1"
+    DEEP_PINK2 = "deep_pink2"
+    DEEP_PINK1 = "deep_pink1"
+    MAGENTA2 = "magenta2"
+    MAGENTA1 = "magenta1"
+    ORANGE_RED1 = "orange_red1"
+    INDIAN_RED1 = "indian_red1"
+    HOT_PINK = "hot_pink"
+    MEDIUM_ORCHID1 = "medium_orchid1"
+    DARK_ORANGE = "dark_orange"
+    SALMON1 = "salmon1"
+    LIGHT_CORAL = "light_coral"
+    PALE_VIOLET_RED1 = "pale_violet_red1"
+    ORCHID2 = "orchid2"
+    ORCHID1 = "orchid1"
+    ORANGE1 = "orange1"
+    SANDY_BROWN = "sandy_brown"
+    LIGHT_SALMON1 = "light_salmon1"
+    LIGHT_PINK1 = "light_pink1"
+    PINK1 = "pink1"
+    PLUM1 = "plum1"
+    GOLD1 = "gold1"
+    LIGHT_GOLDENROD2 = "light_goldenrod2"
+    NAVAJO_WHITE1 = "navajo_white1"
+    MISTY_ROSE1 = "misty_rose1"
+    THISTLE1 = "thistle1"
+    YELLOW1 = "yellow1"
+    LIGHT_GOLDENROD1 = "light_goldenrod1"
+    KHAKI1 = "khaki1"
+    WHEAT1 = "wheat1"
+    CORNSILK1 = "cornsilk1"
+    GREY100 = "grey100"
+    GREY3 = "grey3"
+    GREY7 = "grey7"
+    GREY11 = "grey11"
+    GREY15 = "grey15"
+    GREY19 = "grey19"
+    GREY23 = "grey23"
+    GREY27 = "grey27"
+    GREY30 = "grey30"
+    GREY35 = "grey35"
+    GREY39 = "grey39"
+    GREY42 = "grey42"
+    GREY46 = "grey46"
+    GREY50 = "grey50"
+    GREY54 = "grey54"
+    GREY58 = "grey58"
+    GREY62 = "grey62"
+    GREY66 = "grey66"
+    GREY70 = "grey70"
+    GREY74 = "grey74"
+    GREY78 = "grey78"
+    GREY82 = "grey82"
+    GREY85 = "grey85"
+    GREY89 = "grey89"
+    GREY93 = "grey93"
+
+
+class StyleKwargs(TypedDict, total=False):
+    color: RichColors | None
+    bgcolor: RichColors | None
+
+    # boolean attributes
+    bold: bool | None
+    dim: bool | None
+    italic: bool | None
+    underline: bool | None
+    blink: bool | None
+    blink2: bool | None
+    reverse: bool | None
+    conceal: bool | None
+    strike: bool | None
+    underline2: bool | None
+    frame: bool | None
+    encircle: bool | None
+    overline: bool | None
+
+
 def create_progress() -> Progress:
     return Progress(
         SpinnerColumn(spinner_name="arc"),
@@ -49,30 +277,79 @@ def create_progress() -> Progress:
 def build_table(
     data: dict[str, Any] | Namespace,
     title: str = "",
-    columns: list[str] = [],
-    box=box.ASCII_DOUBLE_HEAD,
+    columns: list[str] | None = None,
+    box: box.Box = box.ASCII_DOUBLE_HEAD,
     show_header: bool = True,
     expand: bool = False,
+    join_list: bool = False,
 ) -> Table:
+    """
+    Build a Rich table from dictionary or Namespace.
+
+    Parameters
+    ----------
+    data : dict | Namespace
+        Data to display
+    title : str
+        Table title
+    columns : list[str] | None
+        Column headers. If None, uses ["Key", "Value"]
+    box : box.Box
+        Box style for table borders
+    show_header : bool
+        Whether to show column headers
+    expand : bool
+        Whether to expand table to full width
+    join_list : bool
+        If True, join list items with comma
+        If False, spread lists across columns when possible
+
+    Returns
+    -------
+    Table
+        Configured Rich table
+    """
+
     data = vars(data) if isinstance(data, Namespace) else data
 
-    table = Table(
-        show_header=show_header, header_style="bold blue", box=box, expand=expand
-    )
-    table.title = title
+    if columns is None:
+        columns = ["Key", "Value"]
 
-    for i, c in enumerate(columns):
-        table.add_column(header=c, style="italic dim" if i == 0 else None)
+    table = Table(
+        show_header=show_header,
+        header_style="bold blue",
+        box=box,
+        expand=expand,
+        title=title,
+    )
+
+    for i, col in enumerate(columns):
+        table.add_column(header=col, style="italic dim" if i == 0 else None)
+
+    num_data_columns = len(columns) - 1
 
     for key, value in data.items():
-        if isinstance(value, list):  # this assumes no nested dict
-            value = ", ".join([str(v) for v in value])
-            table.add_row(key, value)
+        if isinstance(value, list):
+            list_length = len(value)
+
+            if join_list:
+                joined_value = ", ".join(str(v) for v in value)
+                table.add_row(key, joined_value)
+
+            elif list_length == num_data_columns and num_data_columns > 1:
+                row_data = [key] + [str(v) for v in value]
+                table.add_row(*row_data)
+
+            else:
+                formatted_list = "\n".join(str(v) for v in value)
+                table.add_row(key, formatted_list)
+
         else:
-            table.add_row(key, str(value))
+            # Simple value - pad with empty strings for extra columns
+            row_data = [key, str(value)] + [""] * (num_data_columns - 1)
+            table.add_row(*row_data)
 
     return table
-
 
 @main_process_only
 def rich_table(
@@ -128,7 +405,7 @@ def build_panel(
     grid_padding: tuple = (1, 5),
     panel_align: Literal["left", "center", "right"] = "center",
     layout: Literal["vertical", "horizontal"] = "horizontal",
-):
+) -> Align:
     """Build table(s) in a panel.
 
     Parameters
@@ -235,7 +512,7 @@ def rich_panel(
 
 @main_process_only
 def rich_panels_grid(
-    panels: list[Panel],
+    panels: list[Panel] | list[Align],
     grid_shape: tuple[int, int] | None = None,
     grid_padding: tuple = (0, 2),
     align: Literal["left", "center", "right"] = "center",
@@ -270,7 +547,7 @@ def rich_panels_grid(
         row_panels = panels[i : i + cols]
         # Pad with empty strings if needed
         while len(row_panels) < cols:
-            row_panels.append("") # type: ignore[reportArgumentType]
+            row_panels.append("")  # type: ignore[reportArgumentType]
         grid.add_row(*row_panels)
 
     if align == "left":
@@ -316,6 +593,31 @@ def build_pretty_renderable(
     )
 
 
+def build_rich_style_kwargs(
+    *,
+    color: RichColors | str | None = None,
+    bgcolor: RichColors | str | None = None,
+
+    bold: bool | None = None,
+    dim: bool | None = None,
+    italic: bool | None = None,
+    underline: bool | None = None,
+    blink: bool | None = None,
+    blink2: bool | None = None,
+    reverse: bool | None = None,
+    conceal: bool | None = None,
+    strike: bool | None = None,
+    underline2: bool | None = None,
+    frame: bool | None = None,
+    encircle: bool | None = None,
+    overline: bool | None = None,
+) -> StyleKwargs:
+    """Returns a StyleKwargs dictionary with autocompletion."""
+
+    kwargs = {k: v for k, v in locals().items() if v is not None}
+
+    return cast(StyleKwargs, kwargs)
+
 @main_process_only
 def rich_print(
     _object,
@@ -327,13 +629,32 @@ def rich_print(
     max_string: int | None = None,
     max_depth: int | None = None,
     expand_all: bool = False,
-    style: str = "",
     indent_size: int = 4,
     justify: JustifyMethod | None = None,
     overflow: OverflowMethod | None = None,
     no_wrap: bool = False,
     margin: int = 0,
     insert_line: bool = False,
+    is_json: bool|None = None,
+
+    color: RichColors | None = None,
+    bgcolor: RichColors | None = None,
+
+    # boolean attributes
+    bold: bool | None = None,
+    dim: bool | None = None,
+    italic: bool | None = None,
+    underline: bool | None = None,
+    blink: bool | None = None,
+    blink2: bool | None = None,
+    reverse: bool | None = None,
+    conceal: bool | None = None,
+    strike: bool | None = None,
+    underline2: bool | None = None,
+    frame: bool | None = None,
+    encircle: bool | None = None,
+    overline: bool | None = None,
+
     is_main_process: bool | None = None,
 ):
     """Print with rich styling (main process only)."""
@@ -341,7 +662,28 @@ def rich_print(
     cons = console if console is not None else _console
 
     if isinstance(_object, str):
-        cons.print(_object, style=style)
+        if is_json:
+            cons.print_json(_object)
+        else:
+            style_kwargs = build_rich_style_kwargs(
+                color=color,
+                bgcolor=bgcolor,
+                bold=bold,
+                dim=dim,
+                italic=italic,
+                underline=underline,
+                blink=blink,
+                blink2=blink2,
+                reverse=reverse,
+                conceal=conceal,
+                strike=strike,
+                underline2=underline2,
+                frame=frame,
+                encircle=encircle,
+                overline=overline
+            )
+            style: Style | None = Style(**style_kwargs) if style_kwargs else None
+            cons.print(_object, style=style)
     else:
         pretty_obj = build_pretty_renderable(
             _object, 
@@ -376,7 +718,6 @@ def rich_exception(is_main_process: bool | None = None, show_locals: bool=False)
             "[yellow]Warning: rich_exception called outside except block[/yellow]"
         )
 
-
 @main_process_only
 def rich_rule(
     title: str = "",
@@ -384,7 +725,7 @@ def rich_rule(
     is_main_process: bool | None = None,
 ):
     """Print a horizontal rule (main process only)."""
-    # print("\n")
+    print()
     _console.rule(title, style=style, align="center")
 
 
@@ -525,8 +866,7 @@ def rich_status(description: str, spinner: str = "clock"):
             raise
 
 
-@main_process_only
-def display_env_info(parser: ArgumentParser, args: Namespace):
+def get_env_info(parser: ArgumentParser, args: Namespace) -> list[Table]:
     # env settings
     cpus_allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
     accelerator = get_accelerator_config()
@@ -547,7 +887,7 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
     else:
         data["DEEPSPEED"] = "DISABLED"
 
-    acc = build_table(
+    acc: Table = build_table(
         data=data, title="Meta information", columns=["Parameter", "Value"]
     )
 
@@ -588,13 +928,8 @@ def display_env_info(parser: ArgumentParser, args: Namespace):
             for action in group._group_actions
         }
 
-    cli = build_table(
+    cli: Table = build_table(
         data=custom_args, title="CLI arguments", columns=["Name", "Value"]
     )
-    rich_rule(style="royal_blue1")
-    rich_panel(
-        tables=[acc, cli],
-        panel_title="Run settings",
-        border_style="royal_blue1",
-    )
-    rich_rule()
+
+    return [acc, cli]

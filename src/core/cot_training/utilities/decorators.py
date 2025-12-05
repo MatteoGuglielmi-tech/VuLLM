@@ -1,13 +1,16 @@
 import functools
-import inspect 
+import inspect
 
-from typing import Callable
+from typing import TypeVar, ParamSpec, Callable
 from inspect import Signature, BoundArguments
 
 from .detection import is_main_process
 
+P = ParamSpec("P")
+R = TypeVar("R")
 
-def main_process_only(func: Callable) -> Callable:
+
+def main_process_only(func: Callable[P, R]) -> Callable[P, R | None]:
     """Decorator to only execute function on main process.
 
     Automatically detects main process, but allows override via
@@ -37,14 +40,14 @@ def main_process_only(func: Callable) -> Callable:
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
         sig: Signature = inspect.signature(func)
         bound_args: BoundArguments = sig.bind(*args, **kwargs)
         bound_args.apply_defaults()
 
         # check if explicit
         is_main: bool | None = bound_args.arguments.get("is_main_process")
-        if is_main is None: # auto-detect and cache
+        if is_main is None:  # auto-detect and cache
             is_main = is_main_process()
 
         if not is_main:

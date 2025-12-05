@@ -1,17 +1,16 @@
 import logging
 import random
-import json
 
-from typing import TypedDict
+from typing import TypedDict, cast
 from pathlib import Path
 from dataclasses import dataclass
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset, DatasetDict
 from collections import defaultdict
 
-
-from .prompt_config import Message, VulnInfo, ResponseStruct, VulnerabilityPromptConfig
-from ..utilities import rich_table, is_main_process
+from .prompt_config import Message, VerdictStruct, VulnInfo, ExpectedModelResponse, VulnerabilityPromptConfig
+from ..utilities import rich_table, is_main_process, load_dataset_from_disk
+from .datatypes import ReasoningSample
 
 logger = logging.getLogger(name=__name__)
 
@@ -67,15 +66,24 @@ class DatasetHandler:
                 "test_size and val_size must be floats between 0 and 1, and their sum must be less than 1."
             )
 
-        logger.info("⚙️ Loading dataset... ⚙️")
+        logger.info("⏬ Loading dataset...")
         full_dataset = load_dataset("json", data_files=self.dataset_path, split="train")
+        raw_unique_keys = set(cast(list[str], full_dataset.column_names))
+        try:
+            full_dataset = full_dataset.remove_columns(
+                column_names=list(
+                    raw_unique_keys - set(ReasoningSample.required_keys())
+                )
+            )
+        except:
+            pass
 
-        logger.info("📊 Analyzing label distribution per project for stratification... 📊")
+        logger.info("📊 Analyzing label distribution per project for stratification...")
 
         project_stats = defaultdict(lambda: {"vulnerable": 0, "clean": 0})
         for example in full_dataset:
-            project = example["project"]
-            if example["target"] == 1:
+            project = example["project"]  # type: ignore
+            if example["target"] == 1:  # type: ignore
                 project_stats[project]["vulnerable"] += 1
             else:
                 project_stats[project]["clean"] += 1
@@ -125,7 +133,7 @@ class DatasetHandler:
 
             return vuln_diff + clean_diff
 
-        logger.info("✂️ Performing label-balanced project-based split... ✂️")
+        logger.info("🔪 Performing label-balanced project-based split...")
 
         for project, vuln_count, clean_count in projects_with_stats:
             # Calculate imbalance for each split if we add this project
@@ -211,9 +219,9 @@ class DatasetHandler:
         val_vuln, val_clean = _count_labels(val_dataset)
         test_vuln, test_clean = _count_labels(test_dataset)
 
-        train_split_len = len(train_dataset)
-        val_split_len = len(val_dataset)
-        test_split_len = len(test_dataset)
+        train_split_len = len(train_dataset)  # type: ignore
+        val_split_len = len(val_dataset)  # type: ignore
+        test_split_len = len(test_dataset)  # type: ignore
         data = {
             "Training": [
                 train_split_len, train_vuln, train_clean,
@@ -231,6 +239,7 @@ class DatasetHandler:
                 test_clean / test_split_len * 100,
             ],
         }
+
         rich_table(
             data=data,
             title="✅ Label-balanced project-based split done.",
@@ -239,9 +248,9 @@ class DatasetHandler:
 
         return DatasetDict(
             {
-                "train": train_dataset,
-                "validation": val_dataset,
-                "test": test_dataset,
+                "train": train_dataset,  # type: ignore
+                "validation": val_dataset,  # type: ignore
+                "test": test_dataset,  # type: ignore
             }
         )
 
@@ -284,24 +293,27 @@ class DatasetHandler:
                     )
 
                     vulnerabilities.append(
-                        {"cwe_id": cwe_id, "description": description}
+                        VulnInfo(cwe_id=cwe_id, description=description)
                     )
 
                 except ValueError:
                     logger.exception(f"Error parsing for CWE '{cwe}`")
                     continue
 
+
         # build structured response matching prompt schema
-        response_data: ResponseStruct = {
-            "reasoning": example["reasoning"].strip(),
-            "vulnerabilities": vulnerabilities,
-            "verdict": {"is_vulnerable": bool(example["target"]), "cwe_list": cwe_list},
-        }
+        response_data: ExpectedModelResponse = ExpectedModelResponse(
+            reasoning=example["reasoning"].strip(),
+            vulnerabilities=vulnerabilities,
+            verdict=VerdictStruct(
+                is_vulnerable=bool(example["target"]), cwe_list=cwe_list
+            ),
+        )
 
         # convert to formatted JSON
-        ground_truth: str = json.dumps(response_data, indent=2, ensure_ascii=False)
         messages = self.prompt_config.as_messages(
-            func_code=example["func"], ground_truth=ground_truth
+            func_code=example["func"],
+            ground_truth=response_data.model_dump_json(indent=2, ensure_ascii=False),
         )
 
         return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
@@ -319,7 +331,7 @@ class DatasetHandler:
         DatasetDict
             A new DatasetDict whose entires are formatted and tokenized
         """
-        logger.info("🥼 Formatting train and validation splits with Chain-of-Thought template... 🥼")
+        logger.info("💱 Formatting train and validation splits with Chain-of-Thought template...")
 
         formatted_splits = DatasetDict()
 
@@ -359,6 +371,9 @@ class DatasetHandler:
         )
 
     def run_pipeline(self) -> DatasetDict:
+        if self.formatted_dataset_dir.exists() and any(self.formatted_dataset_dir.iterdir()):  # pre-computed splits
+            return load_dataset_from_disk(input_dir=self.formatted_dataset_dir)
+
         dataset_dict: DatasetDict = self.load_and_split_dataset()
         formatted_dataset_dict: DatasetDict = self.format_dataset(dataset_dict=dataset_dict)
 

@@ -1,6 +1,6 @@
 import logging
 
-from typing import Optional
+from typing import overload
 from pathlib import Path
 from datasets import DatasetDict, Dataset, load_from_disk
 
@@ -41,8 +41,22 @@ def save_dataset(
     logger.info(msg)
 
 
-def load_dataset(
-    input_dir: Path, split_name: str = "train", full_dict: Optional[bool] = None
+@overload
+def load_dataset_from_disk(
+    input_dir: Path,
+    split_name: None = None,
+) -> DatasetDict: ...
+
+
+@overload
+def load_dataset_from_disk(
+    input_dir: Path,
+    split_name: str,
+) -> Dataset: ...
+
+
+def load_dataset_from_disk(
+    input_dir: Path, split_name: str | None = None
 ) -> Dataset | DatasetDict:
     """Load evaluation results from disk.
     Dataset needs to be previously saved via [~utilities.disk.save_dataset].
@@ -51,10 +65,8 @@ def load_dataset(
     ----------
     input_dir : Path
         Directory to load from
-    split_name : str
-        Name of the split to load
-    full_dict: bool, optional, default=None
-        Load dataset as DatasetDict instance
+    split_name : str, optional (default=None)
+        Name of the split to load, when None, it loads all splits
 
     Returns
     -------
@@ -68,14 +80,13 @@ def load_dataset(
 
     loaded: Dataset | DatasetDict = load_from_disk(dataset_path=input_dir)
 
-    if isinstance(loaded, DatasetDict):
-        if full_dict is not None:
-            return loaded  # DatasetDict
-        elif split_name not in loaded:
-            raise KeyError(
-                f"`{split_name}` split not found. Available: {list(loaded.keys())}"
-            )
-        return loaded[split_name]  # Dataset
+    if isinstance(loaded, Dataset):
+        return loaded # Dataset
 
-    elif isinstance(loaded, Dataset):
-        return loaded  # Dataset
+    if split_name is None:
+        return loaded  # DatasetDict
+    elif split_name not in loaded:
+        raise KeyError(f"`{split_name}` split not found. Available: {list(loaded.keys())}")
+
+    return loaded[split_name]  # Dataset
+

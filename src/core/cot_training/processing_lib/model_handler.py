@@ -43,31 +43,6 @@ class ModelHandler:
     def __post_init__(self) -> None:
         self._validate_inputs()
 
-        data = {
-            "Max sequence length": self.max_seq_length,
-            "RsLoRA enabled?" : self.use_rslora,
-            "LoftQ enabled?" : self.use_loftq,
-        }
-        rich_table(
-            data=data,
-            title=f"🔧 Initializing {self.base_model_name} with:",
-            columns=["Hyperparameter", "Value"],
-        )
-
-        data = {
-            "LoRA rank": self.lora_r,
-            "LoRA alpha": self.lora_alpha,
-            "LoRA dropout": self.lora_dropout,
-            "Chat template": self.chat_template
-        }
-        rich_table(
-            data=data,
-            title="🩹 Patching model with:",
-            columns=["Hyperparameter", "Value"],
-        )
-
-        del data
-
     def _validate_inputs(self):
         """Validate constructor inputs."""
 
@@ -101,8 +76,10 @@ class ModelHandler:
             logger.info(f"📍 Set padding_side='right' for encoder-decoder model ({model_type})")
 
         # ensure pad token exists
-        if self.tokenizer.pad_token is None:
+        if not (self.tokenizer.pad_token or self.tokenizer.pad_token_id):
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
             logger.info(f"🔧 Set pad_token to eos_token: {self.tokenizer.eos_token}")
 
     def _configure_tokenizer(self):
