@@ -6,7 +6,7 @@ Analyses the token distribution when applying the prompt to evaluate CoT quality
 from transformers import PreTrainedTokenizer
 
 from .base import BaseSequenceLengthAnalyzer
-from ..datatypes import ReasoningSample
+from ..datatypes import Sample
 
 
 class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
@@ -85,28 +85,28 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
     def __init__(self, tokenizer: PreTrainedTokenizer):
         super().__init__(tokenizer)
 
-    def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
+    def format_sample(self, sample: Sample) -> tuple[str, str, str]:
         """Create prompt for judging reasoning quality"""
 
         cwe_info = (
-            "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample.cwe, sample.cwe_desc)])
-            if bool(sample.target)
+            "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample["cwe"], sample["cwe_descs"])])
+            if bool(sample["target"])
             else "None"
         )
 
         prompt = self.PROMPT_SKELETON.format(
-            project=sample.project,
-            target=sample.target,
+            project=sample["project"],
+            target=sample["target"],
             cwe_info=cwe_info,
-            func=sample.func,
-            reasoning=sample.reasoning,
+            func=sample["func"],
+            reasoning=sample.get("reasoning", ""),
         )
 
         no_answer_field_here: str = ""
 
         return self.SYSTEM_PROMPT, prompt, no_answer_field_here
 
-    def count_tokens_for_sample(self, sample: ReasoningSample) -> int:
+    def count_tokens_for_sample(self, sample: Sample) -> int:
         system_content, user_content, _ = self.format_sample(sample)
 
         full_convo = [

@@ -1,19 +1,13 @@
-from dataclasses import dataclass
-from typing import Any
+from typing import NotRequired, TypedDict, TypeAlias
 
-ReasoningSampleDict = dict[str, Any]
+CWEId: TypeAlias = int
+UniqueCWEs: TypeAlias = set[int]
 
-@dataclass
-class ReasoningSample:
-    """Container for reasoning samples"""
 
-    project: str
-    cwe: list[str]
-    target: int
+class Sample(TypedDict):
     func: str
-    cwe_desc: list[str]
-    reasoning: str
-
-    @property
-    def to_dict(self) -> ReasoningSampleDict:
-        return self.__dict__
+    target: int
+    cwe: list[str]
+    cwe_descs: list[str]
+    project: str
+    reasoning: NotRequired[str]

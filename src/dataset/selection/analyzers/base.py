@@ -4,13 +4,12 @@ import numpy as np
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from torch import t
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 from transformers import PreTrainedTokenizer
 
-from ..utilities import iter_jsonl_samples, rich_progress
-from ..datatypes import ReasoningSample
+from ..utilities import read_and_parse_lines, rich_progress
+from ..datatypes import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class StatsRecord:
     max_token_length: int = 0
     running_tokens: list[int] = field(default_factory=list)
 
-    def add_sample(self, sample: ReasoningSample, total_tokens: int):
+    def add_sample(self, sample: Sample, total_tokens: int):
         self.record[self.index] = {"sample": sample, "tokens": total_tokens}
         self.running_tokens.append(total_tokens)
         self.index += 1
@@ -147,7 +146,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         self.tokenizer = tokenizer
 
     @abstractmethod
-    def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
+    def format_sample(self, sample: Sample) -> tuple[str, str, str]:
         """Format a dataset entry into system, user, and assistant messages.
 
         Returns
@@ -158,7 +157,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def count_tokens_for_sample(self, sample: ReasoningSample) -> int:
+    def count_tokens_for_sample(self, sample: Sample) -> int:
         """Count tokens for each component of a sample.
 
         Returns
@@ -199,7 +198,7 @@ class BaseSequenceLengthAnalyzer(ABC):
             total_lines = sum(1 for _ in f)
 
         for sample in tqdm(
-            iter_jsonl_samples(jsonl_path=jsonl_path),
+            read_and_parse_lines(input_fp=jsonl_path),
             total=total_lines,
             desc="Analyzing samples",
         ):

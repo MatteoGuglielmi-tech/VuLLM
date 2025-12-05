@@ -5,17 +5,23 @@ import logging
 from pathlib import Path
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
-from src.dataset.selection.utilities.utils import build_table, rich_panel
-
-
-from .datatypes import ReasoningSampleDict
-from .utilities import rich_status, rich_progress, rich_rule, iter_jsonl_samples
+from .datatypes import Sample
 from .analyzers import BaseSequenceLengthAnalyzer, StatsRecord
+from .utilities import (
+    rich_status,
+    rich_progress,
+    rich_rule,
+    build_table,
+    rich_panel,
+    read_and_parse_lines,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def separate_targets(jsonl_path: Path, output_dir: Path, save_interval: int = 100, force: bool=False):
+def separate_targets(
+    jsonl_path: Path, output_dir: Path, save_interval: int = 100, force: bool = False
+):
     """Split vulnerable and safe entries into separate files.
 
     Parameters
@@ -29,14 +35,15 @@ def separate_targets(jsonl_path: Path, output_dir: Path, save_interval: int = 10
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    vul_batch: list[ReasoningSampleDict] = []
-    safe_batch: list[ReasoningSampleDict] = []
+    vul_batch: list[Sample] = []
+    safe_batch: list[Sample] = []
 
     vul_count: int = 0
     safe_count: int = 0
 
     vulpath: Path = output_dir / "vulnearble.jsonl"
     safepath: Path = output_dir / "safe.jsonl"
+    mergepath: Path = output_dir / "complete.jsonl"
 
     with open(file=jsonl_path, mode="r", encoding="utf-8") as f:
         total_lines = sum(1 for _ in f)
@@ -48,29 +55,37 @@ def separate_targets(jsonl_path: Path, output_dir: Path, save_interval: int = 10
         with (
             jsonlines.open(file=vulpath, mode="w") as vul_writer,
             jsonlines.open(file=safepath, mode="w") as safe_writer,
+            jsonlines.open(file=mergepath, mode="w") as writer,
         ):
             for sample in rich_progress(
-                iter_jsonl_samples(jsonl_path=jsonl_path),
+                read_and_parse_lines(input_fp=jsonl_path),
                 total=total_lines,
                 description="🗡️ Separating concerns 🗡️",
             ):
-                if sample.target == 1:
+                if sample["target"] == 1 and sample["cwe"]:
                     vul_count += 1
-                    vul_batch.append(sample.to_dict)
+                    vul_batch.append(sample)
                     if len(vul_batch) % save_interval == 0:
                         vul_writer.write_all(vul_batch)
+                        writer.write_all(vul_batch)
                         vul_batch.clear()
-                elif sample.target == 0:
-                    safe_batch.append(sample.to_dict)
+                elif sample["target"] == 0:
+                    sample["cwe"] = []
+                    safe_batch.append(sample)
                     safe_count += 1
                     if len(safe_batch) % save_interval == 0:
                         safe_writer.write_all(safe_batch)
+                        writer.write_all(safe_batch)
                         safe_batch.clear()
+                else:
+                    continue
 
             if vul_batch:
                 vul_writer.write_all(vul_batch)
+                writer.write_all(safe_batch)
             if safe_batch:
                 safe_writer.write_all(safe_batch)
+                writer.write_all(safe_batch)
 
     except (IOError, OSError):
         logger.exception("❌ Failed during vulnerability isolation ❌")
@@ -96,7 +111,9 @@ def _analyze_single_tokenizer(
 
     try:
         with rich_status(description=f"Loading tokenizer..."):
-            tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_name
+            )
 
         with rich_status(description=f"📊 Initializing analyzer"):
             analyzer = analyzer_type(tokenizer=tokenizer)
@@ -110,12 +127,12 @@ def _analyze_single_tokenizer(
 
 
 def analyze_filter_and_save(
-    dataset_path: Path, 
+    dataset_path: Path,
     analyzer_type: type[BaseSequenceLengthAnalyzer],
     tokenizer_name: str,
     n_samples: int,
     output_dir: Path,
-    filename: str
+    filename: str,
 ):
     stats = _analyze_single_tokenizer(
         dataset_path, analyzer_type=analyzer_type, tokenizer_name=tokenizer_name
