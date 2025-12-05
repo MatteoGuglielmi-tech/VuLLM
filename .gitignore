@@ -36,13 +36,21 @@ src/core/cot/assessment/assets/
 
 src/core/cot/generation/__pycache__/
 src/core/cot/generation/llm_clients/__pycache__/
+src/core/cot/generation/test.py
+src/core/cot/generation/todo.md
 
 # src/core/cot_training/
 src/core/cot_training/__pycache__/
 src/core/cot_training/todo.md
+src/core/cot_training/processing_lib/inference_legacy.py
 src/core/cot_training/processing_lib/unused/
 src/core/cot_training/run/
 
+src/core/cot_training_before_json
+src/core/cot_training_hybrid
+src/core/cot_training_no_reasoning
+src/core/cot_training_reasoning_in_json_no_vulnerabilities
+src/core/cot_training_reasoning_in_prompt_internalize_in_inference
 
 # src/dataset/restructure
 # substituted by Rust pipeline
@@ -51,17 +59,16 @@ src/dataset/restructure
 # src/dataset/analysis
 src/dataset/analysis/analysis/run/
 src/dataset/analysis/distribution/assets
+src/dataset/analysis/distribution/mitre
 src/dataset/analysis/analysis/distribution/assets/
 src/dataset/analysis/sequence_length_analysis/__pycache__/
-src/dataset/analysis/sequence_length_analysis/results/assessment/selected/safe
-src/dataset/analysis/sequence_length_analysis/results/assessment/selected/vul
-!src/dataset/analysis/sequence_length_analysis/results/assessment/selected/safe/tokenizer_comparison.json
-!src/dataset/analysis/sequence_length_analysis/results/assessment/selected/vul/tokenizer_comparison.json
+src/dataset/analysis/sequence_length_analysis/results/
 
 # src/dataset/balance
 src/dataset/balance/__pycache__/
 src/dataset/balance/assets/
 
+src/dataset/selection_1
 
 ####### RUST #######
 rusty/target
