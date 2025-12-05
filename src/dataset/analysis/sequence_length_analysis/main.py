@@ -9,22 +9,28 @@ from .cli import get_parsed_args
 from .analyzer_wrapper import analyze_single_tokenizer, compare_tokenizers
 from .utilities import cleanup_resources
 
-install(show_locals=True)
+install(show_locals=False)
 
 
 logger = logging.getLogger(name=__name__)
-setup_logger()
-load_dotenv()
 
 if __name__ == "__main__":
-    logger.debug("🚀 Starting baseline... 🚀")
+    setup_logger()
+    load_dotenv()
     args = get_parsed_args()
+
+    logger.debug("🚀 Starting baseline... 🚀")
 
     try:
         if args.finetuning:
-            from .analyzers import FineTunePromptAnalyzer
+            if args.version == 1:
+                from .analyzers import FineTunePromptAnalyzer
 
-            analyzer_type = FineTunePromptAnalyzer
+                analyzer_type = FineTunePromptAnalyzer
+            elif args.version == 2:
+                from .analyzers import FineTunePromptAnalyzerV2
+
+                analyzer_type = FineTunePromptAnalyzerV2
         elif args.assessment:
             from .analyzers import JudgePromptAnalyzer
 
@@ -35,6 +41,7 @@ if __name__ == "__main__":
                 dataset_path=args.dataset,
                 analyzer_type=analyzer_type,
                 tokenizer_name=args.tokenizer,
+                chat_template=args.chat_template,
                 output_dir=args.output,
                 max_samples=args.max_samples,
             )
@@ -42,7 +49,7 @@ if __name__ == "__main__":
             compare_tokenizers(
                 dataset_path=args.dataset,
                 analyzer_type=analyzer_type,
-                tokenizer_names=args.tokenizers,
+                tokenizer_config=args.tokenizers,
                 output_dir=args.output,
                 max_samples=args.max_samples,
             )

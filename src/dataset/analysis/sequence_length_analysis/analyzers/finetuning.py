@@ -39,8 +39,8 @@ class FineTunePromptAnalyzer(BaseSequenceLengthAnalyzer):
         "**Reasoning:**\n"
     )
 
-    def __init__(self, tokenizer: PreTrainedTokenizer):
-        super().__init__(tokenizer)
+    def __init__(self, tokenizer: PreTrainedTokenizer, chat_template: str):
+        super().__init__(tokenizer, chat_template)
 
     def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
         user_content = self.PROMPT_SKELETON.format(func_code=sample.func)

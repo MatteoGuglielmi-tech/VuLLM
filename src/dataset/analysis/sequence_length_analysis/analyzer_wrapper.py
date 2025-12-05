@@ -1,3 +1,5 @@
+from .analyzers import BaseSequenceLengthAnalyzer
+
 import logging
 import json
 
@@ -5,7 +7,6 @@ from pathlib import Path
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from .utilities import rich_status, build_table, rich_panel, rich_rule
-from .analyzers import BaseSequenceLengthAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ def analyze_single_tokenizer(
     dataset_path: Path,
     analyzer_type: type[BaseSequenceLengthAnalyzer],
     tokenizer_name: str,
+    chat_template: str,
     output_dir: Path,
     max_samples: int | None = None,
 ):
@@ -25,7 +27,7 @@ def analyze_single_tokenizer(
             tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         with rich_status(description=f"📊 Initializing analyzer"):
-            analyzer = analyzer_type(tokenizer=tokenizer)
+            analyzer = analyzer_type(tokenizer=tokenizer, chat_template=chat_template)
 
         stats = analyzer.analyze_dataset(
             jsonl_path=dataset_path, max_samples=max_samples, output_dir=output_dir
@@ -41,16 +43,16 @@ def compare_tokenizers(
     dataset_path: Path,
     analyzer_type: type[BaseSequenceLengthAnalyzer],
     output_dir: Path,
-    tokenizer_names: list[str],
+    tokenizer_config: list[tuple[str,str]],
     max_samples: int | None = None,
 ):
     """Compare multiple tokenizers."""
 
-    logger.info(f"🔍 Comparing {len(tokenizer_names)} tokenizers")
+    logger.info(f"🔍 Comparing {len(tokenizer_config)} tokenizers")
 
     results = {}
 
-    for tokenizer_name in tokenizer_names:
+    for tokenizer_name, chat_template in tokenizer_config:
         tokenizer_output_dir = output_dir / tokenizer_name.replace("/", "_")
 
         try:
@@ -58,6 +60,7 @@ def compare_tokenizers(
                 dataset_path=dataset_path,
                 analyzer_type=analyzer_type,
                 tokenizer_name=tokenizer_name,
+                chat_template=chat_template,
                 output_dir=tokenizer_output_dir,
                 max_samples=max_samples,
             )

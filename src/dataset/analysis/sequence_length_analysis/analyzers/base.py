@@ -1,3 +1,5 @@
+from unsloth import get_chat_template
+
 import json
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,9 +7,8 @@ import seaborn as sns
 import logging
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 from pathlib import Path
-from collections.abc import Generator
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 from transformers import PreTrainedTokenizer
@@ -85,8 +86,15 @@ class TokenStats:
 class BaseSequenceLengthAnalyzer(ABC):
     """Base class for analyzing token distribution in datasets."""
 
-    def __init__(self, tokenizer: PreTrainedTokenizer):
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        chat_template: str,
+        entry_keys: list[str] | None = None,
+    ):
         self.tokenizer = tokenizer
+        self.tokenizer = get_chat_template(self.tokenizer, chat_template=chat_template)
+        self.entry_keys = entry_keys or ReasoningSample.required_keys()
 
     @abstractmethod
     def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
@@ -110,7 +118,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         """
         pass
 
-    def stream_jsonl(self, filepath: Path) -> Generator[dict[str, Any], None, None]:
+    def stream_jsonl(self, filepath: Path) -> Iterator[dict[str, Any]]:
         """Memory-efficient JSONL streaming.
 
         Parameters
@@ -174,10 +182,13 @@ class BaseSequenceLengthAnalyzer(ABC):
         with open(jsonl_path, mode="r") as f:
             total_lines = sum(1 for _ in f)
 
-        for entry in tqdm(self.stream_jsonl(jsonl_path), total=total_lines, desc="Analyzing samples"):
+        for entry in tqdm(
+            self.stream_jsonl(jsonl_path), total=total_lines, desc="Analyzing samples"
+        ):
             if max_samples and sample_count >= max_samples:
                 break
 
+            entry = {k: v for k, v in entry.items() if k in self.entry_keys}
             sample = ReasoningSample(**entry)
             try:
                 token_counts = self.count_tokens_for_sample(sample)
@@ -215,16 +226,25 @@ class BaseSequenceLengthAnalyzer(ABC):
     def _generate_plots(self, stats: TokenStats, output_dir: Path):
         """Generate comprehensive visualizations."""
 
-        with Loader("📊 Generating plots...", f"✅ All plots saved to {output_dir}", logger=logger):
-            self._plot_distribution(data=stats.total_tokens, title="Distribution of Total Sequence Length",
-                xlabel="Total Tokens", output_path=output_dir / "total_tokens_distribution.png",
+        with Loader(
+            "📊 Generating plots...",
+            f"✅ All plots saved to {output_dir}",
+            logger=logger,
+        ):
+            self._plot_distribution(
+                data=stats.total_tokens,
+                title="Distribution of Total Sequence Length",
+                xlabel="Total Tokens",
+                output_path=output_dir / "total_tokens_distribution.png",
             )
             self._plot_component_breakdown(stats, output_dir / "component_breakdown.png")
             self._plot_cumulative_distribution(stats.total_tokens, output_path=output_dir / "cumulative_distribution.png")
             self._plot_truncation_impact(stats.total_tokens, output_path=output_dir / "truncation_impact.png")
-            self._plot_component_correlation( stats, output_dir / "component_correlation.png")
+            self._plot_component_correlation(stats, output_dir / "component_correlation.png")
 
-    def _plot_distribution(self, data: list[int], title: str, xlabel: str, output_path: Path):
+    def _plot_distribution(
+        self, data: list[int], title: str, xlabel: str, output_path: Path
+    ):
         """Plot histogram with statistics overlay."""
 
         _, ax = plt.subplots(figsize=(12, 6))
@@ -235,10 +255,34 @@ class BaseSequenceLengthAnalyzer(ABC):
         p95_val = np.percentile(data, 95).astype(np.float64)
         p99_val = np.percentile(data, 99).astype(np.float64)
 
-        ax.axvline(mean_val, color="red", linestyle="--", linewidth=2, label=f"Mean: {mean_val:.0f}")
-        ax.axvline(median_val, color="green", linestyle="--", linewidth=2, label=f"Median: {median_val:.0f}")
-        ax.axvline(p95_val, color="orange", linestyle="--", linewidth=2, label=f"95th percentile: {p95_val:.0f}")
-        ax.axvline(p99_val, color="purple", linestyle="--", linewidth=2, label=f"99th percentile: {p99_val:.0f}")
+        ax.axvline(
+            mean_val,
+            color="red",
+            linestyle="--",
+            linewidth=2,
+            label=f"Mean: {mean_val:.0f}",
+        )
+        ax.axvline(
+            median_val,
+            color="green",
+            linestyle="--",
+            linewidth=2,
+            label=f"Median: {median_val:.0f}",
+        )
+        ax.axvline(
+            p95_val,
+            color="orange",
+            linestyle="--",
+            linewidth=2,
+            label=f"95th percentile: {p95_val:.0f}",
+        )
+        ax.axvline(
+            p99_val,
+            color="purple",
+            linestyle="--",
+            linewidth=2,
+            label=f"99th percentile: {p99_val:.0f}",
+        )
 
         ax.set_xlabel(xlabel, fontsize=12)
         ax.set_ylabel("Frequency", fontsize=12)
@@ -255,7 +299,12 @@ class BaseSequenceLengthAnalyzer(ABC):
 
         _, ax = plt.subplots(figsize=(12, 6))
 
-        data_to_plot = [ stats.user_tokens, stats.reasoning_tokens, stats.answer_tokens, stats.total_tokens ]
+        data_to_plot = [
+            stats.user_tokens,
+            stats.reasoning_tokens,
+            stats.answer_tokens,
+            stats.total_tokens,
+        ]
         labels = ["User\nPrompt", "Reasoning", "Answer", "Total"]
 
         bp = ax.boxplot(
@@ -277,7 +326,14 @@ class BaseSequenceLengthAnalyzer(ABC):
 
         for i, data in enumerate(data_to_plot, start=1):
             mean_val = np.mean(data).astype(np.float64)
-            ax.text(i, mean_val, f"{mean_val:.0f}", ha="center", va="bottom", fontweight="bold")
+            ax.text(
+                i,
+                mean_val,
+                f"{mean_val:.0f}",
+                ha="center",
+                va="bottom",
+                fontweight="bold",
+            )
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -297,7 +353,9 @@ class BaseSequenceLengthAnalyzer(ABC):
             val = np.percentile(data, percentile).astype(np.float64)
             ax.axvline(val, color="red", linestyle="--", alpha=0.5)
             ax.axhline(percentile, color="red", linestyle="--", alpha=0.5)
-            ax.text(val, percentile + 2, f"{percentile}th: {val:.0f}", fontsize=9, ha="left")
+            ax.text(
+                val, percentile + 2, f"{percentile}th: {val:.0f}", fontsize=9, ha="left"
+            )
 
         ax.set_xlabel("Sequence Length (tokens)", fontsize=12)
         ax.set_ylabel("Cumulative Percentage (%)", fontsize=12)
@@ -437,13 +495,16 @@ class BaseSequenceLengthAnalyzer(ABC):
             "recommendations": [],
         }
 
-        # GPU tensor core alignment -> 5-10% faster training 
+        # GPU tensor core alignment -> 5-10% faster training
         # Flash Attention blocks -> Fewer partial blocks
         # Memory coalescing -> Better cache utilization
         cuda_performance_alignment: int = 512
 
         # Conservative (cover 95% of samples)
-        rec_95 = int(np.ceil(total_stats["p95"] /  cuda_performance_alignment) * cuda_performance_alignment)
+        rec_95 = int(
+            np.ceil(total_stats["p95"] / cuda_performance_alignment)
+            * cuda_performance_alignment
+        )
         truncated_95 = 5.0  # By definition
         recommendations["recommendations"].append(
             {
@@ -456,7 +517,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         )
 
         # Balanced (cover 99% of samples)
-        rec_99 = int(np.ceil(total_stats["p99"] / cuda_performance_alignment) * cuda_performance_alignment)
+        rec_99 = int(
+            np.ceil(total_stats["p99"] / cuda_performance_alignment)
+            * cuda_performance_alignment
+        )
         truncated_99 = 1.0
         recommendations["recommendations"].append(
             {
@@ -469,7 +533,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         )
 
         # Comprehensive (cover all samples)
-        rec_max = int(np.ceil(total_stats["max"] / cuda_performance_alignment) * cuda_performance_alignment)
+        rec_max = int(
+            np.ceil(total_stats["max"] / cuda_performance_alignment)
+            * cuda_performance_alignment
+        )
         recommendations["recommendations"].append(
             {
                 "strategy": "Comprehensive (cover 100%)",
@@ -514,9 +581,9 @@ class BaseSequenceLengthAnalyzer(ABC):
                 "Max seq length": rec["max_seq_length"],
                 "Truncated": trunc_pct,
                 "Description": rec["description"],
-                "Recommended?": rec["recommended"]
+                "Recommended?": rec["recommended"],
             }
-            tables.append(build_table(data=d, columns=["Info","Value"]))
+            tables.append(build_table(data=d, columns=["Info", "Value"]))
 
         rich_panel(
             tables,

@@ -82,8 +82,8 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
         "- Output ONLY valid JSON, no additional text before or after"
     ).strip()
 
-    def __init__(self, tokenizer: PreTrainedTokenizer):
-        super().__init__(tokenizer)
+    def __init__(self, tokenizer: PreTrainedTokenizer, chat_template: str):
+        super().__init__(tokenizer, chat_template)
 
     def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
         """Create prompt for judging reasoning quality"""
