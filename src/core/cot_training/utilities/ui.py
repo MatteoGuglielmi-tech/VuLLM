@@ -239,6 +239,12 @@ class RichColors(StrEnum):
     GREY93 = "grey93"
 
 
+class Alignment(StrEnum):
+    """Alignment options for grid layout."""
+    LEFT = "left"
+    CENTER = "center"
+    RIGHT = "right"
+
 class StyleKwargs(TypedDict, total=False):
     color: RichColors | None
     bgcolor: RichColors | None
@@ -403,7 +409,7 @@ def build_panel(
     align: AlignMethod = "center",
     panel_padding: tuple = (1, 3),
     grid_padding: tuple = (1, 5),
-    panel_align: Literal["left", "center", "right"] = "center",
+    panel_align: Alignment | Literal["left", "center", "right"] = Alignment.CENTER,
     layout: Literal["vertical", "horizontal"] = "horizontal",
 ) -> Align:
     """Build table(s) in a panel.
@@ -515,7 +521,7 @@ def rich_panels_grid(
     panels: list[Panel] | list[Align],
     grid_shape: tuple[int, int] | None = None,
     grid_padding: tuple = (0, 2),
-    align: Literal["left", "center", "right"] = "center",
+    align: Alignment | Literal["left", "center", "right"] = Alignment.CENTER,
 ):
     """Arrange multiple panels in a grid.
 
