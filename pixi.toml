@@ -20,6 +20,7 @@ plotly = ">=6.3.0,<7"
 optuna = ">=4.5.0,<5"
 python-telegram-bot = ">=22.5,<23"
 outlines = ">=1.2.9,<2"
+matplotlib-venn = ">=1.1.2,<2"
 
 [pypi-dependencies]
 tiktoken = ">=0.11.0, <0.12"
