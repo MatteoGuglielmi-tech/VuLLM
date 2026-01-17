@@ -34,6 +34,8 @@ if __name__ == "__main__":
         match args.engine_name:
             case "gpt-4.1":
                 cot_generator = AzureCoTGenerator(deployment_name=args.deployment_name)
+            case "gtp-5-mini":
+                cot_generator = AzureCoTGenerator(deployment_name=args.deployment_name)
             case _:
                 raise ArgumentError(
                     argument=None, message="Invalid proprietary model specified"

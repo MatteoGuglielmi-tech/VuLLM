@@ -6,7 +6,7 @@ from typing import Any, Generator
 from tqdm import tqdm
 from dataclasses import dataclass
 
-from src.core.cot.generation.llm_clients.base import ReasoningGenerator
+from .llm_clients.base import ReasoningGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -51,13 +51,16 @@ class Reasoner:
                 chunk.append(line_obj)
                 if len(chunk) == self.batch_size:
                     # batch
-                    # reasonings = self.cot_generator.generate_reasoning(entries=chunk, batch_size=self.batch_size)
                     reasonings = self.cot_generator.generate_reasoning(
                         mini_batch=chunk,
                         max_completion_tokens=self.max_completion_tokens,
                     )
                     processed_chunk = [
-                        {**line, "reasoning": reasoning}
+                        {
+                            **line,
+                            "reasoning": reasoning["reasoning"],
+                            "verdict": reasoning["verdict"],
+                        }
                         for line, reasoning in zip(chunk, reasonings)
                     ]
                     writer.write_all(processed_chunk)

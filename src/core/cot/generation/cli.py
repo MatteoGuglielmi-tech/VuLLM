@@ -36,7 +36,7 @@ def get_parser():
     # --- Subparser for Proprietary models ---
     parser_prop = subparsers.add_parser("proprietary", help="Use a proprietary API-based model.")
     prop_group = parser_prop.add_argument_group("API Arguments")
-    prop_group.add_argument("--deployment_name", type=str, default="gpt-4.1", help="Name of the API deployment.")
+    prop_group.add_argument("--deployment_name", type=str, default="gpt", help="Name of the API deployment.")
     prop_group.add_argument("--engine_name", "-e", type=str, required=True, help="Name of the model engine.")
 
     return parser

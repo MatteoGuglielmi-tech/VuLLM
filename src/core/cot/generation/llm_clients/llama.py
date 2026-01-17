@@ -8,7 +8,7 @@ from typing import Any
 from transformers import BitsAndBytesConfig 
 
 from .base import ReasoningGenerator
-from src.core.cot.loader_config import Loader
+from ..loader_config import Loader
 
 
 
@@ -84,7 +84,45 @@ class LlamaCoTGenerator(ReasoningGenerator):
                 logger.critical(f"❌ Failed to load model: {e}")
                 raise e
 
-    def generate_reasoning(self, mini_batch: list[dict[str, Any]], max_completion_tokens: int) -> list[str]:
+    def build_cot_prompt(
+        self,
+        c_code: str,
+        is_vulnerable: bool,
+        cwe_ids: list[str] | None = None,
+        cwe_descs: list[str] | None = None,
+    ) -> dict[str, str]:
+        """
+        Build the structured prompt for CWE analysis.
+
+        Parameters
+        ----------
+        c_code : str
+            C code to analyze
+        is_vulnerable : bool
+            Whether the code is known to be vulnerable
+        cwe_ids : list[str] | None
+            List of CWE identifiers
+
+        Returns
+        -------
+        dict[str, str]
+            Dictionary with 'system' and 'user' prompt content
+        """
+        messages = self.prompt_template.build_messages(
+            func_code=c_code,
+            is_vulnerable=is_vulnerable,
+            cwe_ids=cwe_ids,
+            cwe_descs=cwe_descs,
+        )
+
+        return {
+            "system": messages[0]["content"],
+            "user": messages[1]["content"],
+        }
+
+    def generate_reasoning(
+        self, mini_batch: list[dict[str, Any]], max_completion_tokens: int
+    ) -> list[str]:
         if not mini_batch:
             logger.warning("Empty batch detected")
             return []
@@ -100,7 +138,7 @@ class LlamaCoTGenerator(ReasoningGenerator):
                 c_code=sample["func"],
                 is_vulnerable=bool(sample["target"]),
                 cwe_ids=sample["cwe"],
-                cwe_descriptions=sample["cwe_desc"],
+                cwe_descs=sample["cwe_desc"],
             )
 
             messages_batch.append([
