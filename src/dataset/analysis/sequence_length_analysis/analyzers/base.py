@@ -235,15 +235,37 @@ class BaseSequenceLengthAnalyzer(ABC):
                 data=stats.total_tokens,
                 title="Distribution of Total Sequence Length",
                 xlabel="Total Tokens",
-                output_path=output_dir / "total_tokens_distribution.png",
+                output_path=output_dir / "total_tokens_distribution.pdf",
+                format="pdf",
+                bbox_inches="tight",
             )
-            self._plot_component_breakdown(stats, output_dir / "component_breakdown.png")
-            self._plot_cumulative_distribution(stats.total_tokens, output_path=output_dir / "cumulative_distribution.png")
-            self._plot_truncation_impact(stats.total_tokens, output_path=output_dir / "truncation_impact.png")
-            self._plot_component_correlation(stats, output_dir / "component_correlation.png")
+            self._plot_component_breakdown(
+                stats,
+                output_path=output_dir / "component_breakdown.pdf",
+                format="pdf",
+                bbox_inches="tight",
+            )
+            self._plot_cumulative_distribution(
+                stats.total_tokens,
+                output_path=output_dir / "cumulative_distribution.pdf",
+                format="pdf",
+                bbox_inches="tight",
+            )
+            self._plot_truncation_impact(
+                stats.total_tokens,
+                output_path=output_dir / "truncation_impact.pdf",
+                format="pdf",
+                bbox_inches="tight",
+            )
+            self._plot_component_correlation(
+                stats,
+                output_dir / "component_correlation.pdf",
+                format="pdf",
+                bbox_inches="tight",
+            )
 
     def _plot_distribution(
-        self, data: list[int], title: str, xlabel: str, output_path: Path
+        self, data: list[int], title: str, xlabel: str, output_path: Path, **kwargs
     ):
         """Plot histogram with statistics overlay."""
 
@@ -252,8 +274,18 @@ class BaseSequenceLengthAnalyzer(ABC):
 
         mean_val = np.mean(data).astype(np.float64)
         median_val = np.median(data).astype(np.float64)
+        std_val = np.std(data).astype(np.float64)
         p95_val = np.percentile(data, 95).astype(np.float64)
         p99_val = np.percentile(data, 99).astype(np.float64)
+
+        # Add shaded region for +/- standard deviation
+        ax.axvspan(
+            mean_val - std_val,
+            mean_val + std_val,
+            alpha=0.2,
+            color="red",
+            label=f"\u00b1\u03C3: {std_val:.1f}"
+        )
 
         ax.axvline(
             mean_val,
@@ -291,10 +323,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, **kwargs)
         plt.close()
 
-    def _plot_component_breakdown(self, stats: TokenStats, output_path: Path):
+    def _plot_component_breakdown(self, stats: TokenStats, output_path: Path, **kwargs):
         """Box plot showing token distribution for each component."""
 
         _, ax = plt.subplots(figsize=(12, 6))
@@ -302,7 +334,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         data_to_plot = [
             stats.user_tokens,
             stats.reasoning_tokens,
-            stats.answer_tokens,
+            # stats.answer_tokens,
             stats.total_tokens,
         ]
         labels = ["User\nPrompt", "Reasoning", "Answer", "Total"]
@@ -336,10 +368,12 @@ class BaseSequenceLengthAnalyzer(ABC):
             )
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, **kwargs)
         plt.close()
 
-    def _plot_cumulative_distribution(self, data: list[int], output_path: Path):
+    def _plot_cumulative_distribution(
+        self, data: list[int], output_path: Path, **kwargs
+    ):
         """Plot cumulative distribution function."""
 
         _, ax = plt.subplots(figsize=(12, 6))
@@ -369,10 +403,10 @@ class BaseSequenceLengthAnalyzer(ABC):
         ax.set_ylim((0.0, 105.0))
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, **kwargs)
         plt.close()
 
-    def _plot_truncation_impact(self, data: list[int], output_path: Path):
+    def _plot_truncation_impact(self, data: list[int], output_path: Path, **kwargs):
         """Show impact of different max_seq_length values."""
 
         _, ax = plt.subplots(figsize=(12, 6))
@@ -416,10 +450,10 @@ class BaseSequenceLengthAnalyzer(ABC):
             )
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, **kwargs)
         plt.close()
 
-    def _plot_component_correlation(self, stats: TokenStats, output_path: Path):
+    def _plot_component_correlation(self, stats: TokenStats, output_path: Path, **kwargs):
         """Scatter plot showing correlation between components."""
 
         _, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -475,7 +509,7 @@ class BaseSequenceLengthAnalyzer(ABC):
         )
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path, **kwargs)
         plt.close()
 
     def _generate_recommendations(self, summary: dict, output_dir: Path):
