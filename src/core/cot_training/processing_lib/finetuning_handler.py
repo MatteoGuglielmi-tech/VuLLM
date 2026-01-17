@@ -2,6 +2,7 @@ from rich.table import Table
 from unsloth import is_bfloat16_supported
 from unsloth.chat_templates import train_on_responses_only
 
+from .datatypes import PromptPhase, AssumptionMode
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
@@ -11,6 +12,7 @@ import logging
 import os
 import gc
 import torch
+import wandb
 
 from transformers.tokenization_utils import PreTrainedTokenizer
 from trl.trainer.sft_config import SFTConfig
@@ -29,14 +31,15 @@ logger = logging.getLogger(name=__name__)
 
 
 class TrainingStrategy(StrEnum):
-    FAST = "fast"           # Quick iteration with early stopping
-    EXPLORE = "explore"     # Full warm restarts exploration
-    BALANCED = "balanced"   # Moderate approach
+    FAST = "fast"  # Quick iteration with early stopping
+    EXPLORE = "explore"  # Full warm restarts exploration
+    BALANCED = "balanced"  # Moderate approach
 
 
 @dataclass
 class StrategyConfig:
     """Configuration overrides for training strategies."""
+
     epochs: int
     lr_scheduler_type: str
     use_early_stopping: bool
@@ -54,6 +57,9 @@ class FineTuningHandler:
         dataset_path: str,
         formatted_dataset_dir: Path,
         num_cpus: int,
+        target_vulnerable_ratio: Optional[float],
+        prompt_mode: PromptPhase,
+        assumption_mode: AssumptionMode,
         # -- model loading --
         base_model_name: str,
         chat_template: str,
@@ -69,14 +75,12 @@ class FineTuningHandler:
         per_device_eval_batch_size: int,
         gradient_accumulation_steps: int,
         weight_decay: float,
-
         strategy: TrainingStrategy,
         epochs: Optional[int] = None,
         use_early_stopping: Optional[bool] = None,
         early_stopping_patience: Optional[int] = None,
-        early_stopping_threshold: Optional[float]= None,
+        early_stopping_threshold: Optional[float] = None,
         warmup_ratio: Optional[float] = None,
-
         logging_steps: int = 100,
         use_weighted_cot_trainer: bool = False,
         use_deepspeed: bool = False,
@@ -102,6 +106,15 @@ class FineTuningHandler:
 
         num_cpus: int
             Number of cpu processes available for this task
+
+        target_vulnerable_ratio: float, optional, default=None
+            Specifies whether to duplicate vulnearble samples if unbalance in SFT
+
+        prompt_mode: str
+            Ablation mode to use
+
+        assumption_mode: str
+            whether to add positive or negative assumptions (or none)
 
         base_model_name: str
             Name of the model to load (from huggingface or unsloth)
@@ -191,6 +204,9 @@ class FineTuningHandler:
         self.dataset_path = dataset_path
         self.formatted_dataset_dir = formatted_dataset_dir
         self.num_cpus = num_cpus
+        self.target_vulnerable_ratio = target_vulnerable_ratio
+        self.prompt_mode = prompt_mode
+        self.assumption_mode = assumption_mode
 
         self.model_loader_class = model_loader_class
         self.base_model_name = base_model_name
@@ -207,13 +223,14 @@ class FineTuningHandler:
         self.per_device_eval_batch_size = per_device_eval_batch_size
         self.gradient_accumulation_steps = gradient_accumulation_steps
 
+        self.strategy_name = strategy
         self.strategy_config = self._get_strategy_defaults(strategy)
         self.epochs = epochs if epochs is not None else self.strategy_config.epochs
         self.lr_scheduler_type = self.strategy_config.lr_scheduler_type
         self.use_early_stopping = (
             use_early_stopping
             if use_early_stopping is not None
-            else self.strategy_config.early_stopping_patience
+            else self.strategy_config.use_early_stopping
         )
         self.early_stopping_patience = (
             early_stopping_patience
@@ -226,7 +243,9 @@ class FineTuningHandler:
             else self.strategy_config.early_stopping_threshold
         )
         self.warmup_ratio = (
-            warmup_ratio if warmup_ratio is not None else self.strategy_config.warmup_ratio
+            warmup_ratio
+            if warmup_ratio is not None
+            else self.strategy_config.warmup_ratio
         )
 
         self.logging_steps = logging_steps
@@ -244,11 +263,17 @@ class FineTuningHandler:
             "Epochs": self.epochs,
             "LR scheduler": self.lr_scheduler_type,
             "Early stopping?": self.use_early_stopping,
-            "Early stopping patience": self.early_stopping_patience if self.use_early_stopping else "None",
-            "Early stopping threshold": self.early_stopping_threshold if self.use_early_stopping else "None",
+            "Early stopping patience": (
+                self.early_stopping_patience if self.use_early_stopping else "None"
+            ),
+            "Early stopping threshold": (
+                self.early_stopping_threshold if self.use_early_stopping else "None"
+            ),
             "Warm-up ratio (%)": self.warmup_ratio,
         }
-        tb = build_table(data=tb_dict, columns=["Parameter", "Value"], title="Fine-tuning strategy")
+        tb = build_table(
+            data=tb_dict, columns=["Parameter", "Value"], title="Fine-tuning strategy"
+        )
         return tb
 
     @staticmethod
@@ -291,7 +316,13 @@ class FineTuningHandler:
         history_dir: str = "./checkpoints"
 
         self.lora_best_model_dir: str = os.path.join(
-            history_dir, "best_model", self.base_model_name, f"{date}-{time}"
+            history_dir,
+            "best_model",
+            self.base_model_name,
+            self.prompt_mode,
+            self.assumption_mode,
+            date,
+            time
         )
         self.checkpoint_dir: str = os.path.join(history_dir, common_suffix)
         self.output_dir: str = os.path.join("./results", f"{model_id}_{date}_{time}")
@@ -312,72 +343,146 @@ class FineTuningHandler:
             tokenizer=tokenizer,
             num_cpus=self.num_cpus,
             debug_mode=self.debug,
+            prompt_mode=self.prompt_mode,
+            assumption_mode=self.assumption_mode
         )
-        self._dataset_dict = dataset_handler.run_pipeline()
+        self._dataset_dict = dataset_handler.run_pipeline(
+            target_vulnerable_ratio=self.target_vulnerable_ratio
+        )
 
         return self._dataset_dict
 
     def get_instruction_response_parts(self) -> tuple[str, str]:
-        """Automatically extract instruction and response parts from chat template.
-
+        """
+        Get instruction and response delimiters for train_on_responses_only.
+        
         Returns
         -------
         tuple[str, str]
             (instruction_part, response_part)
         """
+        model_name_lower = self.base_model_name.lower()
 
-        chat_template = cast(str, self.tokenizer.chat_template)
+        # DeepSeek uses ### format
+        if "deepseek" in model_name_lower:
+            logger.info("🎯 Using DeepSeek delimiters (### Instruction / ### Response)")
+            return ("### Instruction:\n", "### Response:\n")
 
+        # Try to detect from chat template
+        chat_template = getattr(self.tokenizer, "chat_template", "")
         if not chat_template:
             raise ValueError("Tokenizer has no chat template!")
-
-        patterns = {
-            # Llama 3+
-            "llama": (
-                "<|start_header_id|>user<|end_header_id|>\n\n",
-                "<|start_header_id|>assistant<|end_header_id|>\n\n",
-            ),
-            # Qwen 2.5
-            "qwen": (
-                "<|im_start|>user\n",
-                "<|im_start|>assistant\n",
-            ),
-            # ChatML (generic)
-            "chatml": (
-                "<|im_start|>user\n",
-                "<|im_start|>assistant\n",
-            ),
-            # Mistral
-            "mistral": (
-                "[INST]",
-                "[/INST]",
-            ),
-            # Zephyr
-            "zephyr": (
-                "<|user|>\n",
-                "<|assistant|>\n",
-            ),
-        }
 
         # Detect based on template content
         template_lower = chat_template.lower()
 
-        if "start_header_id" in template_lower:
-            return patterns["llama"]
-        elif "im_start" in template_lower or "qwen" in template_lower:
-            return patterns["qwen"]
-        elif "[inst]" in template_lower:
-            return patterns["mistral"]
-        elif "<|user|>" in template_lower:
-            return patterns["zephyr"]
-        else:
-            raise ValueError(
-                f"Could not detect chat template format. "
-                f"Please specify instruction_part and response_part manually.\n"
-                f"Template: {chat_template[:200]}"
+        # DeepSeek-style (### format)
+        if "### instruction" in template_lower and "### response" in template_lower:
+            logger.info("🎯 Detected ### format from template")
+            return ("### Instruction:\n", "### Response:\n")
+
+        # Llama 3+
+        elif "start_header_id" in template_lower:
+            logger.info("🎯 Detected Llama 3+ format from template")
+            return (
+                "<|start_header_id|>user<|end_header_id|>\n\n",
+                "<|start_header_id|>assistant<|end_header_id|>\n\n",
             )
 
-    def create_trainer_with_params(self) -> SFTTrainer|WeightedCoTTrainer:
+        # Llama 2 / Mistral
+        elif "[inst]" in template_lower:
+            logger.info("🎯 Detected Llama 2/Mistral format from template")
+            return ("[INST]", "[/INST]")
+
+        # Qwen / ChatML
+        elif "im_start" in template_lower or "qwen" in template_lower:
+            logger.info("🎯 Detected Qwen/ChatML format from template")
+            return ("<|im_start|>user\n", "<|im_start|>assistant\n")
+
+        # Zephyr / Phi
+        elif "<|user|>" in template_lower:
+            logger.info("🎯 Detected Zephyr/Phi format from template")
+            return ("<|user|>\n", "<|assistant|>\n")
+
+        # Gemma
+        elif "start_of_turn" in template_lower:
+            logger.info("🎯 Detected Gemma format from template")
+            return ("<start_of_turn>user\n", "<start_of_turn>model\n")
+
+        else:
+            raise ValueError(
+                f"Could not detect chat template format.\n"
+                f"Model: {self.base_model_name}\n"
+                f"Model type: {getattr(self.base_model.config, 'model_type', 'unknown')}\n" # type: ignore[reportAttributeAccessIssue]
+                f"Please specify instruction_part and response_part manually.\n\n"
+                f"Template (first 500 chars):\n{chat_template[:500]}"
+            )
+
+    def apply_response_only_training(self, trainer: SFTTrainer | WeightedCoTTrainer):
+        """
+        Apply train_on_responses_only to the trainer.
+
+        Automatically detects the correct delimiters based on the model.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            The trainer instance
+
+        Returns
+        -------
+        Trainer
+            Trainer with response-only training applied
+        """
+        instruction_part, response_part = self.get_instruction_response_parts()
+
+        logger.info(f"🎯 Applying train_on_responses_only")
+        logger.info(f"   Instruction delimiter: {repr(instruction_part)}")
+        logger.info(f"   Response delimiter: {repr(response_part)}")
+
+        trainer = train_on_responses_only(
+            trainer,
+            instruction_part=instruction_part,
+            response_part=response_part,
+            tokenizer=self.tokenizer,
+            num_proc=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)),
+        )
+
+        logger.info("✅ Response-only training applied")
+
+        return trainer
+
+    def wandb_init(self) -> None:
+        start_time = datetime.now().strftime("%b %d '%y %H:%M")
+        job_name = os.environ.get("SLURM_JOB_NAME", "unknown")
+        job_id = os.environ.get("SLURM_JOB_ID", "0")
+
+        wandb.init(
+            project="huggingface",
+            name=f"{self.base_model_name.split('/')[-1]}-{job_id}",
+            config={
+                "job_name": job_name,
+                "job_id": job_id,
+                "start_time": start_time,
+                "strategy": self.strategy_name,
+                "epochs": self.epochs,
+                "train_on_responses_only": True,
+                "use_early_stopping": self.use_early_stopping,
+                "early_stopping_patience": self.early_stopping_patience,
+                "early_stopping_threshold": self.early_stopping_threshold,
+                "warmup_ratio": self.warmup_ratio,
+                "best_model_directory": self.lora_best_model_dir,
+                "prompt_mode": self.prompt_mode,
+                "assumption_mode": self.assumption_mode,
+                "RsLora?": self.use_rslora,
+                "LoftQ?": self.use_loftq,
+            },
+        )
+
+    def wandb_close(self) -> None:
+        wandb.finish()
+
+    def create_trainer_with_params(self) -> SFTTrainer | WeightedCoTTrainer:
         """Create a new model and trainer with specific hyperparameters using your existing class."""
 
         model_loader = self.model_loader_class(
@@ -389,31 +494,33 @@ class FineTuningHandler:
             lora_dropout=self.lora_dropout,
             use_rslora=self.use_rslora,
             use_loftq=self.use_loftq,
-            use_deepspeed=self.use_deepspeed
+            use_deepspeed=self.use_deepspeed,
         )
 
         model_loader._load_base_model()
         model_loader.patch_model()  # LoRA patch
         model, self.tokenizer = model_loader.obtain_components()
 
-        dataset_dict: DatasetDict = self._prepare_dataset_with_tokenizer(tokenizer=self.tokenizer)
+        dataset_dict: DatasetDict = self._prepare_dataset_with_tokenizer(
+            tokenizer=self.tokenizer
+        )
 
         if is_main_process():
             print(f"📊 Model trainable parameters:")
             if hasattr(model, "print_trainable_parameters"):
-                model.print_trainable_parameters() # type: ignore
+                model.print_trainable_parameters()  # type: ignore
 
         sft_args: SFTConfig = self._ft_args(dataset_dict=dataset_dict)
         callbacks = self.get_callbacks()
 
         if not self.use_weighted_trainer:
             trainer = SFTTrainer(
-                model=model, # type: ignore
+                model=model,  # type: ignore
                 processing_class=self.tokenizer,
                 train_dataset=dataset_dict["train"],
                 eval_dataset=dataset_dict["validation"],
                 args=sft_args,
-                callbacks=callbacks
+                callbacks=callbacks,
             )
         else:
             trainer = WeightedCoTTrainer(
@@ -425,21 +532,10 @@ class FineTuningHandler:
                 reasoning_weight=1.0,
                 answer_weight=1.5,
                 answer_marker="Final Answer:",  # prompt-specific!
-                callbacks=callbacks
+                callbacks=callbacks,
             )
 
-        instruction_part, response_part = self.get_instruction_response_parts()
-        trainer = train_on_responses_only(
-            trainer,
-            instruction_part=instruction_part,
-            response_part=response_part,
-            tokenizer=self.tokenizer,
-            num_proc=int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
-        )
-
-        logger.info(f"✅ Trainer configured with response-only training")
-        logger.info(f"   Instruction marker: {instruction_part}")
-        logger.info(f"   Response marker: {response_part}")
+        trainer = self.apply_response_only_training(trainer=trainer)
 
         return cast(SFTTrainer, trainer)
 
@@ -475,7 +571,11 @@ class FineTuningHandler:
                 "Warmup ratio": f"{self.warmup_ratio} ({warmup_steps} steps)",
             }
             tb = build_table(data=tb_dict, columns=["Info", "Value"])
-            rich_panel(tb, panel_title="Training steps calculation", border_style="medium_spring_green")
+            rich_panel(
+                tb,
+                panel_title="Training steps calculation",
+                border_style="medium_spring_green",
+            )
             del tb_dict, tb
 
         return {
@@ -515,10 +615,14 @@ class FineTuningHandler:
                 "Target evals/epoch": evals_per_epoch,
                 "Eval steps": eval_steps,
                 "Actual evals/epoch": f"{actual_evals_per_epoch:.1f}",
-                "Total evaluations": int(actual_evals_per_epoch * self.epochs)
+                "Total evaluations": int(actual_evals_per_epoch * self.epochs),
             }
             tb = build_table(data=tb_dict, columns=["Info", "Value"])
-            rich_panel(tb, panel_title="Evaluation steps calculation", border_style="medium_spring_green")
+            rich_panel(
+                tb,
+                panel_title="Evaluation steps calculation",
+                border_style="medium_spring_green",
+            )
             del tb_dict, tb
 
         return eval_steps
@@ -527,7 +631,9 @@ class FineTuningHandler:
         """Configures the training parameters for SFTTrainer."""
 
         if self.epochs <= 0:
-            logger.warning("No training duration specified. Defaulting to StrategyConfig.epochs.")
+            logger.warning(
+                "No training duration specified. Defaulting to StrategyConfig.epochs."
+            )
             self.epochs = self.strategy_config.epochs
 
         train_size = len(dataset_dict["train"])
@@ -538,54 +644,41 @@ class FineTuningHandler:
         sft_config_params: dict[str, Any] = {
             # optimized kernel
             "use_liger_kernel": True,
-
             # paths
             "output_dir": self.checkpoint_dir,
-            "run_name": f"{self.base_model_name.split('/')[-1]}-epochs-{self.epochs}",
-
             # model related args
             "fp16": not bfloat16_supported,
             "bf16": bfloat16_supported,
             "max_length": self.max_seq_length,
-
             # fine-tuning hps
             "num_train_epochs": self.epochs,
-
             # "train"
             "gradient_checkpointing": True,
             "per_device_train_batch_size": self.per_device_train_batch_size,
             "per_device_eval_batch_size": self.per_device_eval_batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
-
             "learning_rate": self.lr,
             "weight_decay": self.wd,
             "max_grad_norm": 0.3,
-
             # warmup
             "warmup_ratio": self.warmup_ratio,
-
             # data handling
             "packing": False,
             "dataset_text_field": "text",
-
             # evaluation step
             "eval_strategy": "steps",
-            "eval_steps": eval_steps, 
-
+            "eval_steps": eval_steps,
             # checkpointing
             "save_strategy": "steps",
             "save_steps": eval_steps,
             "save_total_limit": 3,
-
             # best model selection
             "load_best_model_at_end": True,
             "metric_for_best_model": "eval_loss",
             "greater_is_better": False,
-
-            #logging
-            "logging_steps": self.logging_steps, 
+            # logging
+            "logging_steps": self.logging_steps,
             "report_to": "wandb",
-
             # reproducibility
             "seed": 3407,
         }
@@ -609,6 +702,7 @@ class FineTuningHandler:
 
         if self.use_early_stopping:
             from transformers import EarlyStoppingCallback
+
             assert self.early_stopping_patience is not None
 
             callbacks.append(
@@ -649,15 +743,19 @@ class FineTuningHandler:
                 print(f"✓ Unmasked tokens (assistant): {num_unmasked}")
 
                 print(self.tokenizer.decode(first_batch["input_ids"][0]))
-                space = self.tokenizer(" ", add_special_tokens = False).input_ids[0]
-                print(self.tokenizer.decode([space if x == -100 else x for x in first_batch["labels"]]))
+                space = self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+                print(
+                    self.tokenizer.decode(
+                        [space if x == -100 else x for x in first_batch["labels"]]
+                    )
+                )
 
                 # Sequence length check
                 print(f"\nMax sequence length setting: {trainer.args.max_length}")
                 print(f"Actual batch max length: {first_batch['input_ids'].shape[1]}")
 
                 # Check for padding
-                padding_mask = first_batch['attention_mask'][0]
+                padding_mask = first_batch["attention_mask"][0]
                 num_padding_tokens = (padding_mask == 0).sum().item()
                 num_real_tokens = (padding_mask == 1).sum().item()
 
@@ -665,23 +763,33 @@ class FineTuningHandler:
                 print(f"Padding tokens: {num_padding_tokens}")
 
                 # Check if any sequences are truncated
-                if first_batch['input_ids'].shape[1] >= trainer.args.max_length:
+                if first_batch["input_ids"].shape[1] >= trainer.args.max_length:
                     print("⚠️  Warning: Sequences may be truncated at max_length")
                 else:
-                    print(f"✓ Sequences fit within max_seq_length ({trainer.args.max_length})")
+                    print(
+                        f"✓ Sequences fit within max_seq_length ({trainer.args.max_length})"
+                    )
 
                 # Final pre-training checklist
                 print("\n" + "=" * 60)
                 print("FINAL PRE-TRAINING CHECKLIST")
                 print("=" * 60)
 
-                print(f"✓ Batch loading successful: shape {first_batch['input_ids'].shape}")
-                print(f"✓ Assistant-only loss active: {num_masked} masked, {num_unmasked} unmasked tokens")
-                print(f"✓ Masking ratio: {num_masked/(num_masked+num_unmasked)*100:.1f}% masked")
+                print(
+                    f"✓ Batch loading successful: shape {first_batch['input_ids'].shape}"
+                )
+                print(
+                    f"✓ Assistant-only loss active: {num_masked} masked, {num_unmasked} unmasked tokens"
+                )
+                print(
+                    f"✓ Masking ratio: {num_masked/(num_masked+num_unmasked)*100:.1f}% masked"
+                )
                 print(f"✓ Training for {self.epochs} epochs")
                 print(f"✓ Batch size: {self.per_device_train_batch_size}")
                 print(f"✓ Gradient accumulation: {self.gradient_accumulation_steps}")
-                print(f"✓ Effective batch size: {self.per_device_train_batch_size * self.gradient_accumulation_steps}")
+                print(
+                    f"✓ Effective batch size: {self.per_device_train_batch_size * self.gradient_accumulation_steps}"
+                )
                 print(f"✓ Learning rate: {self.lr}")
 
                 print("\n🚀 Ready to start training!")
@@ -702,17 +810,23 @@ class FineTuningHandler:
         if self.debug:
             self.debug_trainer(trainer)
 
+        self.wandb_init()
         logger.info("🚀 Starting training...")
         trainer.train()
         logger.info("✅ Training completed.")
+        self.wandb_close()
 
         if self.debug:
             # Check trainer state
             print("=== Training State ===")
             print(f"Best metric: {trainer.state.best_metric}")
             print(f"Best model checkpoint: {trainer.state.best_model_checkpoint}")
-            print(f"Total steps: {trainer.state.global_step} / {trainer.state.max_steps}")
-            print(f"Early stopped: {trainer.state.global_step < trainer.state.max_steps}")
+            print(
+                f"Total steps: {trainer.state.global_step} / {trainer.state.max_steps}"
+            )
+            print(
+                f"Early stopped: {trainer.state.global_step < trainer.state.max_steps}"
+            )
 
         # save the LoRA adapters of best model
         logger.info(f"💾 Saving best model to {self.base_model_name}...")
