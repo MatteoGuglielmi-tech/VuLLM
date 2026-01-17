@@ -10,16 +10,16 @@ from typing import Iterable, cast
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from datasets import load_dataset
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
-# from sklearn.tree import export_graphviz
 
 from scipy.stats import randint
 from loader_config import Loader
+
+from validation import inspect_jsonl_schema_pydantic
 
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,7 @@ class RandomForestPipeline:
     encoder: LabelEncoder | None = None
 
     def _load_dataset(self) -> pd.DataFrame:
-        dataset = load_dataset("json", data_files=str(self.source_path), split="train")
-        return pd.DataFrame(data=dataset)
+        return pd.read_json(self.source_path, lines=True)
 
     def _confusion_matrix(self, y_test: Iterable, y_pred: Iterable, target_column: str):
         cm = confusion_matrix(y_true=y_test, y_pred=y_pred)
@@ -66,8 +65,8 @@ class RandomForestPipeline:
         plt.title("Confusion Matrix for Random Forest Classifier")
 
         self.assets_folder.mkdir(parents=True, exist_ok=True)
-        pathname: Path = self.assets_folder / f"{target_column}_confusion_matrix.png"
-        plt.savefig(pathname, dpi=300, bbox_inches="tight")
+        pathname: Path = self.assets_folder / f"{target_column}_confusion_matrix.pdf"
+        plt.savefig(pathname, format="pdf", bbox_inches="tight")
         logger.info(f"🗃️ Confusion matrix for {target_column} classification saved to: {pathname} 🗃️")
 
     def _heatmap(self, y_test: np.ndarray, y_pred: np.ndarray):
@@ -90,16 +89,13 @@ class RandomForestPipeline:
             xaxis=dict(tickangle=-45)
         )
 
-        # for i in range(len(fig.layout.annotations)):
-        #     fig.layout.annotations[i].text = ''
-        #
         fig.show()
 
         fig.write_html("confusion_matrix.html")
 
         try:
-            fig.write_image("confusion_matrix.png", scale=2)
-            print("Successfully saved confusion_matrix.png")
+            fig.write_image("confusion_matrix.pdf", format="pdf", bbox_inches="tight")
+            print("Successfully saved confusion_matrix.pdf")
         except ValueError as e:
             print(f"Could not save static image. Please install kaleido: pip install kaleido\nError: {e}")
 
@@ -139,26 +135,12 @@ class RandomForestPipeline:
 
         self.assets_folder.mkdir(parents=True, exist_ok=True)
         pathname: Path = (
-            self.assets_folder / f"{target_column}_classification_report.png"
+            self.assets_folder / f"{target_column}_classification_report.pdf"
         )
-        plt.savefig(pathname, bbox_inches="tight", dpi=300)
+        plt.savefig(pathname, format="pdf", bbox_inches="tight")
         plt.close(fig)
 
         logger.info(f"🗃️ Classification report for {target_column} classification saved to: {pathname} 🗃️")
-
-    # def display_trees(self, x_train):
-    #     for i in range(3):
-    #         tree = self.model.estimators_[i]
-    #         dot_data = export_graphviz(
-    #             tree,
-    #             feature_names=x_train.columns,
-    #             filled=True,
-    #             max_depth=2,
-    #             impurity=False,
-    #             proportion=True,
-    #         )
-    #         graph = graphviz.Source(dot_data)  # type: ignore
-    #         display(graph)
 
     def hyperparamter_tuning(self, X_train: np.ndarray, y_train: np.ndarray) -> dict[str, int]:
         param_dist = {"n_estimators": randint(50, 500), "max_depth": randint(1, 20)}
@@ -190,7 +172,13 @@ class RandomForestPipeline:
 
         logger.info(f"🚀 --- Running pipeline for target: {target_column} --- 🚀 ")
 
-        df = self._load_dataset()
+        try:
+            df = self._load_dataset()
+        except:
+            import sys
+            inspect_jsonl_schema_pydantic(self.source_path)
+            sys.exit(1)
+
         logger.info("🏗️ Dataset loaded. 🏗️")
 
         X, y = self._preprocess_data(
