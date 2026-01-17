@@ -54,6 +54,7 @@ class EvaluationResult:
             "clarity",
             "technical_accuracy",
             "logical_flow",
+            "confidence"
         ]
 
     def get_criteria_vector(self) -> np.ndarray:

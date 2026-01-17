@@ -13,9 +13,11 @@ def plot_judge_comparison_radar(judge_evaluations: dict[str, dict[str, float | i
     fig = go.Figure()
 
     colors, line_colors = generate_color_palette(5, alpha=0.2)
+    val_for_legend = {}
 
     for idx, (judge_name, scores) in enumerate(judge_evaluations.items()):
         values = list(scores.values())
+        val_for_legend[judge_name] = values
 
         fig.add_trace(
             go.Scatterpolar(
@@ -76,6 +78,17 @@ def plot_judge_comparison_radar(judge_evaluations: dict[str, dict[str, float | i
         width=900,
         height=700,
         margin=dict(l=80, r=180, t=120, b=80),
+    )
+
+    fig.add_annotation(
+        x=2,
+        y=1,
+        text=(
+            f"Qwen2.5-Coder-32B =  { ",".join([x.astype(str) for x in val_for_legend["Qwen2.5-Coder-32B-Instruct-bnb-4bit"]])}",
+            f"Qwen2.5-72B =  { ",".join([x.astype(str) for x in val_for_legend["Qwen2.5-72B"]])}",
+            f"Phi-4 =  { ",".join([x.astype(str) for x in val_for_legend["Phi-4"]])}",
+            f"DeepSeek-R1-Distill-Llama =  {",".join([x.astype(str) for x in val_for_legend["DeepSeek-R1-Distill-Llama"]]) }",
+        ),
     )
 
     fig.write_image(
