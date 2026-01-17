@@ -27,6 +27,7 @@ from .processing_lib import (
     FineTuningHandler,
     LLMHyperparameterOptimizer,
     TestHandler,
+    TestHandlerPlain,
     TypedDataset,
     TestDatasetSchema,
     Evaluator,
@@ -36,7 +37,7 @@ from . import cli
 
 import torch
 
-install()
+install(show_locals=False)
 
 
 warnings.filterwarnings(
@@ -78,6 +79,9 @@ if __name__ == "__main__":
                 dataset_path=args.dataset_path,
                 formatted_dataset_dir=Path(args.formatted_dataset_dir),
                 num_cpus=cpus_allocated,
+                target_vulnerable_ratio=args.target_vulnerable_ratio,
+                prompt_mode=args.prompt_mode,
+                assumption_mode=args.assumption_mode,
 
                 # -- model loading --
                 base_model_name=args.base_model_name,
@@ -147,7 +151,7 @@ if __name__ == "__main__":
                 gradient_accumulation_steps=args.grad_acc_steps,
                 logging_steps=args.logging_steps,
                 eval_steps=args.eval_steps,
-                use_deepspeed=args.deepspeed,
+                # use_deepspeed=args.deepspeed,
             )
 
             # Run HPO
@@ -166,12 +170,15 @@ if __name__ == "__main__":
             rich_rule(f"🚀 [bold][italic][light_sky_blue1] Starting inference pipeline [/][/][/] 🚀")
 
             if not args.load_test_from_disk:
-                test_handler = TestHandler(
+                test_handler = TestHandlerPlain(
+                # test_handler = TestHandler(
                     lora_model_dir=args.lora_weights,
                     max_seq_length=args.max_seq_length,
                     max_new_tokens=args.max_tokens_per_answer,
                     chat_template=args.chat_template,
-                    evaluated_testset_path=args.evaluated_test_path
+                    evaluated_testset_path=args.evaluated_test_path,
+                    prompt_mode=args.prompt_mode,
+                    assumption_mode=args.assumption_mode
                 )
                 test_set: Dataset = TestHandler.load_test_dataset(input_dir=args.formatted_dataset_dir)
                 pred_testset: TypedDataset[TestDatasetSchema] = test_handler.evaluate_on_test_set(
@@ -179,19 +186,22 @@ if __name__ == "__main__":
                     batch_size=args.batch_size,
                     use_batching=args.use_batching,
                 )
-
+                # test_handler.diagnose_model(test_set, n_samples=10)
             else:
                 pred_testset: TypedDataset[TestDatasetSchema] = TestHandler.load_test_dataset(
                     input_dir=args.evaluated_test_path, split_name="test", with_eval=True
                 )
 
-            evaluator = Evaluator(output_dir=args.assets_dir, test_typeddataset=pred_testset)
-            evaluator.validate_cwe_format() # validate predicted cwe quality
-            binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=args.save_artifacts) # address target performance
-            cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=args.save_artifacts) # address cwe performance
+                evaluator = Evaluator(output_dir=args.assets_dir, test_typeddataset=pred_testset)
+                evaluator.validate_cwe_format() # validate predicted cwe quality
+                binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=args.save_artifacts) # address target performance
+                cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=args.save_artifacts) # address cwe performance
 
-    except Exception as e:
+    except (Exception, KeyboardInterrupt) as e:
+        import sys
+
         rich_exception()
+        sys.exit(1)
     finally:
         if torch.cuda.device_count() > 1:
             cleanup_resources(accelerator=accelerator)
