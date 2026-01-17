@@ -65,37 +65,67 @@ class ModelHandler:
         - Encoder-decoder (T5, BART): Right padding
         """
 
-        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"}
-        model_type = getattr(self.base_model.config, "model_type", "").lower()
+        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"} # deepseek uses "llama"
+        model_type = getattr(self.base_model.config, "model_type", "").lower()  # type: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
         if any(arch in model_type for arch in decoder_only_models):
-            self.tokenizer.padding_side = "left"
+            self.tokenizer.padding_side = "left"  # type: ignore[reportOptionalMemberAccess]
             logger.info(f"📍 Set padding_side='left' for decoder-only model ({model_type})")
         else:
-            self.tokenizer.padding_side = "right"
+            self.tokenizer.padding_side = "right"  # type: ignore[reportOptionalMemberAccess]
             logger.info(f"📍 Set padding_side='right' for encoder-decoder model ({model_type})")
 
         # ensure pad token exists
-        if not (self.tokenizer.pad_token or self.tokenizer.pad_token_id):
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        if not (self.tokenizer.pad_token or self.tokenizer.pad_token_id):  # type: ignore[reportOptionalMemberAccess]
+            self.tokenizer.pad_token = self.tokenizer.eos_token  # type: ignore[reportOptionalMemberAccess]
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id  # type: ignore[reportOptionalMemberAccess]
 
-            logger.info(f"🔧 Set pad_token to eos_token: {self.tokenizer.eos_token}")
+            logger.info(f"🔧 Set pad_token to eos_token: {self.tokenizer.eos_token}")  # type: ignore[reportOptionalMemberAccess]
 
     def _configure_tokenizer(self):
         """Configure tokenizer settings (chat template, padding, special tokens)."""
+        model_name_lower = self.base_model_name.lower()
 
-        if self.chat_template is not None:
-            logger.info(f"🎨 Applying chat template: {self.chat_template}")
+        # Check if DeepSeek model
+        if "deepseek" in model_name_lower:
+            logger.info("🔍 Detected DeepSeek model - applying custom chat template")
+
+            # Override DeepSeek's default template to remove automatic system prompt
+            self.tokenizer.chat_template = (  # type: ignore[reportOptionalMemberAccess]
+                "{{ bos_token }}"
+                "{% for message in messages %}"
+                "{% if message['role'] == 'system' %}"
+                "{{ message['content'] + '\\n' }}"
+                "{% elif message['role'] == 'user' %}"
+                "{{ '### Instruction:\\n' + message['content'] + '\\n' }}"
+                "{% elif message['role'] == 'assistant' %}"
+                "{{ '### Response:\\n' + message['content'] + '\\n<|EOT|>\\n' }}"
+                "{% endif %}"
+                "{% endfor %}"
+                "{% if add_generation_prompt %}"
+                "{{ '### Response:\\n' }}"
+                "{% endif %}"
+            )
+
+            logger.info(
+                "✅ Applied custom DeepSeek chat template (removed default system prompt)"
+            )
+
+        elif self.chat_template is not None:
+            # Use Unsloth's built-in templates for non-DeepSeek models
+            logger.info(
+                f"🎨 Applying chat template for non-DeepSeek models: {self.chat_template}"
+            )
             try:
                 self.tokenizer = get_chat_template(
-                    self.tokenizer, 
-                    chat_template=self.chat_template
+                    self.tokenizer, chat_template=self.chat_template
                 )
             except ValueError as e:
                 logger.error(f"Invalid chat template: {self.chat_template}")
                 logger.error(f"Available templates: {list(CHAT_TEMPLATES.keys())}")
-                raise ValueError(f"Chat template '{self.chat_template}' not found") from e
+                raise ValueError(
+                    f"Chat template '{self.chat_template}' not found"
+                ) from e
 
         self._set_padding_strategy()
 
@@ -108,7 +138,7 @@ class ModelHandler:
                 max_seq_length=self.max_seq_length,
                 dtype=(torch.bfloat16 if is_bfloat16_supported() else None),
                 load_in_4bit=not self.use_loftq,
-                device_map="auto" if not self.use_deepspeed else None,
+                device_map="auto" if not self.use_deepspeed else None,  # type: ignore[reportArgumentType]
                 attn_implementation="flash_attention_2",
             )
 
@@ -147,7 +177,7 @@ class ModelHandler:
             self._load_base_model()
 
         def _find_all_linear_names(model) -> list[str]:
-            cls = bnb.nn.Linear4bit
+            cls = bnb.nn.modules.Linear4bit
             lora_module_names = set()
             for name, module in model.named_modules():
                 if isinstance(module, cls):
