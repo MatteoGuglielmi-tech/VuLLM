@@ -260,6 +260,8 @@ impl CodeSanitizer {
         command
             .arg("-E") // run preprocessor
             .arg("-P") // no linemarkers
+            .arg("-x") // force C
+            .arg("c")
             .arg("-") // read stdin
             .stdin(Stdio::piped()) // don't expect keyboard input
             .stdout(Stdio::piped())

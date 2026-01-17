@@ -1,5 +1,5 @@
 use crate::processor_lib::{
-    processor::Processor,
+    processor::{ProcessingStats, Processor},
     utils::{
         JsonlEntry, compute_cyclomatic_complexity, compute_token_count, create_progress_bar,
         read_jsonl,
@@ -84,12 +84,24 @@ impl FeatureExtractor {
             return Err(anyhow!("No valid C functions found after filtering"));
         }
 
+        let vulnerable_count = filtered_entries
+            .iter()
+            .filter(|entry| entry.target == 1)
+            .count();
+        println!(
+            "Binary labels distribution after C-only filtering:\n\t(target=1): {}\n\t(target=0): {}",
+            vulnerable_count,
+            filtered_entries.len() - vulnerable_count
+        );
+
         info!(
             "Filtered down to {} entries. Starting sanitization and enrichment...",
             filtered_entries.len()
         );
 
         let pb = create_progress_bar(filtered_entries.len() as u64, "🔬 Sanitizing & Enriching");
+
+        let stats = ProcessingStats::new();
 
         let processed_entries: Vec<ProcessedEntry> = filtered_entries
             .into_par_iter()
@@ -101,7 +113,7 @@ impl FeatureExtractor {
                         let tokenizer = tokenizer_cell.borrow();
 
                         let Ok(Some((sanitized_code, tree))) =
-                            processor.process_snippet_fallible(&entry.func)
+                            processor.process_snippet_fallible(&entry.func, &stats)
                         else {
                             return None;
                         };
@@ -117,21 +129,19 @@ impl FeatureExtractor {
                             func: sanitized_code,
                             cyclomatic_complexity,
                             token_count,
-                            cwe_desc: Vec::new() // initially empty
+                            cwe_desc: Vec::new(), // initially empty
                         })
                     })
                 })
             })
             .collect();
 
+        stats.report();
         Ok(processed_entries)
     }
 
     pub fn count_vulnerable(entries: &[ProcessedEntry]) -> Result<()> {
-        let vulnerable_count = entries
-            .iter()
-            .filter(|entry| entry.target == 1)
-            .count();
+        let vulnerable_count = entries.iter().filter(|entry| entry.target == 1).count();
 
         println!(
             "Binary labels distribution:\n\t(target=1): {}\n\t(target=0): {}",

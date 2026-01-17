@@ -11,10 +11,58 @@ use tree_sitter::{InputEdit, Parser, Tree};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
-// use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-// pub static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
-// pub static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+// Add these as fields in your Processor struct, or as static counters
+pub struct ProcessingStats {
+    pub gcc_direct_success: AtomicUsize,
+    pub gcc_fallback_success: AtomicUsize,
+    pub gcc_rejected: AtomicUsize,
+    pub empty_after_gcc: AtomicUsize,
+    pub invalid_tree: AtomicUsize,
+}
+
+impl ProcessingStats {
+    pub fn new() -> Self {
+        Self {
+            gcc_direct_success: AtomicUsize::new(0),
+            gcc_fallback_success: AtomicUsize::new(0),
+            gcc_rejected: AtomicUsize::new(0),
+            empty_after_gcc: AtomicUsize::new(0),
+            invalid_tree: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn report(&self) {
+        println!("=== Processing Statistics ===");
+        println!(
+            "GCC direct success:   {}",
+            self.gcc_direct_success.load(Ordering::Relaxed)
+        );
+        println!(
+            "GCC fallback success: {}",
+            self.gcc_fallback_success.load(Ordering::Relaxed)
+        );
+        println!(
+            "GCC rejected:         {}",
+            self.gcc_rejected.load(Ordering::Relaxed)
+        );
+        println!(
+            "Empty after GCC:      {}",
+            self.empty_after_gcc.load(Ordering::Relaxed)
+        );
+        println!(
+            "Invalid tree:         {}",
+            self.invalid_tree.load(Ordering::Relaxed)
+        );
+    }
+}
+
+impl Default for ProcessingStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// The main struct that orchestrates the pre-processing pipeline.
 pub struct Processor {
@@ -70,6 +118,7 @@ impl Processor {
     pub fn process_snippet_fallible(
         &self,
         code: &str,
+        stats: &ProcessingStats,
     ) -> Result<Option<(String, Tree)>, anyhow::Error> {
         // --- GCC Pre-processing  ---
         let processed_code = {
@@ -80,7 +129,10 @@ impl Processor {
             } else {
                 // Cache MISS: Run the expensive GCC call
                 let result = match self.sanitizer.call_gcc_preprocessor(code, None) {
-                    Ok(c) => Ok(c),
+                    Ok(c) => {
+                        stats.gcc_direct_success.fetch_add(1, Ordering::Relaxed);
+                        Ok(c)
+                    }
                     Err(_) => {
                         let fixed_code = self
                             .foundry
@@ -88,7 +140,17 @@ impl Processor {
                         let balanced_code = self
                             .sanitizer
                             .balance_directives(&fixed_code, &self.ts_main_parser);
-                        self.sanitizer.call_gcc_preprocessor(&balanced_code, None)
+
+                        match self.sanitizer.call_gcc_preprocessor(&balanced_code, None) {
+                            Ok(c) => {
+                                stats.gcc_fallback_success.fetch_add(1, Ordering::Relaxed);
+                                Ok(c)
+                            }
+                            Err(e) => {
+                                stats.gcc_rejected.fetch_add(1, Ordering::Relaxed);
+                                Err(e)
+                            }
+                        }
                     }
                 }
                 .map_err(anyhow::Error::msg)?;
@@ -98,6 +160,7 @@ impl Processor {
         };
 
         if processed_code.trim().is_empty() {
+            stats.empty_after_gcc.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         };
 
@@ -134,6 +197,7 @@ impl Processor {
 
         let processed_code = current_code.into_owned();
         if !is_function(&processed_code, &tree) || tree.root_node().has_error() {
+            stats.invalid_tree.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         }
 

@@ -3,8 +3,29 @@ use once_cell::sync::Lazy;
 use tree_sitter::{Language, Query};
 
 /* --- LANGUAGE LAZY --- */
-pub static C_LANG: Lazy<Language> = Lazy::new(|| tree_sitter_c::LANGUAGE.into());
-pub static CPP_LANG: Lazy<Language> = Lazy::new(|| tree_sitter_cpp::LANGUAGE.into());
+pub static C_LANG: Lazy<Language> = Lazy::new(|| {
+    std::panic::catch_unwind(|| {
+        let lang: Language = tree_sitter_c::LANGUAGE.into();
+        lang
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("PANIC during C_LANG init: {:?}", e);
+        eprintln!("Backtrace: {:?}", std::backtrace::Backtrace::capture());
+        panic!("C_LANG initialization failed");
+    })
+});
+
+pub static CPP_LANG: Lazy<Language> = Lazy::new(|| {
+    std::panic::catch_unwind(|| {
+        let lang: Language = tree_sitter_cpp::LANGUAGE.into();
+        lang
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("PANIC during CPP_LANG init: {:?}", e);
+        eprintln!("Backtrace: {:?}", std::backtrace::Backtrace::capture());
+        panic!("CPP_LANG initialization failed");
+    })
+});
 // static EXT_C_LANG: Lazy<Language> = Lazy::new(tree_sitter_ext_c::language);
 
 /* --- QUERY LAZY --- */

@@ -89,8 +89,6 @@ fn main() -> Result<()> {
     enrich_data(&cwe_map, &mut enriched_data);
     FeatureExtractor::count_vulnerable(&enriched_data)?;
     FeatureExtractor::save_dataset(&enriched_data, output_fp)?;
-    // println!("Miss clang cache rate: {:#?}", data_processing::processor_lib::processor::CACHE_MISSES);
-    // println!("Hit clang cache rate: {:#?}", data_processing::processor_lib::processor::CACHE_HITS);
 
     Ok(())
 }
