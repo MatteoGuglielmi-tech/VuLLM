@@ -24,6 +24,13 @@ unused/
 tests/
 scripts/
 
+accelerate/
+results/
+scripts_1/
+
+analyze_diversevul.py
+test.py
+
 src/core/chunking_and_streaming
 src/core/cot_training__
 src/core/baseline___
@@ -45,12 +52,15 @@ src/core/cot_training/todo.md
 src/core/cot_training/processing_lib/inference_legacy.py
 src/core/cot_training/processing_lib/unused/
 src/core/cot_training/run/
+src/core/cot_training/processing_lib/ignore.py
 
 src/core/cot_training_before_json
 src/core/cot_training_hybrid
 src/core/cot_training_no_reasoning
 src/core/cot_training_reasoning_in_json_no_vulnerabilities
 src/core/cot_training_reasoning_in_prompt_internalize_in_inference
+
+src/core/random_forest/assets/
 
 # src/dataset/restructure
 # substituted by Rust pipeline
@@ -63,6 +73,10 @@ src/dataset/analysis/distribution/mitre
 src/dataset/analysis/analysis/distribution/assets/
 src/dataset/analysis/sequence_length_analysis/__pycache__/
 src/dataset/analysis/sequence_length_analysis/results/
+src/dataset/analysis/project_analysis/assets/
+src/dataset/analysis/reasoning_analysis/results/
+src/dataset/filter/stats/
+src/dataset/judge_analysis/assets/
 
 # src/dataset/balance
 src/dataset/balance/__pycache__/
