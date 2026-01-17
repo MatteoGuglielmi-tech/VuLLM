@@ -22,8 +22,7 @@ from ..utilities import (
     rich_progress_manual,
     rich_status,
 )
-from .prompt_config import ExpectedModelResponse
-from .datatypes import TestDatasetSchema, TypedDataset
+from .datatypes import TestDatasetSchema, TypedDataset, ExpectedModelResponse
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +57,7 @@ class CWEPair:
 @dataclass
 class CWEEvaluationResults:
     """Results from CWE classification evaluation."""
+
     per_cwe_metrics: dict[str, Any]
     aggreate_metrics: dict[str, float]
     vocabulary: list[int]
@@ -152,14 +152,6 @@ class Evaluator:
         if missing_fields:
             raise ValueError(f"Dataset missing fields: {missing_fields}")
 
-        try:
-            ExpectedModelResponse.model_validate_json(sample["model_prediction"])
-        except KeyError as e:
-            raise e
-        except ValidationError as e:
-            logger.exception("`ValueError` exception during pydantic validation")
-            raise
-
         logger.info("📊 Evaluator initialized")
         logger.info(f"  Output dir: {self.output_dir}")
         logger.info(f"  Test samples: {self.n_samples}")
@@ -204,60 +196,72 @@ class Evaluator:
             total=self.n_samples, description="Validating CWE format ..."
         ) as pbar:
             for idx in range(self.n_samples):
-                sample: dict[str, Any] = self.test_dataset[idx]
+                sample: dict = self.test_dataset[idx]
                 try:
-                    prediction: ExpectedModelResponse = ExpectedModelResponse.model_validate_json(sample["model_prediction"])
+                    prediction = ExpectedModelResponse.model_validate_json(
+                        sample["model_prediction"]
+                    )
                     is_pred_vulnerable: bool = prediction.is_vulnerable
                     pred_cwes: list[int] = prediction.cwe_list
 
-                    if is_pred_vulnerable and pred_cwes:
-                        warnings.append({
-                            "index": idx,
-                            "issue": "Predicted vulnerable but CWE list is empty",
-                            "is_vulnerable": is_pred_vulnerable,
-                            "cwe_list": pred_cwes,
-                        })
+                    if is_pred_vulnerable and not pred_cwes:
+                        warnings.append(
+                            {
+                                "index": idx,
+                                "issue": "Predicted vulnerable but CWE list is empty",
+                                "is_vulnerable": is_pred_vulnerable,
+                                "cwe_list": pred_cwes,
+                            }
+                        )
 
                     if not is_pred_vulnerable and pred_cwes:
-                        warnings.append({
-                            "index": idx,
-                            "issue": "Predicted safe but CWE list is non-empty",
-                            "is_vulnerable": is_pred_vulnerable,
-                            "cwe_list": pred_cwes
-                        })
+                        warnings.append(
+                            {
+                                "index": idx,
+                                "issue": "Predicted safe but CWE list is non-empty",
+                                "is_vulnerable": is_pred_vulnerable,
+                                "cwe_list": pred_cwes,
+                            }
+                        )
 
                     if pred_cwes and is_pred_vulnerable:
                         if not all(isinstance(cwe, int) for cwe in pred_cwes):
-                            invalid_cwes.append({
-                                "index": idx,
-                                "issue": "CWE list contains non-integer values",
-                                "pred_cwes": pred_cwes,
-                                "types": [type(cwe).__name__ for cwe in pred_cwes],
-                            })
+                            invalid_cwes.append(
+                                {
+                                    "index": idx,
+                                    "issue": "CWE list contains non-integer values",
+                                    "pred_cwes": pred_cwes,
+                                    "types": [type(cwe).__name__ for cwe in pred_cwes],
+                                }
+                            )
 
                 except ValidationError:
                     parse_errors += 1
                 except Exception as e:
-                    invalid_cwes.append({
-                        "index": idx,
-                        "issue": f"CWE validation error: {e}",
-                        "raw_cwe": sample.get("cwe", "missing"),
-                        "prediction": str(
-                            sample.get("model_prediction", "missing")
-                        ),
-                    })
+                    invalid_cwes.append(
+                        {
+                            "index": idx,
+                            "issue": f"CWE validation error: {e}",
+                            "raw_cwe": sample.get("cwe", "missing"),
+                            "prediction": str(
+                                sample.get("model_prediction", "missing")
+                            ),
+                        }
+                    )
                 finally:
                     pbar.update(advance=1)
-                    pbar.set_postfix({
-                        "✗ Parse errors": parse_errors,
-                        "✗ Format errors": len(invalid_cwes),
-                        "⚠ Warnings": len(warnings),
-                        "Format error rate": (
-                            f"{len(invalid_cwes)/self.n_samples:.1%}"
-                            if invalid_cwes
-                            else "0.0%"
-                        ),
-                    })
+                    pbar.set_postfix(
+                        {
+                            "✗ Parse errors": parse_errors,
+                            "✗ Format errors": len(invalid_cwes),
+                            "⚠ Warnings": len(warnings),
+                            "Format error rate": (
+                                f"{len(invalid_cwes)/self.n_samples:.1%}"
+                                if invalid_cwes
+                                else "0.0%"
+                            ),
+                        }
+                    )
 
             if invalid_cwes:
                 logger.error(
@@ -312,7 +316,6 @@ class Evaluator:
             for idx in range(self.n_samples):
                 sample: dict[str, Any] = self.test_dataset[idx]
 
-                # ParsedResponse(**sample["model_prediction"])
                 gt_binary_label: bool = bool(sample["target"])
                 gt_cwes: list[int] = (
                     list(
@@ -323,7 +326,8 @@ class Evaluator:
                 )
 
                 try:
-                    prediction: ExpectedModelResponse = ExpectedModelResponse.model_validate_json(
+                    # NOTE: Already validated during generation. is this necessary?
+                    prediction = ExpectedModelResponse.model_validate_json(
                         sample["model_prediction"]
                     )
                 except ValidationError as e:
@@ -340,15 +344,17 @@ class Evaluator:
                     self.n_parse_failures += 1
 
                     pbar.update(advance=1)
-                    pbar.set_postfix({
-                        "✓ Valid": len(self.results),
-                        "✗ Failures": self.n_parse_failures,
-                        "Error rate (%)": (
-                            f"{self.n_parse_failures/self.n_samples:.1%}"
-                            if self.n_parse_failures > 0
-                            else "0%"
-                        ),
-                    })
+                    pbar.set_postfix(
+                        {
+                            "✓ Valid": len(self.results),
+                            "✗ Failures": self.n_parse_failures,
+                            "Error rate (%)": (
+                                f"{self.n_parse_failures/self.n_samples:.1%}"
+                                if self.n_parse_failures > 0
+                                else "0%"
+                            ),
+                        }
+                    )
                     continue
 
                 is_pred_vulnerable: bool = prediction.is_vulnerable
@@ -390,7 +396,7 @@ class Evaluator:
         logger.info(f"✓ Extracted {len(self.results)} valid predictions")
         logger.info(
             f"✗ Parse failures: {self.n_parse_failures} "
-                f"({self.n_parse_failures/self.n_samples:.1%})"
+            f"({self.n_parse_failures/self.n_samples:.1%})"
         )
         # Save parse failures for analysis
         if self.parse_failures:
@@ -424,18 +430,18 @@ class Evaluator:
         Returns
         -------
         dict[str, Any]
-            Classification report containing accuracy, precision, recall, f1 
+            Classification report containing accuracy, precision, recall, f1
             for each class, plus macro/weighted averages.
         """
         report = classification_report(
             y_true,
             y_pred,
-            target_names=["Vulnerable", "Safe"],
+            target_names=["Safe", "Vulnerable"],
             output_dict=True,
-            zero_division=0.0, # type: ignore
+            zero_division=0.0,  # type: ignore
         )
 
-        return report # type: ignore
+        return report  # type: ignore
 
     def _compute_confusion_matrix(
         self, y_true: list[str], y_pred: list[str]
@@ -468,7 +474,9 @@ class Evaluator:
             Dictionary containing classification report and confusion matrix
         """
         if not self.results:
-            logger.exception("No valid predictions found. Run _parse_predictions() first.")
+            logger.exception(
+                "No valid predictions found. Run _parse_predictions() first."
+            )
             raise ValueError("No results available for metrics computation")
 
         with rich_status(
@@ -532,14 +540,14 @@ class Evaluator:
         yes_metrics = binary_metrics["classification_report"]["Vulnerable"]
         no_metrics = binary_metrics["classification_report"]["Safe"]
         tp, tn, fp, fn = binary_metrics["confusion_matrix_dict"].values()
+        accuracy = binary_metrics["classification_report"]["accuracy"]
 
         overall_stats = {
             "Support (total)": binary_metrics["n_samples"],
             "Support (vulnerable)": binary_metrics["n_vulnerable"],
             "Support (safe)": binary_metrics["n_safe"],
-            "Accuracy": f"{binary_metrics["accuracy"]:3.f}",
             "Confusion Matrix": f"TP={tp}, TN={tn}, FP={fp}, FN={fn}",
-            "Overall Accuracy": f"{binary_metrics['accuracy']:.4f}"
+            "Overall Accuracy": f"{accuracy:.3f}",
         }
 
         tb = build_table(data=overall_stats, columns=["Index name", "Value"])
@@ -551,9 +559,9 @@ class Evaluator:
 
         vul_stats = {
             "Support (vulnerable)": binary_metrics["n_vulnerable"],
-            "Precision (vulnerable)": float(f"{yes_metrics["precision"]:3.f}"),
-            "Recall (vulnerable)": float(f"{yes_metrics["recall"]:3.f}"),
-            "F1-Score (vulnerable)": float(f"{yes_metrics["f1-score"]:3.f}"),
+            "Precision (vulnerable)": float(f"{yes_metrics["precision"]:.3f}"),
+            "Recall (vulnerable)": float(f"{yes_metrics["recall"]:.3f}"),
+            "F1-Score (vulnerable)": float(f"{yes_metrics["f1-score"]:.3f}"),
         }
         tb = build_table(data=vul_stats, columns=["Index name", "Value"])
         vul_panel = build_panel(
@@ -564,9 +572,9 @@ class Evaluator:
 
         safe_stats = {
             "Support (safe)": binary_metrics["n_safe"],
-            "Precision (safe)": f"{no_metrics["precision"]:3.f}",
-            "Recall (safe)": f"{no_metrics["recall"]:3.f}",
-            "F1-Score (safe)": f"{no_metrics["f1-score"]:3.f}",
+            "Precision (safe)": f"{no_metrics["precision"]:.3f}",
+            "Recall (safe)": f"{no_metrics["recall"]:.3f}",
+            "F1-Score (safe)": f"{no_metrics["f1-score"]:.3f}",
         }
         tb = build_table(data=safe_stats, columns=["Index name", "Value"])
         safe_panel = build_panel(
@@ -584,7 +592,7 @@ class Evaluator:
             ("vul_stats", vul_stats),
             ("safe_stats", safe_stats),
         ]
-        stats: dict[str,dict] = {k: v for k, v in l}
+        stats: dict[str, dict] = {k: v for k, v in l}
         self._save_json(filepath=(self.output_dir / "stats.json"), obj=stats)
 
     def _save_binary_artifacts(self, binary_metrics: dict[str, Any]) -> None:
@@ -597,7 +605,7 @@ class Evaluator:
             self._save_json(report_path, binary_metrics["classification_report"])
             logger.info(f"✅ Classification report: {report_path.name}")
 
-            cm_path = self.output_dir / "binary_confusion_matrix.png"
+            cm_path = self.output_dir / "plots" / "binary_confusion_matrix.png"
             self._plot_confusion_matrix(
                 cm=binary_metrics["confusion_matrix"],
                 title="Binary Vulnerability Detection",
@@ -631,8 +639,8 @@ class Evaluator:
 
     def _collect_cwe_pairs(self) -> list[CWEPair]:
         """Collect pairs of CWE indexes in a list of tuples where:
-            - 1st element represents all ground truth cwe ids
-            - 2nd element represents corresponding predicted cwe ids
+        - 1st element represents all ground truth cwe ids
+        - 2nd element represents corresponding predicted cwe ids
         """
         return [
             CWEPair(cwes_gt=entry["gt_cwes"], cwes_pred=entry["pred_cwes"])
@@ -712,7 +720,7 @@ class Evaluator:
             target_names=target_names,
             output_dict=True,
             digits=4,
-            zero_division=0.0, # type: ignore
+            zero_division=0.0,  # type: ignore
         )
         report = cast(dict[str, Any], report)
 
@@ -722,7 +730,9 @@ class Evaluator:
 
         return report
 
-    def _compute_aggregate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, float]:
+    def _compute_aggregate_metrics(
+        self, y_true: np.ndarray, y_pred: np.ndarray
+    ) -> tuple[float, float]:
         """Compute micro and macro averaged F1 scores.
 
         Returns
@@ -731,8 +741,8 @@ class Evaluator:
             (micro_f1, macro_f1)
         """
 
-        micro_f1 = f1_score(y_true, y_pred, average="micro", zero_division=0.0) # type: ignore
-        macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0.0) # type: ignore
+        micro_f1 = f1_score(y_true, y_pred, average="micro", zero_division=0.0)  # type: ignore
+        macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0.0)  # type: ignore
 
         return micro_f1, macro_f1
 
@@ -776,8 +786,8 @@ class Evaluator:
 
         report_path = self.output_dir / "cwe_classification_report.json"
         full_report = {
-            "micro_avg_f1": results.aggreate_metrics["micro_avg_f1"],
-            "macro_avg_f1": results.aggreate_metrics["macro_avg_f1"],
+            "micro_avg_f1": results.aggreate_metrics["micro_f1"],
+            "macro_avg_f1": results.aggreate_metrics["macro_f1"],
             "per_cwe_metrics": results.per_cwe_metrics,
         }
         self._save_json(report_path, full_report)
@@ -786,310 +796,6 @@ class Evaluator:
         self._plot_per_cwe_performance(
             per_cwe_report=results.per_cwe_metrics, vocab=results.vocabulary
         )
-
-    # def analyze_misclassifications(
-    #     self,
-    #     predictions: list[ParsedResponse],
-    #     save_artifacts: bool = True,
-    #     include_code: bool = False,
-    #     max_response_length: int = 1000,
-    # ) -> MisclassificationAnalysisResults:
-    #     """Identify and analyze misclassified samples (False Positives & False Negatives).
-    #
-    #     Parameters
-    #     ----------
-    #     predictions : list[str]
-    #         Raw model predictions.
-    #     save_artifacts : bool
-    #         Whether to save detailed reports to disk.
-    #     include_code : bool
-    #         Whether to include full function code in reports.
-    #     max_response_length : int
-    #         Maximum length of model response to include (prevents huge files).
-    #
-    #     Returns
-    #     -------
-    #     MisclassificationAnalysisResults
-    #         Detailed breakdown of misclassifications.
-    #     """
-    #
-    #     logger.info("MISCLASSIFICATION ANALYSIS")
-    #
-    #     fp_samples, fn_samples = self._collect_misclassifications(
-    #         predictions=predictions,
-    #         include_code=include_code,
-    #         max_response_length=max_response_length,
-    #     )
-    #     self._log_misclassification_summary(
-    #         false_positives=fp_samples,
-    #         false_negatives=fn_samples,
-    #         total_samples=len(predictions),
-    #     )
-    #     if save_artifacts:
-    #         self._save_misclassification_artifacts(fp_samples, fn_samples)
-    #
-    #     return MisclassificationAnalysisResults(
-    #         total_samples=len(predictions),
-    #         false_positives=len(fp_samples),
-    #         false_negatives=len(fn_samples),
-    #         false_positive_samples=fp_samples,
-    #         false_negative_samples=fn_samples,
-    #     )
-
-    # def _collect_misclassifications(
-    #     self,
-    #     predictions: list[ParsedResponse],
-    #     include_code: bool,
-    #     max_response_length: int,
-    # ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    #     """Collect False Positives and False Negatives.
-    #
-    #     Returns
-    #     -------
-    #     tuple[list[dict], list[dict]]
-    #         (false_positives, false_negatives)
-    #     """
-    #
-    #     logger.info(f"Analyzing {len(predictions)} predictions for misclassifications...")
-    #
-    #     false_positives = []
-    #     false_negatives = []
-    #
-    #     for i, parsed_resp in enumerate(predictions):
-    #         sample = self.test_dataset[i]
-    #         gt_label = self.LABEL_YES if sample["target"] == 1 else self.LABEL_NO
-    #
-    #         pred_label = 1 if  parsed_resp.verdict.get("cwe_list") else 0
-    #
-    #         # skip if unparseable and correct
-    #         if not parsed_resp.parse_error or pred_label is None: continue
-    #         if pred_label == gt_label: continue
-    #
-    #         sample_details = {
-    #             "index": i,
-    #             "ground_truth_label": gt_label,
-    #             "predicted_label": pred_label,
-    #             "ground_truth_cwes": sample.get("cwe", []),
-    #             "predicted_cwes": parsed_resp.verdict.get("cwe_list"),
-    #             "model_response": parsed_resp.__repr__(),
-    #             "response_full_length": len(parsed_resp.__str__()), # approx
-    #         }
-    #
-    #         if include_code:
-    #             sample_details["function_code"] = sample["func"]
-    #         else:
-    #             sample_details["function_length"] = len(sample["func"])
-    #
-    #         if pred_label == self.LABEL_YES and gt_label == self.LABEL_NO:
-    #             # False Positive: Model said vulnerable, but it's not
-    #             false_positives.append(sample_details)
-    #         elif pred_label == self.LABEL_NO and gt_label == self.LABEL_YES:
-    #             # False Negative: Model said safe, but it's vulnerable
-    #             false_negatives.append(sample_details)
-    #
-    #     logger.info(
-    #         f"Found {len(false_positives)} False Positives and "
-    #         f"{len(false_negatives)} False Negatives"
-    #     )
-    #
-    #     return false_positives, false_negatives
-
-    # def _log_misclassification_summary(
-    #     self,
-    #     false_positives: list[dict[str, Any]],
-    #     false_negatives: list[dict[str, Any]],
-    #     total_samples: int,
-    # ) -> None:
-    #     """Log summary statistics about misclassifications."""
-    #
-    #     total_errors = len(false_positives) + len(false_negatives)
-    #     error_rate = total_errors / total_samples if total_samples > 0 else 0.0
-    #
-    #     print(f"\n📊 Misclassification Summary:")
-    #     print(f"   Total samples:      {total_samples}")
-    #     print(f"   Total errors:       {total_errors} ({error_rate:.2%})")
-    #     print(f"   False Positives:    {len(false_positives)} ({len(false_positives)/total_samples:.2%})")
-    #     print(f"   False Negatives:    {len(false_negatives)} ({len(false_negatives)/total_samples:.2%})")
-    #
-    #     # what vulnerabilities were missed?
-    #     if false_negatives:
-    #         missed_cwes = {}
-    #         for fn in false_negatives:
-    #             for cwe in fn["ground_truth_cwes"]:
-    #                 missed_cwes[cwe] = missed_cwes.get(cwe, 0) + 1
-    #
-    #         print(f"\n   Missed CWEs (False Negatives):")
-    #         for cwe, count in sorted(missed_cwes.items(), key=lambda x: x[1], reverse=True):
-    #             print(f"      {cwe}: {count} times")
-    #
-    #     # what did model hallucinate?
-    #     if false_positives:
-    #         hallucinated_cwes = {}
-    #         for fp in false_positives:
-    #             for cwe in fp["predicted_cwes"]:
-    #                 hallucinated_cwes[cwe] = hallucinated_cwes.get(cwe, 0) + 1
-    #
-    #         if hallucinated_cwes:
-    #             print(f"\n   Hallucinated CWEs (False Positives):")
-    #             for cwe, count in sorted(hallucinated_cwes.items(), key=lambda x: x[1], reverse=True):
-    #                 print(f"      {cwe}: {count} times")
-    #
-    # def _save_misclassification_artifacts(
-    #     self,
-    #     false_positives: list[dict[str, Any]],
-    #     false_negatives: list[dict[str, Any]],
-    # ) -> None:
-    #     """Save misclassification reports in multiple formats."""
-    #
-    #     logger.info("--- Saving Misclassification Artifacts ---")
-    #
-    #     json_path = self.output_dir / "misclassifications.json"
-    #     json_data = {
-    #         "false_positives": false_positives,
-    #         "false_negatives": false_negatives,
-    #         "summary": {
-    #             "total_fp": len(false_positives),
-    #             "total_fn": len(false_negatives),
-    #             "total_errors": len(false_positives) + len(false_negatives),
-    #         }
-    #     }
-    #     self._save_json(json_path, json_data)
-    #     logger.info(f"✅ JSON report: {json_path.name}")
-    #
-    #     txt_path = self.output_dir / "misclassifications_report.txt"
-    #     self._save_misclassification_text_report(
-    #         txt_path,
-    #         false_positives,
-    #         false_negatives,
-    #     )
-    #     logger.info(f"✅ Text report: {txt_path.name}")
-    #
-    #     csv_path = self.output_dir / "misclassifications.csv"
-    #     self._save_misclassification_csv(
-    #         csv_path,
-    #         false_positives,
-    #         false_negatives,
-    #     )
-    #     logger.info(f"✅ CSV report: {csv_path.name}")
-    #
-    #
-    # def _save_misclassification_text_report(
-    #     self,
-    #     filepath: Path,
-    #     false_positives: list[dict[str, Any]],
-    #     false_negatives: list[dict[str, Any]],
-    # ) -> None:
-    #     """Save human-readable text report."""
-    #
-    #     with open(file=filepath, mode="w", encoding="utf-8") as f:
-    #         f.write("=" * 80 + "\n")
-    #         f.write("MISCLASSIFICATION ANALYSIS REPORT\n")
-    #         f.write("=" * 80 + "\n\n")
-    #
-    #         # Summary
-    #         total_errors = len(false_positives) + len(false_negatives)
-    #         f.write(f"Total Misclassifications: {total_errors}\n")
-    #         f.write(f"  - False Positives: {len(false_positives)}\n")
-    #         f.write(f"  - False Negatives: {len(false_negatives)}\n\n")
-    #
-    #         # False Positives
-    #         f.write("=" * 80 + "\n")
-    #         f.write(f"FALSE POSITIVES ({len(false_positives)} samples)\n")
-    #         f.write("=" * 80 + "\n")
-    #         f.write("Model predicted VULNERABLE, but ground truth is NOT VULNERABLE\n\n")
-    #
-    #         for i, sample in enumerate(false_positives, 1):
-    #             f.write(f"\n{'─' * 80}\n")
-    #             f.write(f"FALSE POSITIVE #{i} (Index: {sample['index']})\n")
-    #             f.write(f"{'─' * 80}\n")
-    #             f.write(f"Ground Truth:    {sample['ground_truth_label']}\n")
-    #             f.write(f"Prediction:      {sample['predicted_label']}\n")
-    #             f.write(f"Predicted CWEs:  {', '.join(sample['predicted_cwes']) if sample['predicted_cwes'] else 'None'}\n\n")
-    #
-    #             if "function_code" in sample:
-    #                 f.write("Function Code:\n")
-    #                 f.write("-" * 40 + "\n")
-    #                 f.write(sample["function_code"] + "\n")
-    #                 f.write("-" * 40 + "\n\n")
-    #
-    #             f.write("Model Response:\n")
-    #             f.write("-" * 40 + "\n")
-    #             f.write(sample["model_response"] + "\n")
-    #             f.write("-" * 40 + "\n\n")
-    #
-    #         # False Negatives
-    #         f.write("\n" + "=" * 80 + "\n")
-    #         f.write(f"FALSE NEGATIVES ({len(false_negatives)} samples)\n")
-    #         f.write("=" * 80 + "\n")
-    #         f.write("Model predicted NOT VULNERABLE, but ground truth is VULNERABLE\n\n")
-    #
-    #         for i, sample in enumerate(false_negatives, 1):
-    #             f.write(f"\n{'─' * 80}\n")
-    #             f.write(f"FALSE NEGATIVE #{i} (Index: {sample['index']})\n")
-    #             f.write(f"{'─' * 80}\n")
-    #             f.write(f"Ground Truth:      {sample['ground_truth_label']}\n")
-    #             f.write(f"Prediction:        {sample['predicted_label']}\n")
-    #             f.write(f"Ground Truth CWEs: {', '.join(sample['ground_truth_cwes'])}\n\n")
-    #
-    #             if "function_code" in sample:
-    #                 f.write("Function Code:\n")
-    #                 f.write("-" * 40 + "\n")
-    #                 f.write(sample["function_code"] + "\n")
-    #                 f.write("-" * 40 + "\n\n")
-    #
-    #             f.write("Model Response:\n")
-    #             f.write("-" * 40 + "\n")
-    #             f.write(sample["model_response"] + "\n")
-    #             f.write("-" * 40 + "\n\n")
-    #
-    #
-    # def _save_misclassification_csv(
-    #     self,
-    #     filepath: Path,
-    #     false_positives: list[dict[str, Any]],
-    #     false_negatives: list[dict[str, Any]],
-    # ) -> None:
-    #     """Save misclassifications as CSV for spreadsheet analysis."""
-    #     with open(file=filepath, mode="w", encoding="utf-8", newline="") as f:
-    #         fieldnames = [
-    #             "error_type",
-    #             "index",
-    #             "ground_truth_label",
-    #             "predicted_label",
-    #             "ground_truth_cwes",
-    #             "predicted_cwes",
-    #             "function_length",
-    #             "response_length",
-    #         ]
-    #
-    #         writer = csv.DictWriter(f, fieldnames=fieldnames)
-    #         writer.writeheader()
-    #
-    #         # Write False Positives
-    #         for sample in false_positives:
-    #             writer.writerow({
-    #                 "error_type": "False Positive",
-    #                 "index": sample["index"],
-    #                 "ground_truth_label": sample["ground_truth_label"],
-    #                 "predicted_label": sample["predicted_label"],
-    #                 "ground_truth_cwes": ", ".join(sample["ground_truth_cwes"]),
-    #                 "predicted_cwes": ", ".join(sample["predicted_cwes"]),
-    #                 "function_length": sample.get("function_length", len(sample.get("function_code", ""))),
-    #                 "response_length": sample["response_full_length"],
-    #             })
-    #
-    #         # Write False Negatives
-    #         for sample in false_negatives:
-    #             writer.writerow({
-    #                 "error_type": "False Negative",
-    #                 "index": sample["index"],
-    #                 "ground_truth_label": sample["ground_truth_label"],
-    #                 "predicted_label": sample["predicted_label"],
-    #                 "ground_truth_cwes": ", ".join(sample["ground_truth_cwes"]),
-    #                 "predicted_cwes": ", ".join(sample["predicted_cwes"]),
-    #                 "function_length": sample.get("function_length", len(sample.get("function_code", ""))),
-    #                 "response_length": sample["response_full_length"],
-    #             })
 
     # ========================================================================
     # UTILITY METHODS
@@ -1165,14 +871,16 @@ class Evaluator:
             cwe_key = f"CWE-{cwe_id}"
             if cwe_key in per_cwe_report:
                 metrics = per_cwe_report[cwe_key]
-                cwe_metrics.append({
-                    "cwe": cwe_id,
-                    "cwe_label": cwe_key,
-                    "precision": metrics["precision"],
-                    "recall": metrics["recall"],
-                    "f1-score": metrics["f1-score"],
-                    "support": metrics["support"],
-                })
+                cwe_metrics.append(
+                    {
+                        "cwe": cwe_id,
+                        "cwe_label": cwe_key,
+                        "precision": metrics["precision"],
+                        "recall": metrics["recall"],
+                        "f1-score": metrics["f1-score"],
+                        "support": metrics["support"],
+                    }
+                )
 
         if not cwe_metrics:
             logger.warning("No CWE metrics to plot")
@@ -1211,12 +919,14 @@ class Evaluator:
         fig, ax = plt.subplots(figsize=(12, min(max(6, len(sorted_metrics) * 0.4), 20)))
         sns.barplot(
             data=df,
-            y="cwe_label",
             x="f1-score",
+            y="cwe_label",
+            hue="cwe_label",
+            legend=False,
             palette="RdYlGn",
-            edgecolot="black",
+            edgecolor="black",
             linewidth=0.5,
-            ax=ax
+            ax=ax,
         )
 
         for i, (_, row) in enumerate(df.iterrows()):
@@ -1251,20 +961,27 @@ class Evaluator:
             pad=20,
         )
         ax.set_xlim(0, 1.05)
-        ax.axvline(x=0.5, color="red", linestyle="--", linewidth=1.5,
-            alpha=0.5, label="0.5 threshold",
+        ax.axvline(
+            x=0.5,
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.5,
+            label="0.5 threshold",
         )
         ax.grid(axis="x", alpha=0.3, linestyle="--")
         ax.legend(loc="lower right")
 
         plt.tight_layout()
 
-        save_path = self.output_dir / "cwe_f1_scores.png"
+        save_path = self.output_dir / "plots" / "cwe_f1_scores.png"
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"✅ F1 bar chart: {save_path.name}")
         plt.close(fig)
 
-    def _plot_metrics_heatmap(self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int]=30) -> None:
+    def _plot_metrics_heatmap(
+        self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int] = 30
+    ) -> None:
         """Heatmap showing Precision, Recall, and F1-score for each CWE."""
 
         sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
@@ -1279,7 +996,7 @@ class Evaluator:
             "F1-Score": [m["f1-score"] for m in cwe_metrics],
         }
 
-        df = pd.DataFrame(data, index=cwes) # type: ignore
+        df = pd.DataFrame(data, index=cwes)  # type: ignore
 
         fig_height = min(max(6, len(cwes) * 0.5), 20)
         fig, ax = plt.subplots(figsize=(10, fig_height))
@@ -1315,7 +1032,7 @@ class Evaluator:
 
         plt.tight_layout()
 
-        save_path = self.output_dir / "cwe_metrics_heatmap.png"
+        save_path = self.output_dir / "plots" / "cwe_metrics_heatmap.png"
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"✅ Metrics heatmap: {save_path.name}")
         plt.close(fig)
@@ -1341,7 +1058,7 @@ class Evaluator:
             ],
         }
 
-        df = pd.DataFrame(data, index=cwes) # type: ignore
+        df = pd.DataFrame(data, index=cwes)  # type: ignore
 
         fig_height = min(max(8, len(cwes) * 0.5), 20)
 
@@ -1368,7 +1085,7 @@ class Evaluator:
             y=0.98,
         )
 
-        save_path = self.output_dir / "cwe_metrics_heatmap_clustered.png"
+        save_path = self.output_dir / "plots" / "cwe_metrics_heatmap_clustered.png"
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"✅ Clustered heatmap: {save_path.name}")
         plt.close()
@@ -1433,7 +1150,7 @@ class Evaluator:
 
         plt.tight_layout()
 
-        save_path = self.output_dir / "cwe_support_distribution.png"
+        save_path = self.output_dir / "plots" / "cwe_support_distribution.png"
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"✅ Support distribution: {save_path.name}")
         plt.close(fig)
