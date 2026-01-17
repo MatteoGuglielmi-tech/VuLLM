@@ -10,6 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .ui import rich_exception, stateless_progress, rich_status
+from . import utils
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ class CWEStatusAnalyzer:
 
     def __init__(
         self,
-        dataset_path: Path | str,
+        df: pd.DataFrame,
         cwe_status_csv: Path | str,
         output_dir: Path | str,
     ):
@@ -35,29 +36,26 @@ class CWEStatusAnalyzer:
 
         Parameters
         ----------
-        dataset_path : Path | str
-            Path to JSONL dataset
+        df : pd.DataFrame
+            Dataset as Pandas DataFrame
         cwe_status_csv : Path | str
             Path to MITRE CWE status CSV
         output_dir : Path | str
             Output directory for results
         """
 
-        self.dataset_path = Path(dataset_path)
         self.cwe_status_csv = Path(cwe_status_csv)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            if not self.dataset_path.exists():
-                raise FileNotFoundError(f"Dataset not found: {self.dataset_path}")
             if not self.cwe_status_csv.exists():
                 raise FileNotFoundError(f"CWE status CSV not found: {self.cwe_status_csv}")
         except FileNotFoundError:
             rich_exception()
 
-        with rich_status(f"📂 Loading dataset: {self.dataset_path.name}"):
-            self.dataset_df = pd.read_json(str(self.dataset_path), lines=True)
+
+        self.dataset_df: pd.DataFrame = df
 
         with rich_status(f"📂 Loading CWE status: {self.cwe_status_csv.name}"):
             self.cwe_status_df = pd.read_csv(str(self.cwe_status_csv), index_col=False)

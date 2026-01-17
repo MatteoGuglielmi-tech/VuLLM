@@ -3,6 +3,7 @@ import re
 import logging
 import json
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -16,7 +17,7 @@ from typing import cast
 from . import utils
 from .logging_config import setup_logger
 from .cli import get_parser
-from .ui import rich_exception, rich_print, rich_status
+from .ui import rich_exception, rich_status
 from .status import CWEStatusAnalyzer
 
 
@@ -36,8 +37,17 @@ class DataDistribution:
         self.output_dir: Path = Path(output_dir)
         self.mitre_file: Path = mitre_file
         self.dataset_path: Path = Path(pth2jsonl)
-        self.__data_dict: list[utils.JsonlEntry] = utils.read_jsonl(input_file_path=self.dataset_path)
-        self.data_df: pd.DataFrame = pd.DataFrame(data=self.__data_dict)
+
+        try:
+            if not self.dataset_path.exists():
+                raise FileNotFoundError(f"Dataset not found: {self.dataset_path}")
+        except FileNotFoundError:
+            rich_exception()
+
+        with rich_status(f"📂 Loading dataset: {self.dataset_path.name}"):
+            self.data_df = pd.read_json(str(self.dataset_path), lines=True)
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _validate_4plots(self) -> None:
         expected_columns: list[str] = sorted([
@@ -63,7 +73,7 @@ class DataDistribution:
         label_names = class_counts.index.values.tolist()
 
         def __func(pct, allvals) -> str:
-            absolute = int(pct / 100.0 * np.sum(allvals))
+            absolute = round(pct / 100.0 * np.sum(allvals))
             return "{:.1f}%\n({:d})".format(pct, absolute)
 
         # Create the pie chart
@@ -102,24 +112,169 @@ class DataDistribution:
         plt.legend(wedges, names, loc="upper right", facecolor="white")
         plt.tight_layout()
 
-        fig_path: Path = self.output_dir / "pie_target.svg"
+        fig_path: Path = self.output_dir / "pie_target.pdf"
         fig_path.parent.mkdir(exist_ok=True, parents=True)
 
         try:
-            plt.savefig(fig_path, dpi=300)
-            # plt.show()
+            plt.savefig(fig_path, format="pdf")
 
             logger.info(f"Distribution pie chart saved to `{fig_path}`")
         except Exception:
             rich_exception(show_locals=True)
 
     def _barplot_vulnerability(self) -> None:
-        # filter non-vulnerable targets
-        vulnerable_df: pd.DataFrame = self.data_df.loc[self.data_df["target"] != 0]
-        n_vul: int = len(vulnerable_df)
-        vulnerable_df = vulnerable_df.drop(labels=["target"], axis=1)
+        # Filter non-vulnerable targets
+        vulnerable_df: pd.DataFrame = self.data_df.loc[
+            self.data_df["target"] != 0
+        ].copy()
+        safe_df: pd.DataFrame = self.data_df.loc[
+            self.data_df["target"] == 0
+        ].copy()
 
-        logger.info(f"Dropped {n_vul - len(vulnerable_df)} vulnerable entries")
+        print(f"Safe entries: {len(safe_df)}")
+        n_vul: int = len(vulnerable_df)
+
+        logger.info(f"Total vulnerable entries: {n_vul}")
+
+        cwe_extended: list[str] = []
+        for el in vulnerable_df["cwe"]:
+            if isinstance(el, list):
+                for e in el:
+                    if e:
+                        cwe_extended.append(e.replace(" ", "").strip())
+            elif el:
+                cwe_extended.append(el.replace(" ", "").strip())
+
+        class_freq: dict[str, int] = dict(Counter(cwe_extended))
+
+        plot_df = pd.DataFrame(
+            [(cwe, freq) for cwe, freq in class_freq.items()], columns=["cwe", "freq"]
+        )
+
+        # Sort by CWE numeric ID
+        plot_df["cwe_num"] = plot_df["cwe"].apply(
+            lambda x: int(
+                re.sub(pattern=r"\[.*\]", repl="", string=x).strip().replace("CWE-", "")
+            )
+        )
+        plot_df = plot_df.sort_values(by="cwe_num").reset_index(drop=True)
+        plot_df = plot_df.drop(columns=["cwe_num"])
+
+        # Create labels with counts for legend
+        plot_df["cwe_label"] = plot_df.apply(
+            lambda row: f"{row['cwe']} [{row['freq']}]", axis=1
+        )
+
+        logger.info(f"CWE distribution:\n{plot_df.to_string()}")
+
+        n_cwes = len(plot_df)
+        pal = sns.color_palette(palette="pastel", n_colors=n_cwes)
+
+        # Adjust figure size based on number of CWEs
+        fig_width = max(14, n_cwes * 1.2)
+        fig, ax = plt.subplots(figsize=(fig_width, 10))
+
+        # Create bar plot
+        bars = ax.bar(
+            x=range(n_cwes),
+            height=plot_df["freq"],
+            color=pal,
+            edgecolor="gray",
+            linewidth=0.5,
+            zorder=10,
+        )
+
+        ax.set_xticks(range(n_cwes))
+        ax.set_xticklabels(plot_df["cwe"], rotation=45, ha="right", fontsize=10)
+
+        fig.suptitle(
+            "Statistical distribution for vulnerability IDs.",
+            fontsize=16,
+            fontweight="bold",
+            y=0.98,
+        )
+        fig.text(
+            x=0.5,
+            y=0.94,
+            s="Analysis shows the distribution after low frequency CWE IDs filtering.",
+            fontsize=12,
+            color="gray",
+            ha="center",
+        )
+
+        ax.set_xlabel("CWE IDs", fontsize=12)
+        ax.set_ylabel("Count", fontsize=12)
+
+        # Y-axis formatting
+        max_freq = plot_df["freq"].max()
+        ax.set_ylim(0, max_freq * 1.1)
+        ax.yaxis.set_major_locator(MultipleLocator(50))
+        ax.yaxis.set_minor_locator(MultipleLocator(25))
+
+        # Grid
+        ax.grid(
+            True, which="minor", linestyle=":", alpha=0.6, axis="y", color="darkgray"
+        )
+        ax.grid(
+            True, which="major", linestyle="-", alpha=0.8, axis="y", color="darkgray"
+        )
+        ax.set_axisbelow(True)
+
+        # Remove top and right spines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        # Add value labels on top of bars
+        for bar, freq in zip(bars, plot_df["freq"]):
+            ax.annotate(
+                f"{freq}",
+                xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="dimgray",
+            )
+
+        # Create legend with counts
+        legend_handles = [
+            Rectangle((0, 0), 1, 1, facecolor=pal[i], edgecolor="gray", linewidth=0.5)
+            for i in range(n_cwes)
+        ]
+
+        # Place legend outside the plot on the right
+        ax.legend(
+            legend_handles,
+            plot_df["cwe_label"].tolist(),
+            title="CWE IDs",
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            fontsize=10,
+            title_fontsize=11,
+            frameon=True,
+            facecolor="white",
+            edgecolor="lightgray",
+        )
+
+        # Adjust layout to make room for legend
+        plt.tight_layout()
+        fig.subplots_adjust(right=0.82, top=0.92)  # Make room for legend on the right
+
+        try:
+            output_file = self.output_dir / "cwe_distr.pdf"
+            plt.savefig(output_file, format="pdf")
+            plt.close(fig)
+            logger.info(f"Distribution bar chart saved to `{output_file}`")
+        except Exception:
+            rich_exception(show_locals=True)
+
+    def _barplot_vulnerability_big(self) -> None:
+        # filter non-vulnerable targets
+        vulnerable_df: pd.DataFrame = self.data_df.loc[self.data_df["target"] != 0].copy()
+        vulnerable_df = vulnerable_df.drop(labels=["target"], axis=1)
+        n_vul: int = len(vulnerable_df)
+        logger.info(f"Total vulnerable entries: {n_vul}")
 
         # subsitute empty CWE field with None
         vulnerable_df.loc[:, "cwe"] = vulnerable_df["cwe"].replace(
@@ -132,39 +287,50 @@ class DataDistribution:
             if isinstance(el, list):
                 for e in el:
                     cwe_extended.append(e.replace(" ", "").strip())
-            else:
-                cwe_extended.append(el)
+            elif el:
+                cwe_extended.append(el.replace(" ", "").strip())
 
-        del vulnerable_df
         class_freq: dict[str, int] = dict(Counter(cwe_extended))
-        del cwe_extended
 
-        vulnerable_df: pd.DataFrame = (
-            pd.DataFrame(data=class_freq, index=pd.Series([0]))
-            .rename(index={0: "freq"})
-            .T
+        plot_df = pd.DataFrame(
+            [(cwe, freq) for cwe, freq in class_freq.items()], columns=["cwe", "freq"]  # type: ignore[reportArgumentType]
+        )
+        # Sort by CWE numeric ID
+        plot_df["cwe_num"] = plot_df["cwe"].apply(
+            lambda x: int(
+                re.sub(pattern=r"\[.*\]", repl="", string=x).strip().replace("CWE-", "")
+            )
+        )
+        plot_df = plot_df.sort_values(by="cwe_num").reset_index(drop=True)
+        plot_df = plot_df.drop(columns=["cwe_num"])
+
+        # Create labels with counts for legend
+        plot_df["cwe_label"] = plot_df.apply(
+            lambda row: f"{row['cwe']} [{row['freq']}]", axis=1
         )
 
-        vulnerable_df.reset_index(inplace=True)
-        vulnerable_df.rename(columns={"index": "cwe"}, inplace=True)
-        vulnerable_df["cwe"] = sorted(
-            vulnerable_df["cwe"].to_list(),
-            key=lambda id: int(
-                re.sub(pattern=r"\[.*\]", repl="", string=id)
-                .strip()
-                .replace("CWE-", "")
-            ),
-        )
+        logger.info(f"CWE distribution:\n{plot_df.to_string()}")
 
-        pal = sns.color_palette(palette="pastel", n_colors=len(vulnerable_df["cwe"]))
+        n_cwes = len(plot_df)
+        pal = sns.color_palette(palette="pastel", n_colors=n_cwes)
 
         fig, ax = plt.subplots(figsize=(25, 15))
+        
+        # Create bar plot
+        bars = ax.bar(
+            x=range(n_cwes),
+            height=plot_df["freq"],
+            color=pal,
+            edgecolor="gray",
+            linewidth=0.5,
+            zorder=10,
+        )
 
         ax = sns.barplot(
             x="cwe",
             y="freq",
             hue="cwe",
-            data=vulnerable_df,
+            data=plot_df,
             palette=pal,
             zorder=10,
             legend=True,
@@ -174,43 +340,48 @@ class DataDistribution:
             "Statistical distribution for vulnerability IDs.",
             fontsize=16,
             fontweight="bold",
-            ha="center",
-            y=0.97,
-        )
-        fig.text(
-            x=0.5,
-            y=0.94,
-            s="Analysis shows a right-skewed distribution with several high-value outliers",
-            fontsize=15,
-            ha="center",
-            color="gray",
+            y=0.98,
         )
 
-        ax.tick_params(axis="x", labelrotation=90)
+        
         ax.set_xlabel("CWE IDs", fontsize=12)
         ax.set_ylabel("Count", fontsize=12)
+        ax.tick_params(axis="x", labelrotation=90)
+    
+        # Y-axis formatting
+        max_freq = plot_df["freq"].max()
+        ax.set_ylim(0, max_freq * 1.1)
         ax.yaxis.set_major_locator(MultipleLocator(50))
-        ax.yaxis.set_major_formatter("{x:.0f}")
         ax.yaxis.set_minor_locator(MultipleLocator(25))
-        ax.yaxis.set_minor_formatter("{x:.0f}")
-        ax.set_ylim(0, int(vulnerable_df["freq"].max() + 25))
-
+    
+        # Grid
         ax.grid(
             True, which="minor", linestyle=":", alpha=0.6, axis="y", color="darkgray"
         )
         ax.grid(
             True, which="major", linestyle="-", alpha=0.8, axis="y", color="darkgray"
         )
-        ax.grid(
-            True, which="major", linestyle="--", alpha=0.4, axis="x", color="darkgray"
-        )
+        ax.set_axisbelow(True)
 
+        # Remove top and right spines
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-        handles, labels = ax.get_legend_handles_labels()
+        # Add value labels on top of bars
+        for bar, freq in zip(bars, plot_df["freq"]):
+            ax.annotate(
+                f"{freq}",
+                xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="dimgray",
+            )
 
-        labels = [labels[i] + f" [{v}]" for i, v in enumerate(vulnerable_df["freq"])]
+        handles, labels = ax.get_legend_handles_labels()
+        labels = [labels[i] + f" [{v}]" for i, v in enumerate(plot_df["freq"])]
 
         plt.legend(
             handles,
@@ -218,8 +389,7 @@ class DataDistribution:
             title="CWE IDs",
             # loc="upper right",
             loc="best",
-            ncol=5,
-            bbox_to_anchor=[0.9, 0.9],
+            ncol=7,
             bbox_transform=fig.transFigure,
             facecolor="white",
             fontsize=12,
@@ -227,11 +397,12 @@ class DataDistribution:
         )
 
         plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-        try:
-            plt.savefig(self.output_dir / "cwe_distr.png", dpi=300)
-            # plt.show()
 
-            logger.info(f"Distribution pie chart saved to `{self.output_dir / "cwe_distr.png"}`")
+        try:
+            output_file = self.output_dir / "cwe_distr.pdf"
+            plt.savefig(output_file, format="pdf")
+            plt.close(fig)
+            logger.info(f"Distribution bar chart saved to `{output_file}`")
         except Exception:
             rich_exception(show_locals=True)
 
@@ -260,28 +431,28 @@ class DataDistribution:
             x_col_content="Token Count",
             y_col_name="token_count",
             title="Distribution of token counts in vulnerable functions",
-            filename="distr_token_count_vul.svg",
+            filename="distr_token_count_vul.pdf",
         )
         self.generate_violin(
             df=df_vuln,
             x_col_content="Complexity",
             y_col_name="cyclomatic_complexity",
             title="Distribution of cyclomatic complexity scores across vulnerable functions",
-            filename="distr_complexity_vul.svg",
+            filename="distr_complexity_vul.pdf",
         )
         self.generate_violin(
             df=df_non_vuln,
             x_col_content="Token Count",
             y_col_name="token_count",
             title="Distribution of token counts across non-vulnerable functions",
-            filename="dist_token_count_non_vul.svg",
+            filename="dist_token_count_non_vul.pdf",
         )
         self.generate_violin(
             df=df_non_vuln,
             x_col_content="Complexity",
             y_col_name="cyclomatic_complexity",
             title="Distribution of cyclomatic complexity scores across non-vulnerable functions",
-            filename="distr_complexity_non_vul.svg",
+            filename="distr_complexity_non_vul.pdf",
         )
 
     def generate_violin(
@@ -419,12 +590,12 @@ class DataDistribution:
         )
 
         ax.set_ylabel("Counts", fontsize=12)
-        if y_col_name == "complexity":
-            major_interval = 20
-            minor_interval = 10
+        if y_col_name == "cyclomatic_complexity":
+            major_interval = 5
+            minor_interval = 2.5
         else:
-            major_interval = 500
-            minor_interval = 250
+            major_interval = 2000
+            minor_interval = 1000
 
         ax.yaxis.set_major_locator(MultipleLocator(major_interval))
         ax.yaxis.set_major_formatter("{x:.0f}")
@@ -447,7 +618,7 @@ class DataDistribution:
         plt.tight_layout(rect=(0.05, 0.05, 0.95, 0.90))
 
         try:
-            plt.savefig(self.output_dir / filename, dpi=300)
+            plt.savefig(self.output_dir / filename, format="pdf")
             # plt.show()
 
             logger.info(f"Distribution pie chart saved to `{self.output_dir / filename}`")
@@ -457,7 +628,7 @@ class DataDistribution:
     def deprecation_analysis(self):
         logger.info("Starting deprecation analysis ...")
         analyzer = CWEStatusAnalyzer(
-            dataset_path=self.dataset_path,
+            df=self.data_df,
             cwe_status_csv=self.mitre_file,
             output_dir=self.output_dir,
         )
