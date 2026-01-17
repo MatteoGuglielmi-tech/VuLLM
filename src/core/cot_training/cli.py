@@ -1,7 +1,10 @@
 import argparse
 import json
+
 from datetime import datetime
 from pathlib import Path
+
+from .processing_lib import PromptPhase, AssumptionMode
 
 
 class PathEncoder(json.JSONEncoder):
@@ -65,6 +68,20 @@ def get_parser():
         "--debug",
         action="store_true",
         help="Activate debug CLI logs",
+    )
+    common_group.add_argument(
+        "--prompt_mode",
+        type=PromptPhase,
+        choices=[m.value for m in PromptPhase],
+        default="training",
+        help="Defines prompt structure to use",
+    )
+    common_group.add_argument(
+        "--assumption_mode",
+        type=AssumptionMode,
+        choices=[m.value for m in AssumptionMode],
+        default="none",
+        help="Defines whether the model will be optimistic, pessimistic or neutral",
     )
 
     # ============================================================================
@@ -174,6 +191,11 @@ def get_parser():
         default=8,
         help="How many samples in a per device batch for evaluation steps",
     )
+    finetune_group.add_argument(
+        "--target_vulnerable_ratio",
+        type=float,
+        help="Balance the vulnerable portion of the training set by duplicating the vulnerable samples to reach specified ration",
+    )
 
     # ============================================================================
     # HPO ONLY ARGUMENTS
@@ -273,7 +295,8 @@ def validate_args(args):
         "lora_rank",
         "lora_alpha",
         "lora_dropout",
-        "batch_size_eval"
+        "batch_size_eval",
+        "target_vulnerable_ratio",
     }
 
     # hpo only args
@@ -436,6 +459,7 @@ def get_default_value(arg_name):
         "lora_alpha": 32,
         "lora_dropout": 0,
         "batch_size_eval": 8,
+        "target_vulnerable_ratio": None,
         # HPO only
         "n_trials": 5,
         "run_cap": 100,
