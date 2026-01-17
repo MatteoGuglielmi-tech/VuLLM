@@ -15,7 +15,15 @@ from outlines import Generator, from_transformers
 from outlines.types import JsonSchema
 from genson import SchemaBuilder
 
-from .datatypes import GenerationError, TypedDataset, TestDatasetSchema
+from .datatypes import (
+    AssumptionMode,
+    GenerationError,
+    MismatchCWEError,
+    PromptPhase,
+    TypedDataset,
+    TestDatasetSchema,
+    ExpectedModelResponse,
+)
 from .prompt_config import Messages, VulnerabilityPromptConfig as PromptConfig
 from ..utilities import (
     stateless_progress,
@@ -83,6 +91,8 @@ class JSONGenerator:
         model: FastLanguageModel,
         tokenizer: PreTrainedTokenizer,
         prompt_config: PromptConfig,
+        prompt_mode: PromptPhase,
+        assumption_mode: AssumptionMode,
         max_new_tokens: int = 512,
         do_sample: bool = True,
         temperature: float = 0.2,
@@ -101,6 +111,10 @@ class JSONGenerator:
             Tokenizer instance previously loaded with [~FastLanguageModel.from_pretrained(...)]
         prompt_config : PromptConfig
             Your prompt configuration
+        prompt_mode : PromptPhase
+            Inference prompt mode to use
+        assumption_mode : AssumptionMode
+            Type of assumptions to use
         max_new_tokens : int
             Maximum tokens to generate
         do_sample : bool
@@ -122,6 +136,8 @@ class JSONGenerator:
         }
 
         self.prompt_config = prompt_config
+        self.prompt_mode = prompt_mode
+        self.assumption_mode = assumption_mode
 
         # Store generation parameters
         self.generation_params = {
@@ -167,15 +183,9 @@ class JSONGenerator:
             "required": ["reasoning", "vulnerabilities", "verdict"],
         }
 
-        self.json_schema = JsonSchema(
-            schema_dict,
-            whitespace_pattern=r"[ ]?",  # Allow compact JSON
-        )
-        self.pydantic_schema = self.convert_json_schema(target_type="pydantic")
-
-        self.generator_json = Generator(
-            model=self.outlines_model, output_type=self.json_schema
-        )
+        self.json_schema = JsonSchema(schema_dict, whitespace_pattern=r"[ ]?")
+        self.pydantic_schema = ExpectedModelResponse
+        self.generator_json = Generator(model=self.outlines_model, output_type=self.json_schema)
 
     @overload
     def convert_json_schema(
@@ -236,7 +246,9 @@ class JSONGenerator:
         """
 
         # build message structure
-        messages: Messages = self.prompt_config.as_messages(func_code=c_code_input)
+        messages: Messages = self.prompt_config.as_messages(
+            func_code=c_code_input, phase=self.prompt_mode, mode=self.assumption_mode
+        )
 
         # apply model-specific chat template (CRITICAL!)
         formatted_prompt: ChatTemplate = self.tokenizer.apply_chat_template(
@@ -306,10 +318,15 @@ class JSONGenerator:
             try:
                 status.update(default_msg)
                 result_json = self.generator_json(data, **gen_params)
-                validated: BaseModel = self.pydantic_schema.model_validate_json(result_json)  # type: ignore[reportArgumentError]
+                validated: ExpectedModelResponse = self.pydantic_schema.model_validate_json(result_json)  # type: ignore[reportArgumentError]
                 return validated.model_dump(mode="json")
 
-            except (torch.cuda.OutOfMemoryError, RuntimeError, ValidationError):
+            except (
+                torch.cuda.OutOfMemoryError,
+                RuntimeError,
+                ValidationError,
+                MismatchCWEError,
+            ):
                 if n_retries and n_retries > 0:
                     return self.run_inference(
                         data=data,
@@ -463,9 +480,9 @@ class JSONGenerator:
 
                 for idx, raw_response in enumerate(raw_results):
                     try:
-                        validated: BaseModel = self.pydantic_schema.model_validate_json(raw_response)
+                        validated: ExpectedModelResponse = self.pydantic_schema.model_validate_json(raw_response)
                         validated_results.append(validated.model_dump(mode="json"))
-                    except (ValidationError, json.JSONDecodeError):
+                    except (ValidationError, json.JSONDecodeError, MismatchCWEError):
                         validated_results.append(None)
                         failed_indeces.append(idx)  # idx 4 fallback
 
@@ -506,7 +523,6 @@ class JSONGenerator:
                 for finput in formatted_batch:
                     try:
                         validated_response = self.run_inference(data=finput, n_retries=n_retries)
-                        # validated = self.pydantic_schema.model_validate_json(raw_response)
                         validated_results.append(validated_response)
                     except GenerationError:
                         rich_exception()
@@ -542,13 +558,6 @@ class JSONGenerator:
         all_predictions: FinalInferenceBatch = []
         stats = BatchInferenceStats(total_samples=len(test_dataset["func"]))
 
-        num_batches = (stats.total_samples + batch_size - 1) // batch_size
-        logger.info(
-            f"Starting batch inference: {stats.total_samples} samples, "
-            f"{num_batches} batches of size {batch_size}"
-            f"Progress bar will be displayed per batch!"
-        )
-
         for func_batch in self._create_batches(
             test_dataset, batch_size=batch_size, num_samples=len(test_dataset)
         ):
@@ -557,10 +566,14 @@ class JSONGenerator:
 
             # filter None
             if all(res is not None for res in outputs):
-                # if all good, no checks, just add
+                # fast path -> all good, no checks
                 all_predictions.extend(cast(FinalInferenceBatch, outputs))
                 stats.successful_samples += batch_len
+                stats.successful_sample_indices.extend(
+                    range(sample_offset, sample_offset + batch_len)
+                )
             else:
+                # slow path -> run sequential on failed samples
                 for local_idx, res in enumerate(outputs):
                     if res is None:
                         stats.failed_samples += 1
@@ -604,7 +617,7 @@ class JSONGenerator:
             Test dataset with 'func' field containing code samples.
         use_batching: bool
             Select either `batch` or `sequential` modes.
-        batch_size : int, default=16
+        batch_size : int, default=8
             Batch size for inference.
 
         Returns
@@ -617,12 +630,6 @@ class JSONGenerator:
 
         if not self.n_samples > 0:
             raise ValueError("Provided dataset is empty")
-
-        logger.info(
-            f"🔍 Evaluating on {self.n_samples} test samples "
-            f"(mode={'batch' if use_batching else 'sequential'}, "
-            f"batch_size={batch_size if use_batching else 'N/A'})..."
-        )
 
         if use_batching:
             predictions, success_indices = self.run_batch_inference_on_dataset(
@@ -668,6 +675,8 @@ if __name__ == "__main__":
         max_new_tokens=1024,
         temperature=0.2,
         top_p=0.95,
+        prompt_mode=PromptPhase.FULL_CONSTRAINED_INFERENCE,
+        assumption_mode=AssumptionMode.OPTIMISTIC
     )
 
     code_sample = """void foo(char *input) {
