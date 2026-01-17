@@ -89,7 +89,7 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
         """Create prompt for judging reasoning quality"""
 
         cwe_info = (
-            "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample["cwe"], sample["cwe_descs"])])
+            "\n".join([f"- {cwe}: {desc}" for cwe, desc in zip(sample["cwe"], sample["cwe_desc"])])
             if bool(sample["target"])
             else "None"
         )

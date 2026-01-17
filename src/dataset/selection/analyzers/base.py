@@ -134,7 +134,8 @@ class StatsRecord:
             for data in rich_progress(
                 vals, total=len(vals), description="✍️ Writing samples ✍️"
             ):
-                writer.write(data["sample"].to_dict)
+                writer.write(data["sample"])
+                # writer.write(data["sample"].to_dict)
 
         logger.info(f"💾 Saved {len(vals)} samples to {outpath} 💾")
 

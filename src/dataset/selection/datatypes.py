@@ -8,6 +8,6 @@ class Sample(TypedDict):
     func: str
     target: int
     cwe: list[str]
-    cwe_descs: list[str]
+    cwe_desc: list[str]
     project: str
     reasoning: NotRequired[str]
