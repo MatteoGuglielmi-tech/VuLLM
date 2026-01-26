@@ -23,6 +23,8 @@ checkpoints/
 unused/
 tests/
 scripts/
+cluster_logs/
+cluster_old_version_stuff/
 
 accelerate/
 results/
@@ -84,6 +86,8 @@ src/dataset/balance/assets/
 
 src/dataset/selection_1
 
+
+src/mem_consumption
 ####### RUST #######
 rusty/target
 rusty/src/mitre
