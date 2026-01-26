@@ -1,8 +1,6 @@
 import sys
 import logging
 
-from pathlib import Path
-from datetime import datetime
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.style import Style
@@ -20,11 +18,6 @@ def setup_logger(level: int = logging.DEBUG):
         The logging level threshold, by default `logging.DEBUG`.
     """
 
-    date: str = datetime.today().strftime("%Y-%m-%d")
-    time: str = datetime.now().strftime("%H-%M-%S")
-    log_file = Path(__file__).parent / f"run/{date}/{time}/app.log"
-    log_file.parent.mkdir(exist_ok=True, parents=True)
-
     custom_theme = Theme(
         {
             "logging.level.notset": Style(dim=True),
@@ -41,11 +34,6 @@ def setup_logger(level: int = logging.DEBUG):
 
     main_process = is_main_process()
     if main_process:
-        fh = logging.FileHandler(log_file, mode="w")
-        fh.setLevel(logging.DEBUG)
-        file_formatter = logging.Formatter('| %(levelname)-8s | %(asctime)s | %(name)s:%(lineno)d | "%(message)s"')
-        fh.setFormatter(file_formatter)
-
         logging.basicConfig(
             level=level,
             format="%(message)s",
@@ -60,7 +48,6 @@ def setup_logger(level: int = logging.DEBUG):
                     show_path=True,
                     markup=True,
                 ),
-                fh
             ],
             force=True,
         )
@@ -91,14 +78,10 @@ def setup_logger(level: int = logging.DEBUG):
         logging.getLogger("datasets").setLevel(logging.ERROR)
         logging.getLogger("torch").setLevel(logging.ERROR)
         logging.getLogger("unsloth").setLevel(logging.ERROR)
-        logging.getLogger("root").setLevel(logging.ERROR)
 
         # suppress Python warnings on non-main processes
         import warnings
         warnings.filterwarnings("ignore")
-
-    if main_process:
-        logging.info(f"Logging configured. Outputting to console and '{log_file}'.")
 
 
 class BufferingHandler(logging.Handler):
