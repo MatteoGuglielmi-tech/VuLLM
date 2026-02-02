@@ -20,39 +20,43 @@ if __name__ == "__main__":
     args = get_parsed_args()
 
     logger.debug("🚀 Starting baseline... 🚀")
-
     try:
         if args.finetuning:
             if args.version == 1:
-                from .analyzers import FineTunePromptAnalyzer
-
-                analyzer_type = FineTunePromptAnalyzer
+                analyzer_version = "v1"
             elif args.version == 2:
-                from .analyzers import FineTunePromptAnalyzerV2
-
-                analyzer_type = FineTunePromptAnalyzerV2
+                analyzer_version = "v2"
+            else:
+                raise ValueError(f"Unknown version: {args.version}")
         elif args.assessment:
-            from .analyzers import JudgePromptAnalyzer
+            analyzer_version = "judge"
+        else:
+            raise ValueError("Must specify --finetuning or --assessment")
 
-            analyzer_type = JudgePromptAnalyzer
+        common_kwargs = {
+            "dataset_path": args.dataset,
+            "analyzer_version": analyzer_version,
+            "output_dir": args.output,
+            "max_samples": args.max_samples,
+        }
+
+        if analyzer_version == "v2":
+            common_kwargs.update(
+                {
+                    "assumption_mode": args.assumption_mode,
+                    "prompt_phase": args.prompt_mode,
+                    "add_hierarchy": args.add_hierarchy,
+                }
+            )
 
         if args.tokenizer:
             analyze_single_tokenizer(
-                dataset_path=args.dataset,
-                analyzer_type=analyzer_type,
                 tokenizer_name=args.tokenizer,
                 chat_template=args.chat_template,
-                output_dir=args.output,
-                max_samples=args.max_samples,
+                **common_kwargs,
             )
         else:
-            compare_tokenizers(
-                dataset_path=args.dataset,
-                analyzer_type=analyzer_type,
-                tokenizer_config=args.tokenizers,
-                output_dir=args.output,
-                max_samples=args.max_samples,
-            )
+            compare_tokenizers(tokenizer_config=args.tokenizers, **common_kwargs)
 
         logger.info(f"🎉 All done! Check the `{args.output}` for results.")
     finally:

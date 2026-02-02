@@ -6,7 +6,7 @@ Analyses the token distribution when applying the prompt to evaluate CoT quality
 from transformers import PreTrainedTokenizer
 
 from .base import BaseSequenceLengthAnalyzer
-from ..datatypes import ReasoningSample, TokensStats
+from ..datatypes import Messages, ReasoningSample, TokensStats
 
 
 class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
@@ -83,9 +83,10 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
     ).strip()
 
     def __init__(self, tokenizer: PreTrainedTokenizer, chat_template: str):
-        super().__init__(tokenizer, chat_template)
+        self.tokenizer = tokenizer
+        self.chat_template = chat_template
 
-    def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
+    def format_sample(self, sample: ReasoningSample) -> Messages:
         """Create prompt for judging reasoning quality"""
 
         cwe_info = (
@@ -102,22 +103,20 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
             reasoning=sample.reasoning,
         )
 
-        no_answer_field_here: str = ""
+        # no_answer_field_here: str = ""
+        return [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
 
-        return self.SYSTEM_PROMPT, prompt, no_answer_field_here
+    def count_individual_components(self, sample: ReasoningSample) -> TokensStats:
+        messages = self.format_sample(sample)
 
-    def count_tokens_for_sample(self, sample: ReasoningSample) -> TokensStats:
-        system_content, user_content, _ = self.format_sample(sample)
-
-        system_messages = [{"role": "system", "content": system_content}]
-        system_formatted = self.apply_template(messages=system_messages)
+        system_messages = messages[0]
+        system_formatted = self.apply_template(messages=[system_messages])
         system_tokens = self._encode_and_count(text=system_formatted)
 
-        full_convo = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
-        ]
-        system_user_formatted = self.apply_template(messages=full_convo)
+        system_user_formatted = self.apply_template(messages=messages)
         total_tokens = self._encode_and_count(text=system_user_formatted)
         user_tokens = total_tokens - system_tokens
         assistant_tokens = 0
@@ -125,8 +124,8 @@ class JudgePromptAnalyzer(BaseSequenceLengthAnalyzer):
         return TokensStats(
             system_tokens=system_tokens,
             user_tokens=user_tokens,
-            reasoning_tokens=self._encode_and_count(sample.reasoning),
-            answer_tokens=0,
+            # reasoning_tokens=self._encode_and_count(sample.reasoning),
+            # answer_tokens=0,
             assistant_tokens=assistant_tokens,
             total_tokens=total_tokens,
         )

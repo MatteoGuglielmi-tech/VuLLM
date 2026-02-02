@@ -4,6 +4,7 @@ import logging
 
 from pathlib import Path
 from .utilities import rich_exception
+from .datatypes import PromptPhase, AssumptionMode
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOKENIZER_LIST = [
     ("unsloth/Qwen2.5-Coder-32B-Instruct-bnb-4bit", "qwen-2.5"),
     ("unsloth/Qwen2.5-72B-Instruct-bnb-4bit", "qwen-2.5"),
+    ("deepseek-ai/deepseek-coder-33b-instruct", "custom"),
     ("microsoft/Phi-4", "phi-4"),
     ("microsoft/Phi-4-reasoning-plus", "phi-4"),
     ("unsloth/Llama-3.3-70B-Instruct-bnb-4bit", "llama-3.3"),
@@ -101,6 +103,25 @@ def _get_parser() -> argparse.ArgumentParser:
 
     finetune_group = parser.add_argument_group("FineTuning prompt version")
     finetune_group.add_argument("--version", "-v", type=int, choices=[1, 2], help="Prompt version to use.")
+    finetune_group.add_argument(
+        "--prompt_mode",
+        type=PromptPhase,
+        choices=[m.value for m in PromptPhase],
+        default="training",
+        help="Defines prompt structure to use",
+    )
+    finetune_group.add_argument(
+        "--assumption_mode",
+        type=AssumptionMode,
+        choices=[m.value for m in AssumptionMode],
+        default="none",
+        help="Defines whether the model will be optimistic, pessimistic or neutral",
+    )
+    finetune_group.add_argument(
+        "--add_hierarchy",
+        action="store_true",
+        help="Add cwe hierarchy guidelines in system prompt",
+    )
 
     return parser
 

@@ -1,4 +1,4 @@
-from unsloth import get_chat_template
+# from unsloth import get_chat_template
 
 import json
 import numpy as np
@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from transformers import PreTrainedTokenizer
 
 from ..utilities import rich_rule, build_table, rich_panel
-from ..datatypes import ReasoningSample, TokensStats
+from ..datatypes import ChatTmplt, ReasoningSample, TokensStats, Messages
 from ..loader_config import Loader
 
 logger = logging.getLogger(__name__)
@@ -29,16 +29,14 @@ class TokenStats:
 
     system_tokens: int = 0
     user_tokens: list[int] = field(default_factory=list)
-    reasoning_tokens: list[int] = field(default_factory=list)
-    answer_tokens: list[int] = field(default_factory=list)
+    assistant_tokens: list[int] = field(default_factory=list)
     total_tokens: list[int] = field(default_factory=list)
 
     def add_sample(
         self,
         system_len: int,
         user_len: int,
-        reasoning_len: int,
-        answer_len: int,
+        assistant_tokens: int,
         total_len: int,
     ):
         """Add a sample's token counts."""
@@ -46,8 +44,7 @@ class TokenStats:
             self.system_tokens = system_len
 
         self.user_tokens.append(user_len)
-        self.reasoning_tokens.append(reasoning_len)
-        self.answer_tokens.append(answer_len)
+        self.assistant_tokens.append(assistant_tokens)
         self.total_tokens.append(total_len)
 
     def get_summary(self) -> dict:
@@ -55,8 +52,7 @@ class TokenStats:
         return {
             "system_tokens": {"value": self.system_tokens},
             "user_tokens": self._compute_stats(self.user_tokens),
-            "reasoning_tokens": self._compute_stats(self.reasoning_tokens),
-            "answer_tokens": self._compute_stats(self.answer_tokens),
+            "assistant_tokens": self._compute_stats(self.assistant_tokens),
             "total_tokens": self._compute_stats(self.total_tokens),
         }
 
@@ -86,37 +82,14 @@ class TokenStats:
 class BaseSequenceLengthAnalyzer(ABC):
     """Base class for analyzing token distribution in datasets."""
 
-    def __init__(
-        self,
-        tokenizer: PreTrainedTokenizer,
-        chat_template: str,
-        entry_keys: list[str] | None = None,
-    ):
-        self.tokenizer = tokenizer
-        self.tokenizer = get_chat_template(self.tokenizer, chat_template=chat_template)
-        self.entry_keys = entry_keys or ReasoningSample.required_keys()
+    tokenizer : PreTrainedTokenizer
+    chat_template: str|None
 
     @abstractmethod
-    def format_sample(self, sample: ReasoningSample) -> tuple[str, str, str]:
-        """Format a dataset entry into system, user, and assistant messages.
-
-        Returns
-        -------
-        tuple[str, str, str]
-            (system_content, user_content, assistant_content)
-        """
-        pass
+    def format_sample(self, sample: ReasoningSample) -> Messages: ...
 
     @abstractmethod
-    def count_tokens_for_sample(self, sample: ReasoningSample) -> TokensStats:
-        """Count tokens for each component of a sample.
-
-        Returns
-        -------
-        dict[str, int]
-            Dictionary with token counts (keys vary by implementation)
-        """
-        pass
+    def count_individual_components(self, sample: ReasoningSample) -> TokensStats: ...
 
     def stream_jsonl(self, filepath: Path) -> Iterator[dict[str, Any]]:
         """Memory-efficient JSONL streaming.
@@ -146,16 +119,18 @@ class BaseSequenceLengthAnalyzer(ABC):
         """Helper method for token counting."""
         return len(self.tokenizer.encode(text, add_special_tokens=add_special_tokens))
 
-    def apply_template(self, messages: list[dict[str, str]]):
+    def apply_template(self, messages: Messages) -> ChatTmplt:
         return self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
         )
 
     def analyze_dataset(
         self,
         jsonl_path: Path,
+        output_dir: Path,
         max_samples: int | None = None,
-        output_dir: Path = Path("./sequence_analysis"),
     ) -> TokenStats:
         """Analyze entire dataset and generate comprehensive report.
 
@@ -179,24 +154,21 @@ class BaseSequenceLengthAnalyzer(ABC):
         stats = TokenStats()
         sample_count = 0
 
-        with open(jsonl_path, mode="r") as f:
+        with open(file=jsonl_path, mode="r") as f:
             total_lines = sum(1 for _ in f)
 
-        for entry in tqdm(
-            self.stream_jsonl(jsonl_path), total=total_lines, desc="Analyzing samples"
-        ):
+        for entry in tqdm(self.stream_jsonl(jsonl_path), total=total_lines, desc="Analyzing samples"):
             if max_samples and sample_count >= max_samples:
                 break
 
-            entry = {k: v for k, v in entry.items() if k in self.entry_keys}
+            # entry = {k: v for k, v in entry.items() if k in self.entry_keys}
             sample = ReasoningSample(**entry)
             try:
-                token_counts = self.count_tokens_for_sample(sample)
+                token_counts = self.count_individual_components(sample)
                 stats.add_sample(
                     system_len=token_counts.system_tokens,
                     user_len=token_counts.user_tokens,
-                    reasoning_len=token_counts.reasoning_tokens,
-                    answer_len=token_counts.answer_tokens,
+                    assistant_tokens=token_counts.assistant_tokens,
                     total_len=token_counts.total_tokens,
                 )
                 sample_count += 1
@@ -332,12 +304,14 @@ class BaseSequenceLengthAnalyzer(ABC):
         _, ax = plt.subplots(figsize=(12, 6))
 
         data_to_plot = [
+            stats.system_tokens,
             stats.user_tokens,
-            stats.reasoning_tokens,
+            stats.assistant_tokens,
+            # stats.reasoning_tokens,
             # stats.answer_tokens,
             stats.total_tokens,
         ]
-        labels = ["User\nPrompt", "Reasoning", "Answer", "Total"]
+        labels: list[str] = ["System\nPrompt", "User\nPrompt", "Assistant\nAnswer (GT)", "Total"]
 
         bp = ax.boxplot(
             data_to_plot,
@@ -456,57 +430,59 @@ class BaseSequenceLengthAnalyzer(ABC):
     def _plot_component_correlation(self, stats: TokenStats, output_path: Path, **kwargs):
         """Scatter plot showing correlation between components."""
 
-        _, axes = plt.subplots(1, 2, figsize=(14, 6))
+        # _, axes = plt.subplots(1, 2, figsize=(14, 6))
+        _, ax = plt.subplots(figsize=(14, 6))
 
         # Plot 1: User (code) vs Reasoning
-        axes[0].scatter(
+        # axes[0].scatter(
+        ax.scatter(
             stats.user_tokens,
-            stats.reasoning_tokens,
+            # stats.reasoning_tokens,
+            stats.assistant_tokens, # contains reasoning and labels
             alpha=0.5,
             s=20,
             color="steelblue",
         )
-        axes[0].set_xlabel("User Tokens (Code Length)", fontsize=11)
-        axes[0].set_ylabel("Reasoning Tokens", fontsize=11)
-        axes[0].set_title(
-            "Code Length vs Reasoning Length", fontsize=12, fontweight="bold"
-        )
-        axes[0].grid(True, alpha=0.3)
+        ax.set_xlabel("User Tokens (Code Length)", fontsize=11)
+        ax.set_ylabel("Reasoning Tokens", fontsize=11)
+        ax.set_title("Code Length vs Reasoning Length", fontsize=12, fontweight="bold")
+        ax.grid(True, alpha=0.3)
 
         # Add correlation coefficient
-        corr = np.corrcoef(stats.user_tokens, stats.reasoning_tokens)[0, 1]
-        axes[0].text(
+        # corr = np.corrcoef(stats.user_tokens, stats.reasoning_tokens)[0, 1]
+        corr = np.corrcoef(stats.user_tokens, stats.assistant_tokens)[0, 1]
+        ax.text(
             0.05,
             0.95,
             f"Correlation: {corr:.3f}",
-            transform=axes[0].transAxes,
+            transform=ax.transAxes,
             fontsize=10,
             verticalalignment="top",
             bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
         )
 
         # Plot 2: Reasoning vs Answer
-        axes[1].scatter(
-            stats.reasoning_tokens, stats.answer_tokens, alpha=0.5, s=20, color="coral"
-        )
-        axes[1].set_xlabel("Reasoning Tokens", fontsize=11)
-        axes[1].set_ylabel("Answer Tokens", fontsize=11)
-        axes[1].set_title(
-            "Reasoning Length vs Answer Length", fontsize=12, fontweight="bold"
-        )
-        axes[1].grid(True, alpha=0.3)
-
-        # Add correlation coefficient
-        corr = np.corrcoef(stats.reasoning_tokens, stats.answer_tokens)[0, 1]
-        axes[1].text(
-            0.05,
-            0.95,
-            f"Correlation: {corr:.3f}",
-            transform=axes[1].transAxes,
-            fontsize=10,
-            verticalalignment="top",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-        )
+        # axes[1].scatter(
+        #     stats.reasoning_tokens, stats.answer_tokens, alpha=0.5, s=20, color="coral"
+        # )
+        # axes[1].set_xlabel("Reasoning Tokens", fontsize=11)
+        # axes[1].set_ylabel("Answer Tokens", fontsize=11)
+        # axes[1].set_title(
+        #     "Reasoning Length vs Answer Length", fontsize=12, fontweight="bold"
+        # )
+        # axes[1].grid(True, alpha=0.3)
+        #
+        # # Add correlation coefficient
+        # corr = np.corrcoef(stats.reasoning_tokens, stats.answer_tokens)[0, 1]
+        # axes[1].text(
+        #     0.05,
+        #     0.95,
+        #     f"Correlation: {corr:.3f}",
+        #     transform=axes[1].transAxes,
+        #     fontsize=10,
+        #     verticalalignment="top",
+        #     bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        # )
 
         plt.tight_layout()
         plt.savefig(output_path, **kwargs)
