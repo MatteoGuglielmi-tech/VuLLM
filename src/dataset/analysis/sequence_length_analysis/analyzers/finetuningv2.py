@@ -16,7 +16,6 @@ from jinja2 import Template
 
 from .base import BaseSequenceLengthAnalyzer
 from ..datatypes import (
-    ChatTmplt,
     Messages,
     ReasoningSample,
     TokensStats,
