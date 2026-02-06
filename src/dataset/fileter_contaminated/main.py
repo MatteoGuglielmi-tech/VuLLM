@@ -28,6 +28,13 @@ def filter_contaminated(input_path: str, output_path: str, contaminated_path: st
         "the label states",
         "the label indicates",
         "according to the label",
+        "Addressing Specified CWEs",
+        "Address Specified CWEs",
+        "(Address all specified CWEs)",
+        "specified cwes",
+        "specified cwe",
+        "as per the specified CWEs", 
+        "No other specified CWEs"
     ]
 
     with open(file=input_path, mode="r", encoding="utf-8") as f:
