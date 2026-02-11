@@ -6,7 +6,7 @@ from .datatypes import PromptPhase, AssumptionMode
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
-from ..utilities import is_main_process, build_table, rich_panel
+from ..utilities import is_main_process, build_table, rich_panel, RichColors
 
 import logging
 import os
@@ -60,6 +60,7 @@ class FineTuningHandler:
         target_vulnerable_ratio: Optional[float],
         prompt_mode: PromptPhase,
         assumption_mode: AssumptionMode,
+        add_hierarchy: bool,
         # -- model loading --
         base_model_name: str,
         chat_template: str,
@@ -75,11 +76,13 @@ class FineTuningHandler:
         per_device_eval_batch_size: int,
         gradient_accumulation_steps: int,
         weight_decay: float,
+        max_grad_norm: float,
         strategy: TrainingStrategy,
         epochs: Optional[int] = None,
         use_early_stopping: Optional[bool] = None,
         early_stopping_patience: Optional[int] = None,
         early_stopping_threshold: Optional[float] = None,
+        resume_from_checkpoint: Optional[Path] = None,
         warmup_ratio: Optional[float] = None,
         logging_steps: int = 100,
         use_weighted_cot_trainer: bool = False,
@@ -115,6 +118,9 @@ class FineTuningHandler:
 
         assumption_mode: str
             whether to add positive or negative assumptions (or none)
+
+        add_hierarchy: bool
+            whether to add cwe hierarchy guidelines to system prompt
 
         base_model_name: str
             Name of the model to load (from huggingface or unsloth)
@@ -166,6 +172,9 @@ class FineTuningHandler:
         weight_decay: float
             L2 regularization penatly term
 
+        max_grad_norm: float
+            Value for gradient clipping
+
         strategy: TrainingStrategy, options={"fast", "explore", "balanced"}
             Training strategy preset:
             - "fast": Quick iteration with early stopping (4 epochs, cosine scheduler)
@@ -183,6 +192,9 @@ class FineTuningHandler:
 
         early_stopping_threshold: Optional[float]= None
             Threshold defining whether an imporvement took place or not
+
+        resume_from_checkpoint: Optional[Path] = None
+            If provided, it resumes a previously interrupted fine-tuning run from specified checkpoint dir path.
 
         warmup_ratio: Optional[float] = None
             Scheduler parameter. Ratio of total training steps used for a linear warmup from 0 to learning_rate
@@ -207,6 +219,7 @@ class FineTuningHandler:
         self.target_vulnerable_ratio = target_vulnerable_ratio
         self.prompt_mode = prompt_mode
         self.assumption_mode = assumption_mode
+        self.add_hierarchy = add_hierarchy
 
         self.model_loader_class = model_loader_class
         self.base_model_name = base_model_name
@@ -242,6 +255,7 @@ class FineTuningHandler:
             if early_stopping_threshold is not None
             else self.strategy_config.early_stopping_threshold
         )
+        self.resume_from_checkpoint = resume_from_checkpoint
         self.warmup_ratio = (
             warmup_ratio
             if warmup_ratio is not None
@@ -250,6 +264,7 @@ class FineTuningHandler:
 
         self.logging_steps = logging_steps
         self.wd = weight_decay
+        self.max_grad_norm = max_grad_norm
         self.use_weighted_trainer = use_weighted_cot_trainer
         self.use_deepspeed = use_deepspeed
 
@@ -344,7 +359,8 @@ class FineTuningHandler:
             num_cpus=self.num_cpus,
             debug_mode=self.debug,
             prompt_mode=self.prompt_mode,
-            assumption_mode=self.assumption_mode
+            assumption_mode=self.assumption_mode,
+            add_hierarchy=self.add_hierarchy
         )
         self._dataset_dict = dataset_handler.run_pipeline(
             target_vulnerable_ratio=self.target_vulnerable_ratio
@@ -353,70 +369,63 @@ class FineTuningHandler:
         return self._dataset_dict
 
     def get_instruction_response_parts(self) -> tuple[str, str]:
-        """
-        Get instruction and response delimiters for train_on_responses_only.
-        
-        Returns
-        -------
-        tuple[str, str]
-            (instruction_part, response_part)
-        """
+        """Get instruction and response delimiters for train_on_responses_only."""
+
         model_name_lower = self.base_model_name.lower()
 
-        # DeepSeek uses ### format
+        # DeepSeek
         if "deepseek" in model_name_lower:
-            logger.info("🎯 Using DeepSeek delimiters (### Instruction / ### Response)")
-            return ("### Instruction:\n", "### Response:\n")
+            logger.info("🎯 Using DeepSeek delimiters")
+            return ("### Instruction:", "### Response:")
 
-        # Try to detect from chat template
-        chat_template = getattr(self.tokenizer, "chat_template", "")
-        if not chat_template:
-            raise ValueError("Tokenizer has no chat template!")
-
-        # Detect based on template content
-        template_lower = chat_template.lower()
-
-        # DeepSeek-style (### format)
-        if "### instruction" in template_lower and "### response" in template_lower:
-            logger.info("🎯 Detected ### format from template")
-            return ("### Instruction:\n", "### Response:\n")
-
-        # Llama 3+
-        elif "start_header_id" in template_lower:
-            logger.info("🎯 Detected Llama 3+ format from template")
-            return (
-                "<|start_header_id|>user<|end_header_id|>\n\n",
-                "<|start_header_id|>assistant<|end_header_id|>\n\n",
-            )
-
-        # Llama 2 / Mistral
-        elif "[inst]" in template_lower:
-            logger.info("🎯 Detected Llama 2/Mistral format from template")
+        # CodeLlama
+        elif "codellama" in model_name_lower:
+            logger.info("🎯 Using Llama 2 delimiters")
             return ("[INST]", "[/INST]")
 
-        # Qwen / ChatML
-        elif "im_start" in template_lower or "qwen" in template_lower:
-            logger.info("🎯 Detected Qwen/ChatML format from template")
-            return ("<|im_start|>user\n", "<|im_start|>assistant\n")
-
-        # Zephyr / Phi
-        elif "<|user|>" in template_lower:
-            logger.info("🎯 Detected Zephyr/Phi format from template")
-            return ("<|user|>\n", "<|assistant|>\n")
-
-        # Gemma
-        elif "start_of_turn" in template_lower:
-            logger.info("🎯 Detected Gemma format from template")
-            return ("<start_of_turn>user\n", "<start_of_turn>model\n")
-
+        # Auto-detect
         else:
-            raise ValueError(
-                f"Could not detect chat template format.\n"
-                f"Model: {self.base_model_name}\n"
-                f"Model type: {getattr(self.base_model.config, 'model_type', 'unknown')}\n" # type: ignore[reportAttributeAccessIssue]
-                f"Please specify instruction_part and response_part manually.\n\n"
-                f"Template (first 500 chars):\n{chat_template[:500]}"
-            )
+            chat_template = getattr(self.tokenizer, "chat_template", "")
+
+            if not chat_template:
+                raise ValueError("Tokenizer has no chat template!")
+
+            template_lower = chat_template.lower()
+
+            if "### instruction" in template_lower and "### response" in template_lower:
+                logger.info("🎯 Detected ### format from template")
+                return ("### Instruction:", "### Response:")
+
+            elif "[inst]" in template_lower:
+                logger.info("🎯 Detected Llama 2/Mistral format from template")
+                return ("[INST]", "[/INST]")
+
+            elif "start_header_id" in template_lower:
+                logger.info("🎯 Detected Llama 3+ format from template")
+                return (
+                    "<|start_header_id|>user<|end_header_id|>",
+                    "<|start_header_id|>assistant<|end_header_id|>",
+                )
+
+            elif "im_start" in template_lower:
+                logger.info("🎯 Detected Qwen/ChatML format from template")
+                return ("<|im_start|>user", "<|im_start|>assistant")
+
+            elif "<|user|>" in template_lower:
+                logger.info("🎯 Detected Zephyr/Phi format from template")
+                return ("<|user|>", "<|assistant|>")
+
+            elif "start_of_turn" in template_lower:
+                logger.info("🎯 Detected Gemma format from template")
+                return ("<start_of_turn>user", "<start_of_turn>model")
+
+            else:
+                raise ValueError(
+                    f"Could not detect chat template format.\n"
+                    f"Model: {self.base_model_name}\n"
+                    f"Model type: {getattr(self.base_model.config, 'model_type', 'unknown')}\n"  # type: ignore[reportAttributeAccessIssue]
+                    f"Template preview: {chat_template[:300]}"
+                )
 
     def apply_response_only_training(self, trainer: SFTTrainer | WeightedCoTTrainer):
         """
@@ -476,6 +485,7 @@ class FineTuningHandler:
                 "assumption_mode": self.assumption_mode,
                 "RsLora?": self.use_rslora,
                 "LoftQ?": self.use_loftq,
+                "guidelines?": self.add_hierarchy
             },
         )
 
@@ -570,13 +580,9 @@ class FineTuningHandler:
                 "Total steps": total_steps,
                 "Warmup ratio": f"{self.warmup_ratio} ({warmup_steps} steps)",
             }
-            tb = build_table(data=tb_dict, columns=["Info", "Value"])
-            rich_panel(
-                tb,
-                panel_title="Training steps calculation",
-                border_style="medium_spring_green",
-            )
-            del tb_dict, tb
+            global steps_tb
+            steps_tb = build_table(data=tb_dict, columns=["Info", "Value"], title="Fine-tuning parameters")
+            del tb_dict
 
         return {
             "total_steps": total_steps,
@@ -617,13 +623,16 @@ class FineTuningHandler:
                 "Actual evals/epoch": f"{actual_evals_per_epoch:.1f}",
                 "Total evaluations": int(actual_evals_per_epoch * self.epochs),
             }
-            tb = build_table(data=tb_dict, columns=["Info", "Value"])
-            rich_panel(
-                tb,
-                panel_title="Evaluation steps calculation",
-                border_style="medium_spring_green",
+
+            eval_steps_tb = build_table(
+                data=tb_dict, columns=["Info", "Value"], title="Evaluation parameters"
             )
-            del tb_dict, tb
+            rich_panel(
+                tables=[steps_tb, eval_steps_tb],
+                panel_title="Learning parameters",
+                border_style=RichColors.BRIGHT_GREEN
+            )
+            del tb_dict, eval_steps_tb
 
         return eval_steps
 
@@ -643,7 +652,7 @@ class FineTuningHandler:
 
         sft_config_params: dict[str, Any] = {
             # optimized kernel
-            "use_liger_kernel": True,
+            "use_liger_kernel": True if not "deepseek" in self.base_model_name.lower() else False,
             # paths
             "output_dir": self.checkpoint_dir,
             # model related args
@@ -659,7 +668,7 @@ class FineTuningHandler:
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
             "learning_rate": self.lr,
             "weight_decay": self.wd,
-            "max_grad_norm": 0.3,
+            "max_grad_norm": self.max_grad_norm,
             # warmup
             "warmup_ratio": self.warmup_ratio,
             # data handling
@@ -807,26 +816,27 @@ class FineTuningHandler:
         self.setup_paths()
         trainer = self.create_trainer_with_params()
 
-        if self.debug:
-            self.debug_trainer(trainer)
-
         self.wandb_init()
         logger.info("🚀 Starting training...")
-        trainer.train()
+        trainer.train(resume_from_checkpoint=self.resume_from_checkpoint)  # type: ignore[reportArgumentType]
         logger.info("✅ Training completed.")
         self.wandb_close()
 
         if self.debug:
             # Check trainer state
-            print("=== Training State ===")
-            print(f"Best metric: {trainer.state.best_metric}")
-            print(f"Best model checkpoint: {trainer.state.best_model_checkpoint}")
-            print(
-                f"Total steps: {trainer.state.global_step} / {trainer.state.max_steps}"
+            tb_dict = {
+                "Best metric": trainer.state.best_metric,
+                "Best model checkpoint": trainer.state.best_model_checkpoint,
+                "Total steps": trainer.state.global_step / trainer.state.max_steps,
+                "Early stopped": trainer.state.global_step < trainer.state.max_steps,
+            }
+
+            rich_panel(
+                tables=[build_table(data=tb_dict, columns=["Parameter", "Value"])],
+                panel_title="Training State",
+                border_style=RichColors.SKY_BLUE2,
             )
-            print(
-                f"Early stopped: {trainer.state.global_step < trainer.state.max_steps}"
-            )
+            del tb_dict
 
         # save the LoRA adapters of best model
         logger.info(f"💾 Saving best model to {self.base_model_name}...")
