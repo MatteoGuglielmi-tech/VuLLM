@@ -7,7 +7,7 @@ from .inference_plain import TestHandlerPlain
 from .evaluation_handler import Evaluator
 from .hpo_handler import LLMHyperparameterOptimizer
 from .schema_generation import JSONGenerator
-
+from .cwe_diagostic_mixin import CWEDiagnosticMixin
 
 __all__ = [
     "TypedDataset",
@@ -23,4 +23,5 @@ __all__ = [
     "JSONGenerator",
     "PromptPhase",
     "AssumptionMode",
+    "CWEDiagnosticMixin"
 ]

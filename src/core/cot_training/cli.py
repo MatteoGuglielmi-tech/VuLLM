@@ -83,6 +83,11 @@ def get_parser():
         default="none",
         help="Defines whether the model will be optimistic, pessimistic or neutral",
     )
+    common_group.add_argument(
+        "--add_hierarchy",
+        action="store_true",
+        help="Add cwe hierarchy guidelines in system prompt",
+    )
 
     # ============================================================================
     # MODE SELECTION (Mutually Exclusive)
@@ -177,6 +182,12 @@ def get_parser():
         help="Weight decay to apply during fine-tuning",
     )
     finetune_group.add_argument(
+        "--max_grad_norm",
+        type=float,
+        default=1.0,
+        help="Max gradient clipping to apply during fine-tuning",
+    )
+    finetune_group.add_argument(
         "--lora_rank", "-r", type=int, default=16, help="LoRA rank (fine-tuning only)"
     )
     finetune_group.add_argument(
@@ -195,6 +206,12 @@ def get_parser():
         "--target_vulnerable_ratio",
         type=float,
         help="Balance the vulnerable portion of the training set by duplicating the vulnerable samples to reach specified ration",
+    )
+    finetune_group.add_argument(
+        "--resume_from_checkpoint",
+        type=Path,
+        default=None,
+        help="Path to checkpoint to resume from. If omitted, starts fresh.",
     )
 
     # ============================================================================
@@ -292,11 +309,13 @@ def validate_args(args):
     finetune_only = {
         "learning_rate",
         "weight_decay",
+        "max_grad_norm",
         "lora_rank",
         "lora_alpha",
         "lora_dropout",
         "batch_size_eval",
         "target_vulnerable_ratio",
+        "resume_from_checkpoint"
     }
 
     # hpo only args
@@ -455,11 +474,13 @@ def get_default_value(arg_name):
         # Fine-tuning only
         "learning_rate": 2e-5,
         "weight_decay": 0,
+        "max_grad_norm": 1.0,
         "lora_rank": 16,
         "lora_alpha": 32,
         "lora_dropout": 0,
         "batch_size_eval": 8,
         "target_vulnerable_ratio": None,
+        "resume_from_checkpoint": None,
         # HPO only
         "n_trials": 5,
         "run_cap": 100,

@@ -82,6 +82,7 @@ if __name__ == "__main__":
                 target_vulnerable_ratio=args.target_vulnerable_ratio,
                 prompt_mode=args.prompt_mode,
                 assumption_mode=args.assumption_mode,
+                add_hierarchy=args.add_hierarchy,
 
                 # -- model loading --
                 base_model_name=args.base_model_name,
@@ -100,6 +101,7 @@ if __name__ == "__main__":
                 per_device_eval_batch_size=args.batch_size_eval,
                 gradient_accumulation_steps=args.grad_acc_steps,
                 weight_decay=args.weight_decay,
+                max_grad_norm=args.max_grad_norm,
                 strategy=args.strategy,
                 logging_steps=args.logging_steps,
                 use_deepspeed=args.deepspeed,
@@ -172,32 +174,32 @@ if __name__ == "__main__":
             if not args.load_test_from_disk:
                 test_handler = TestHandlerPlain(
                 # test_handler = TestHandler(
-                    lora_model_dir=args.lora_weights,
+                    lora_path=args.lora_weights,
                     max_seq_length=args.max_seq_length,
                     max_new_tokens=args.max_tokens_per_answer,
                     chat_template=args.chat_template,
                     evaluated_testset_path=args.evaluated_test_path,
                     prompt_mode=args.prompt_mode,
-                    assumption_mode=args.assumption_mode
+                    assumption_mode=args.assumption_mode,
+                    add_hierarchy=args.add_hierarchy,
                 )
                 test_set: Dataset = TestHandler.load_test_dataset(input_dir=args.formatted_dataset_dir)
+                logging.info(f"🌟 Dataset loaded from {args.formatted_dataset_dir}")
                 pred_testset: TypedDataset[TestDatasetSchema] = test_handler.evaluate_on_test_set(
                     test_dataset=test_set,
                     batch_size=args.batch_size,
                     use_batching=args.use_batching,
                 )
-                # test_handler.diagnose_model(test_set, n_samples=10)
-            else:
-                pred_testset: TypedDataset[TestDatasetSchema] = TestHandler.load_test_dataset(
-                    input_dir=args.evaluated_test_path, split_name="test", with_eval=True
-                )
+                report = test_handler.run_cwe_diagnostic(verbose=True)
+                test_handler.save_diagnostic_report(report=report, filepath="diagnostics/diagnostic_results.yaml")
+                test_handler.diagnose_model(test_dataset=test_set, output_dir="diagnostics", n_samples=20)
 
                 evaluator = Evaluator(output_dir=args.assets_dir, test_typeddataset=pred_testset)
                 evaluator.validate_cwe_format() # validate predicted cwe quality
                 binary_metrics = evaluator.evaluate_binary_classification(save_artifacts=args.save_artifacts) # address target performance
                 cwe_results = evaluator.evaluate_cwe_classification(save_artifacts=args.save_artifacts) # address cwe performance
 
-    except (Exception, KeyboardInterrupt) as e:
+    except (Exception, KeyboardInterrupt, torch.cuda.OutOfMemoryError) as e:
         import sys
 
         rich_exception()
