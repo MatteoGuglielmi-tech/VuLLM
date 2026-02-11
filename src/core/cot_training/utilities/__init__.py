@@ -1,5 +1,10 @@
 from .detection import is_main_process, init_accelerator
-from .decorators import main_process_only
+from .decorators import (
+    main_process_only,
+    validate_argument_value,
+    validate_filepath_extension,
+    ensure_jsonl_extension,
+)
 from .ui import (
     rich_table,
     rich_print,
@@ -14,7 +19,7 @@ from .ui import (
     rich_panels_grid,
     get_env_info,
     stateless_progress,
-    RichColors
+    RichColors,
 )
 
 from .resources import (
@@ -22,10 +27,7 @@ from .resources import (
     cleanup_single_gpu,
 )
 
-from .disk import (
-    load_dataset_from_disk,
-    save_dataset
-)
+from .disk import load_dataset_from_disk, save_dataset, dump_yaml
 
 __all__ = [
     # detection
@@ -33,6 +35,9 @@ __all__ = [
     "init_accelerator",
     # decorators
     "main_process_only",
+    "validate_argument_value",
+    "validate_filepath_extension",
+    "ensure_jsonl_extension",
     # ui
     "rich_table",
     "rich_print",
@@ -53,5 +58,6 @@ __all__ = [
     "cleanup_single_gpu",
     # disk
     "load_dataset_from_disk",
-    "save_dataset"
+    "save_dataset",
+    "dump_yaml",
 ]

@@ -1,9 +1,9 @@
 import logging
+import yaml
 
-from typing import overload
+from typing import IO, overload
 from pathlib import Path
 from datasets import DatasetDict, Dataset, load_from_disk
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,7 @@ def save_dataset(
     already_datsetdict: bool = isinstance(dataset, DatasetDict)
 
     dataset_dict: DatasetDict = (
-        DatasetDict({split_name: dataset})
-        if not already_datsetdict
-        else dataset
+        DatasetDict({split_name: dataset}) if not already_datsetdict else dataset
     )
     dataset_dict.save_to_disk(dataset_dict_path=output_location)
 
@@ -74,19 +72,45 @@ def load_dataset_from_disk(
         Loaded dataset
     """
 
-
     if not input_dir.exists():
         raise FileNotFoundError(f"Path '{input_dir}' not found.")
 
     loaded: Dataset | DatasetDict = load_from_disk(dataset_path=input_dir)
 
     if isinstance(loaded, Dataset):
-        return loaded # Dataset
+        return loaded  # Dataset
 
     if split_name is None:
         return loaded  # DatasetDict
     elif split_name not in loaded:
-        raise KeyError(f"`{split_name}` split not found. Available: {list(loaded.keys())}")
+        raise KeyError(
+            f"`{split_name}` split not found. Available: {list(loaded.keys())}"
+        )
 
     return loaded[split_name]  # Dataset
 
+
+def _literal_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+def get_yaml_dumper() -> type[yaml.Dumper]:
+    class LiteralDumper(yaml.Dumper):
+        def ignore_aliases(self, data):
+            return True
+
+    LiteralDumper.add_representer(str, _literal_representer)
+    return LiteralDumper
+
+
+def dump_yaml(data: dict, stream: IO[str]) -> None:
+    yaml.dump(
+        data,
+        stream,
+        Dumper=get_yaml_dumper(),
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    )
