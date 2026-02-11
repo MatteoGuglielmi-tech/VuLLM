@@ -27,10 +27,58 @@ from .datatypes import TestDatasetSchema, TypedDataset, ExpectedModelResponse
 logger = logging.getLogger(__name__)
 
 
+# Add at module level or in class
+CWE_HIERARCHY: dict[int, set[int]] = {
+    119: {787, 125, 120},  # Buffer errors
+    400: {401},            # Resource consumption
+    672: {416, 415},       # Lifecycle (UAF, double-free)
+}
+
+
+def is_hierarchically_acceptable(
+    pred_cwes: set[int],
+    gt_cwes: set[int],
+    hierarchy: dict[int, set[int]] = CWE_HIERARCHY,
+) -> bool:
+    """Check if ALL ground truth CWEs are covered by prediction."""
+    if not pred_cwes and not gt_cwes:
+        return True
+    if not pred_cwes or not gt_cwes:
+        return False
+
+    child_to_parent: dict[int, int] = {}
+    for parent, children in hierarchy.items():
+        for child in children:
+            child_to_parent[child] = parent
+
+    for gt_cwe in gt_cwes:
+        is_covered = False
+
+        if gt_cwe in pred_cwes:
+            is_covered = True
+        elif gt_cwe in hierarchy and (pred_cwes & hierarchy[gt_cwe]):
+            is_covered = True
+        elif gt_cwe in child_to_parent and child_to_parent[gt_cwe] in pred_cwes:
+            is_covered = True
+
+        if not is_covered:
+            return False
+
+    return True
+
+
 @dataclass
 class CWEPair:
     cwes_gt: list[int]
     cwes_pred: list[int]
+    is_strict_match: bool = False
+    is_hierarchical_match: bool = False
+
+    def __post_init__(self):
+        self.is_strict_match = set(self.cwes_gt) == set(self.cwes_pred)
+        self.is_hierarchical_match = is_hierarchically_acceptable(
+            set(self.cwes_pred), set(self.cwes_gt)
+        )
 
     @property
     def ground_truth(self) -> list[int]:
@@ -59,7 +107,8 @@ class CWEEvaluationResults:
     """Results from CWE classification evaluation."""
 
     per_cwe_metrics: dict[str, Any]
-    aggreate_metrics: dict[str, float]
+    aggregate_metrics: dict[str, float]
+    hierarchical_metrics: dict[str, Any]
     vocabulary: list[int]
     n_samples: int
     n_classes: int
@@ -67,12 +116,12 @@ class CWEEvaluationResults:
     @property
     def micro_avg(self) -> float:
         """Extract accuracy from classification report."""
-        return self.aggreate_metrics["micro_avg_f1"]
+        return self.aggregate_metrics["micro_avg_f1"]
 
     @property
     def macro_avg(self) -> float:
         """Extract accuracy from classification report."""
-        return self.aggreate_metrics["macro_f1"]
+        return self.aggregate_metrics["macro_f1"]
 
     @property
     def cwe_vocabulary(self) -> list[int]:
@@ -82,7 +131,8 @@ class CWEEvaluationResults:
     def to_dict(self):
         return {
             "per_cwe_metrics": self.per_cwe_metrics,
-            "aggregate_metrics": self.aggreate_metrics,
+            "aggregate_metrics": self.aggregate_metrics,
+            "hierarchical_metrics": self.hierarchical_metrics,
             "vocabulary": self.vocabulary,
             "n_samples": self.n_samples,
             "n_classes": self.n_classes,
@@ -360,6 +410,20 @@ class Evaluator:
                 is_pred_vulnerable: bool = prediction.is_vulnerable
                 pred_cwe_list: list[int] = prediction.cwe_list
 
+                # Strict CWE match (existing)
+                strict_cwe_match = (
+                    (set(gt_cwes) == set(pred_cwe_list))
+                    if gt_binary_label and is_pred_vulnerable
+                    else None
+                )
+
+                # Hierarchical CWE match
+                hierarchical_cwe_match = (
+                    is_hierarchically_acceptable(set(pred_cwe_list), set(gt_cwes))
+                    if gt_binary_label and is_pred_vulnerable
+                    else None
+                )
+
                 result = {
                     "index": idx,
                     "gt_vulnerable": gt_binary_label,
@@ -367,11 +431,8 @@ class Evaluator:
                     "pred_vulnerable": is_pred_vulnerable,
                     "pred_cwes": set(pred_cwe_list),
                     "correct_binary": (gt_binary_label == is_pred_vulnerable),
-                    "correct_cwes": (
-                        (set(gt_cwes) == set(pred_cwe_list))
-                        if gt_binary_label and is_pred_vulnerable
-                        else None
-                    ),
+                    "correct_cwes_strict": strict_cwe_match,
+                    "correct_cwes_hierarchical": hierarchical_cwe_match,
                     "tp": gt_binary_label and is_pred_vulnerable,
                     "tn": (not gt_binary_label) and (not is_pred_vulnerable),
                     "fp": (not gt_binary_label) and is_pred_vulnerable,
@@ -599,7 +660,7 @@ class Evaluator:
         """Save all binary classification artifacts to disk."""
 
         with rich_status(description="Saving Artifacts ...", spinner="arc"):
-            self._save_binary_metrics(binary_metrics=binary_metrics)
+            # self._save_binary_metrics(binary_metrics=binary_metrics)
             # classification report as a separate file from `binary_metrics.json`
             report_path = self.output_dir / "binary_classification_report.json"
             self._save_json(report_path, binary_metrics["classification_report"])
@@ -611,6 +672,89 @@ class Evaluator:
                 title="Binary Vulnerability Detection",
                 save_path=cm_path,
             )
+
+    def _compute_hierarchical_metrics(self, cwe_pairs: list[CWEPair]) -> dict[str, Any]:
+        """
+        Compute sample-level hierarchical acceptance metrics.
+
+        Complements per-CWE metrics by showing how often predictions
+        are in the correct CWE family (parent-child relationships).
+        """
+        n_samples = len(cwe_pairs)
+
+        strict_matches = sum(1 for p in cwe_pairs if p.is_strict_match)
+        hierarchical_matches = sum(1 for p in cwe_pairs if p.is_hierarchical_match)
+        hierarchical_only = sum(
+            1 for p in cwe_pairs if p.is_hierarchical_match and not p.is_strict_match
+        )
+
+        # Analyze which hierarchical patterns occur most
+        from collections import Counter
+
+        hierarchical_only_patterns: Counter[tuple[tuple[int, ...], tuple[int, ...]]] = (
+            Counter()
+        )
+        for p in cwe_pairs:
+            if p.is_hierarchical_match and not p.is_strict_match:
+                gt = tuple(sorted(p.cwes_gt))
+                pred = tuple(sorted(p.cwes_pred))
+                hierarchical_only_patterns[(gt, pred)] += 1
+
+        top_patterns = [
+            {"gt": list(gt), "pred": list(pred), "count": count}
+            for (gt, pred), count in hierarchical_only_patterns.most_common(10)
+        ]
+
+        return {
+            "n_samples": n_samples,
+            "strict_match_count": strict_matches,
+            "strict_match_rate": strict_matches / n_samples if n_samples > 0 else 0,
+            "hierarchical_match_count": hierarchical_matches,
+            "hierarchical_match_rate": (
+                hierarchical_matches / n_samples if n_samples > 0 else 0
+            ),
+            "hierarchical_only_count": hierarchical_only,
+            "hierarchical_gain": (
+                (hierarchical_matches - strict_matches) / n_samples
+                if n_samples > 0
+                else 0
+            ),
+            "top_hierarchical_patterns": top_patterns,
+        }
+
+    def _log_cwe_summary(self, results: CWEEvaluationResults) -> None:
+        """Log CWE evaluation summary."""
+        logger.info("=" * 70)
+        logger.info("CWE CLASSIFICATION METRICS")
+        logger.info("=" * 70)
+
+        # Aggregate metrics
+        agg = results.aggregate_metrics
+        logger.info(f"Micro F1:    {agg['micro_f1']:.4f}")
+        logger.info(f"Macro F1:    {agg['macro_f1']:.4f}")
+
+        # Hierarchical metrics
+        hier = results.hierarchical_metrics
+        logger.info("-" * 70)
+        logger.info("Sample-Level Accuracy:")
+        logger.info(
+            f"  Strict match rate:        {hier['strict_match_rate']:.1%} ({hier['strict_match_count']}/{hier['n_samples']})"
+        )
+        logger.info(
+            f"  Hierarchical match rate:  {hier['hierarchical_match_rate']:.1%} ({hier['hierarchical_match_count']}/{hier['n_samples']})"
+        )
+        logger.info(
+            f"  Hierarchical gain:        +{hier['hierarchical_gain']:.1%} ({hier['hierarchical_only_count']} samples)"
+        )
+
+        # Top patterns
+        if hier["top_hierarchical_patterns"]:
+            logger.info("-" * 70)
+            logger.info("Top hierarchical-only patterns (GT -> Pred):")
+            for p in hier["top_hierarchical_patterns"][:5]:
+                logger.info(f"  {p['gt']} -> {p['pred']}: {p['count']}x")
+
+        logger.info("=" * 70)
 
     def evaluate_cwe_classification(self, save_artifacts: bool = True):
 
@@ -625,46 +769,62 @@ class Evaluator:
             y_true_bin, y_pred_bin, vocabulary=cwe_vocabulary  # type: ignore
         )
         micro_f1, macro_f1 = self._compute_aggregate_metrics(y_true_bin, y_pred_bin)  # type: ignore
+        hierarchical_metrics = self._compute_hierarchical_metrics(cwe_pairs)
 
         results = CWEEvaluationResults(
             per_cwe_metrics=per_cwe_report,
-            aggreate_metrics={"micro_f1": micro_f1, "macro_f1": macro_f1},
+            aggregate_metrics={"micro_f1": micro_f1, "macro_f1": macro_f1},
+            hierarchical_metrics=hierarchical_metrics,
             vocabulary=cwe_vocabulary,
             n_samples=len(cwe_pairs),
             n_classes=len(cwe_vocabulary),
         )
+        self._log_cwe_summary(results)
 
         if save_artifacts:
             self._save_cwe_artifacts(results)
 
+        return results
+
     def _collect_cwe_pairs(self) -> list[CWEPair]:
-        """Collect pairs of CWE indexes in a list of tuples where:
-        - 1st element represents all ground truth cwe ids
-        - 2nd element represents corresponding predicted cwe ids
-        """
-        return [
+        """Collect pairs of CWE indexes."""
+
+        pairs = [
             CWEPair(cwes_gt=entry["gt_cwes"], cwes_pred=entry["pred_cwes"])
             for entry in self.results
             if (entry["gt_vulnerable"] and entry["pred_vulnerable"])
         ]
 
+        # Debug: Check for pred-only CWEs
+        gt_cwes = set()
+        pred_cwes = set()
+
+        for pair in pairs:
+            gt_cwes.update(pair.cwes_gt)
+            pred_cwes.update(pair.cwes_pred)
+
+        pred_only = pred_cwes - gt_cwes
+        if pred_only:
+            logger.warning(
+                f"Found {len(pred_only)} CWEs only in predictions (never in GT): "
+                f"{sorted(pred_only)}"
+            )
+            logger.warning("These CWEs will have support=0 and undefined metrics")
+
+        return pairs
+
     def _build_cwe_vocabulary(self, cwe_pairs: list[CWEPair]) -> list[int]:
-        """Build complete CWE vocabulary from ground truth and predictions.
+        """Build CWE vocabulary only from ground truth (ignore pred-only CWEs)."""
 
-        Returns
-        -------
-        list[str]
-            Sorted list of unique CWE identifiers.
-        """
-
-        all_cwes: set[int] = set()
+        # Only include CWEs that appear in ground truth
+        gt_cwes: set[int] = set()
         for cwe_pair in cwe_pairs:
-            all_cwes.update(cwe_pair.as_flatten_tuple)
+            gt_cwes.update(cwe_pair.cwes_gt)  # ← Only GT CWEs
 
-        sorted_cwes = sorted(all_cwes)
+        sorted_cwes = sorted(gt_cwes)
 
-        logger.info(f"CWE vocabulary: {len(sorted_cwes)} unique CWEs")
-        logger.debug(f"CWEs: {', '.join(map(str,sorted_cwes))}")
+        logger.info(f"CWE vocabulary: {len(sorted_cwes)} unique CWEs (GT only)")
+        logger.debug(f"CWEs: {', '.join(map(str, sorted_cwes))}")
 
         return sorted_cwes
 
@@ -785,13 +945,16 @@ class Evaluator:
         logger.info(f"--- Saving CWE Artifacts ---")
 
         report_path = self.output_dir / "cwe_classification_report.json"
+        hierarchical_path = self.output_dir / "hierarchical_cwe_match.json"
         full_report = {
-            "micro_avg_f1": results.aggreate_metrics["micro_f1"],
-            "macro_avg_f1": results.aggreate_metrics["macro_f1"],
+            "micro_avg_f1": results.aggregate_metrics["micro_f1"],
+            "macro_avg_f1": results.aggregate_metrics["macro_f1"],
             "per_cwe_metrics": results.per_cwe_metrics,
         }
-        self._save_json(report_path, full_report)
+        self._save_json(filepath=report_path, obj=full_report)
         logger.info(f"✅ CWE report: {report_path.name}")
+        self._save_json(filepath=hierarchical_path, obj=results.hierarchical_metrics)
+        logger.info(f"✅ CWE hierarchical report: {hierarchical_path.name}")
 
         self._plot_per_cwe_performance(
             per_cwe_report=results.per_cwe_metrics, vocab=results.vocabulary
@@ -890,6 +1053,7 @@ class Evaluator:
             self._plot_f1_bar_chart(cwe_metrics)
             self._plot_metrics_heatmap(cwe_metrics)
             self._plot_support_distribution(cwe_metrics)
+            self._plot_metrics_clustermap(cwe_metrics)
             logger.info(f"✅ Generated {4} CWE visualization plots")
         except Exception:
             logger.exception("Failed to generate CWE visualization")
@@ -907,12 +1071,27 @@ class Evaluator:
             List of CWE metrics dictionaries
         """
 
-        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        # Filter out CWEs with zero support
+        cwe_metrics_filtered = [m for m in cwe_metrics if m["support"] > 0]
+
+        if not cwe_metrics_filtered:
+            logger.warning("No CWEs with support > 0 to plot")
+            return
+
+        n_filtered = len(cwe_metrics) - len(cwe_metrics_filtered)
+        if n_filtered > 0:
+            logger.info(f"Filtered {n_filtered} CWEs with support=0")
+
+        # Sort by F1-score
+        sorted_metrics = sorted(
+            cwe_metrics_filtered, key=lambda x: x["f1-score"], reverse=True
+        )
+
         if max_to_display and len(sorted_metrics) > max_to_display:
             sorted_metrics = sorted_metrics[:max_to_display]
-            title_suffix = f" (Top {max_to_display})"
+            title_suffix = f" (Top {max_to_display}, support > 0)"
         else:
-            title_suffix = ""
+            title_suffix = " (support > 0)"
 
         df = pd.DataFrame(data=sorted_metrics)
 
@@ -955,7 +1134,7 @@ class Evaluator:
         ax.set_xlabel("F1-Score", fontsize=12, fontweight="bold")
         ax.set_ylabel("CWE", fontsize=12, fontweight="bold")
         ax.set_title(
-            f"Per-CWE F1-Score Performance {title_suffix}",
+            f"Per-CWE F1-Score Performance{title_suffix}",
             fontsize=14,
             fontweight="bold",
             pad=20,
@@ -984,23 +1163,40 @@ class Evaluator:
     ) -> None:
         """Heatmap showing Precision, Recall, and F1-score for each CWE."""
 
-        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        # Filter out CWEs with zero support (never in ground truth)
+        cwe_metrics_filtered = [m for m in cwe_metrics if m["support"] > 0]
+
+        if not cwe_metrics_filtered:
+            logger.warning("No CWEs with support > 0 to plot")
+            return
+
+        logger.info(
+            f"Filtered {len(cwe_metrics) - len(cwe_metrics_filtered)} CWEs with support=0"
+        )
+
+        sorted_metrics = sorted(
+            cwe_metrics_filtered, key=lambda x: x["f1-score"], reverse=True
+        )
+
         if max_to_display and len(sorted_metrics) > max_to_display:
             sorted_metrics = sorted_metrics[:max_to_display]
+            logger.info(f"Displaying top {max_to_display} CWEs by F1-score")
 
         cwes = [f"{m['cwe_label']} (n={m['support']:,})" for m in sorted_metrics]
 
         data = {
-            "Precision": [m["precision"] for m in cwe_metrics],
-            "Recall": [m["recall"] for m in cwe_metrics],
-            "F1-Score": [m["f1-score"] for m in cwe_metrics],
+            "Precision": [m["precision"] for m in sorted_metrics],
+            "Recall": [m["recall"] for m in sorted_metrics],
+            "F1-Score": [m["f1-score"] for m in sorted_metrics],
         }
 
-        df = pd.DataFrame(data, index=cwes)  # type: ignore
+        df = pd.DataFrame(data, index=cwes)
 
-        fig_height = min(max(6, len(cwes) * 0.5), 20)
+        # Dynamic figure height based on number of CWEs
+        fig_height = min(max(6, len(cwes) * 0.4), 20)
         fig, ax = plt.subplots(figsize=(10, fig_height))
 
+        # Dynamic annotation font size
         annot_fontsize = max(6, min(10, 100 / len(cwes)))
 
         sns.heatmap(
@@ -1019,7 +1215,7 @@ class Evaluator:
 
         # Styling
         ax.set_title(
-            "Per-CWE Metrics Heatmap (Sorted by F1-Score)",
+            f"Per-CWE Metrics Heatmap (Top {len(sorted_metrics)} by F1-Score, support > 0)",
             fontsize=14,
             fontweight="bold",
             pad=20,
@@ -1042,7 +1238,22 @@ class Evaluator:
     ) -> None:
         """Heatmap with clustering to show performance patterns."""
 
-        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["f1-score"], reverse=True)
+        # Filter out CWEs with zero support
+        cwe_metrics_filtered = [m for m in cwe_metrics if m["support"] > 0]
+
+        if not cwe_metrics_filtered:
+            logger.warning("No CWEs with support > 0 to plot")
+            return
+
+        n_filtered = len(cwe_metrics) - len(cwe_metrics_filtered)
+        if n_filtered > 0:
+            logger.info(f"Filtered {n_filtered} CWEs with support=0")
+
+        # Sort by F1-score
+        sorted_metrics = sorted(
+            cwe_metrics_filtered, key=lambda x: x["f1-score"], reverse=True
+        )
+
         if max_to_display and len(sorted_metrics) > max_to_display:
             sorted_metrics = sorted_metrics[:max_to_display]
 
@@ -1058,7 +1269,7 @@ class Evaluator:
             ],
         }
 
-        df = pd.DataFrame(data, index=cwes)  # type: ignore
+        df = pd.DataFrame(data, index=cwes)
 
         fig_height = min(max(8, len(cwes) * 0.5), 20)
 
@@ -1079,7 +1290,7 @@ class Evaluator:
         )
 
         g.figure.suptitle(
-            "Per-CWE Metrics Heatmap (Clustered by Performance)",
+            "Per-CWE Metrics Heatmap (Clustered, support > 0)",
             fontsize=14,
             fontweight="bold",
             y=0.98,
@@ -1093,9 +1304,24 @@ class Evaluator:
     def _plot_support_distribution(
         self, cwe_metrics: list[dict[str, Any]], max_to_display: Optional[int] = 30
     ) -> None:
-        """Bar chart showing sample count (support) for each CWE. Helps identify class imbalance."""
+        """Bar chart showing sample count (support) for each CWE."""
 
-        sorted_metrics = sorted(cwe_metrics, key=lambda x: x["support"], reverse=True)
+        # Filter out CWEs with zero support
+        cwe_metrics_filtered = [m for m in cwe_metrics if m["support"] > 0]
+
+        if not cwe_metrics_filtered:
+            logger.warning("No CWEs with support > 0 to plot")
+            return
+
+        n_filtered = len(cwe_metrics) - len(cwe_metrics_filtered)
+        if n_filtered > 0:
+            logger.info(f"Filtered {n_filtered} CWEs with support=0")
+
+        # Sort by support
+        sorted_metrics = sorted(
+            cwe_metrics_filtered, key=lambda x: x["support"], reverse=True
+        )
+
         if max_to_display and len(sorted_metrics) > max_to_display:
             sorted_metrics = sorted_metrics[:max_to_display]
 
@@ -1133,7 +1359,7 @@ class Evaluator:
         ax.set_xlabel("Sample Count (Support)", fontsize=12, fontweight="bold")
         ax.set_ylabel("CWE", fontsize=12, fontweight="bold")
         ax.set_title(
-            "CWE Support Distribution (colored by F1-score)",
+            f"CWE Support Distribution (support > 0, colored by F1-score)",
             fontsize=14,
             fontweight="bold",
             pad=20,
