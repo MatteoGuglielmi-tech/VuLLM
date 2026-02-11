@@ -1,18 +1,19 @@
 from pydantic import ValidationError
 from unsloth import FastLanguageModel, is_bfloat16_supported
-from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
+# from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
 import json
 import torch
 import logging
 
-from typing import Literal, overload
+from typing import Literal, overload, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass, field
 
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
+
 
 from .prompt_config import VulnerabilityPromptConfig
 from .datatypes import (
@@ -26,29 +27,32 @@ from .datatypes import (
     GenerationError,
 )
 
-
-from typing import Iterator
+from .cwe_diagostic_mixin import CWEDiagnosticMixin
+from .evaluation_handler import CWEPair
 from .prompt_config import Messages, VulnerabilityPromptConfig
 from ..utilities import (
     RichColors,
     is_main_process,
     rich_progress_manual,
-    rich_print,
     build_table,
     rich_panel,
+    rich_progress,
+    # validate_filepath_extension
+    dump_yaml
 )
 
 logger = logging.getLogger(name=__name__)
 
 
 @dataclass
-class TestHandlerPlain:
-    lora_model_dir: Path | str
+class TestHandlerPlain(CWEDiagnosticMixin):
+    lora_path: Path | str
     evaluated_testset_path: Path
     max_seq_length: int
     max_new_tokens: int
     prompt_mode: PromptPhase
     assumption_mode: AssumptionMode
+    add_hierarchy: bool
     chat_template: str | None = None
 
     model: FastLanguageModel | None = field(init=False, default=None, repr=False)
@@ -61,7 +65,7 @@ class TestHandlerPlain:
         self._validate_inputs()
 
         d_table = {
-            "LoRA checkpoint:": self.lora_model_dir,
+            "LoRA checkpoint:": self.lora_path,
             "Max sequence length": f"{self.max_seq_length:,}",
             "Max new tokens per answer": f"{self.max_new_tokens:,}",
             "Custom chat template": self.chat_template is not None,
@@ -70,7 +74,7 @@ class TestHandlerPlain:
         tb = build_table(data=d_table, show_header=False)
         rich_panel(
             tb,
-            panel_title=f"🔧 Initializing TestHandler with LoRA checkpoint: {self.lora_model_dir}",
+            panel_title=f"🔧 Initializing TestHandler with LoRA checkpoint: {self.lora_path}",
             border_style=RichColors.MEDIUM_PURPLE1,
         )
 
@@ -79,8 +83,8 @@ class TestHandlerPlain:
     def _validate_inputs(self):
         """Validate constructor inputs."""
 
-        if isinstance(self.lora_model_dir, str):
-            self.lora_model_dir = Path(self.lora_model_dir)
+        if isinstance(self.lora_path, str):
+            self.lora_path = Path(self.lora_path)
 
         if self.prompt_mode in [
             PromptPhase.CONSTRAINED_TRAINING,
@@ -91,27 +95,27 @@ class TestHandlerPlain:
             )
 
         # Check checkpoint exists
-        if not self.lora_model_dir.exists():
+        if not self.lora_path.exists():
             raise FileNotFoundError(
-                f"LoRA checkpoint directory not found: {self.lora_model_dir}"
+                f"LoRA checkpoint directory not found: {self.lora_path}"
             )
 
         # Check for adapter files (LoRA checkpoint validation)
-        self.adapter_config = self.lora_model_dir / "adapter_config.json"
-        adapter_model = self.lora_model_dir / "adapter_model.safetensors"
+        self.adapter_config = self.lora_path / "adapter_config.json"
+        adapter_model = self.lora_path / "adapter_model.safetensors"
 
         if not self.adapter_config.exists():
             raise FileNotFoundError(
-                f"adapter_config.json not found in {self.lora_model_dir}. "
+                f"adapter_config.json not found in {self.lora_path}. "
                 f"Is this a valid LoRA checkpoint?"
             )
 
         if (
             not adapter_model.exists()
-            and not (self.lora_model_dir / "adapter_model.bin").exists()
+            and not (self.lora_path / "adapter_model.bin").exists()
         ):
             logger.warning(
-                f"⚠️  No adapter weights found in {self.lora_model_dir}. "
+                f"⚠️  No adapter weights found in {self.lora_path}. "
                 f"Expected adapter_model.safetensors or adapter_model.bin"
             )
 
@@ -140,7 +144,7 @@ class TestHandlerPlain:
         """
 
         decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"} # deepseek uses "llama"
-        model_type = getattr(self.base_model.config, "model_type", "").lower()  # type: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        model_type = getattr(self.model.config, "model_type", "").lower()  # type: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
         if any(arch in model_type for arch in decoder_only_models):
             self.tokenizer.padding_side = "left"  # type: ignore[reportOptionalMemberAccess]
@@ -158,43 +162,68 @@ class TestHandlerPlain:
 
     def _configure_tokenizer(self):
         """Configure tokenizer settings (chat template, padding, special tokens)."""
+
         model_name_lower = self.base_model_name.lower()
-    
-        # Check if DeepSeek model
+
+        # DeepSeek models
         if "deepseek" in model_name_lower:
-            logger.info("🔍 Detected DeepSeek model - applying custom chat template")
-            
-            # Override DeepSeek's default template to remove automatic system prompt
+            logger.info("🔍 Detected DeepSeek model - applying fixed chat template")
+
             self.tokenizer.chat_template = (  # type: ignore[reportOptionalMemberAccess]
-                "{{ bos_token }}"
-                "{% for message in messages %}"
-                "{% if message['role'] == 'system' %}"
-                "{{ message['content'] + '\\n' }}"
-                "{% elif message['role'] == 'user' %}"
-                "{{ '### Instruction:\\n' + message['content'] + '\\n' }}"
-                "{% elif message['role'] == 'assistant' %}"
-                "{{ '### Response:\\n' + message['content'] + '\\n<|EOT|>\\n' }}"
+                "{% if not add_generation_prompt is defined %}"
+                "{% set add_generation_prompt = false %}"
                 "{% endif %}"
-                "{% endfor %}"
+                "{{ bos_token }}"
+                "{%- for message in messages %}"
+                "    {%- if message['role'] == 'system' %}"
+                "{{ message['content'] + '\\n' }}"
+                "    {%- else %}"
+                "        {%- if message['role'] == 'user' %}"
+                "{{ '### Instruction:\\n' + message['content'] + '\\n' }}"
+                "        {%- else %}"
+                "{{ '### Response:\\n' + message['content'] + '\\n' + eos_token + '\\n' }}"
+                "        {%- endif %}"
+                "    {%- endif %}"
+                "{%- endfor %}"
                 "{% if add_generation_prompt %}"
                 "{{ '### Response:\\n' }}"
                 "{% endif %}"
             )
-            
-            logger.info("✅ Applied custom DeepSeek chat template (removed default system prompt)")
-            
+            logger.info("✅ Applied fixed DeepSeek chat template")
+
+        # CodeLlama models
+        elif "codellama" in model_name_lower:
+            logger.info("🔍 Detected CodeLlama model - applying Llama 2 chat template")
+            from unsloth.chat_templates import get_chat_template
+
+            self.tokenizer = get_chat_template(self.tokenizer, chat_template="llama")
+            logger.info("✅ Applied Llama 2 chat template")
+
+        # Custom template
         elif self.chat_template is not None:
-            # Use Unsloth's built-in templates for non-DeepSeek models
-            logger.info(f"🎨 Applying chat template for non-DeepSeek models: {self.chat_template}")
+            logger.info(f"🎨 Applying chat template: {self.chat_template}")
             try:
+                from unsloth.chat_templates import get_chat_template
+
                 self.tokenizer = get_chat_template(
-                    self.tokenizer, 
-                    chat_template=self.chat_template
+                    self.tokenizer, chat_template=self.chat_template
                 )
+                logger.info(f"✅ Applied {self.chat_template} chat template")
             except ValueError as e:
                 logger.error(f"Invalid chat template: {self.chat_template}")
-                logger.error(f"Available templates: {list(CHAT_TEMPLATES.keys())}")
-                raise ValueError(f"Chat template '{self.chat_template}' not found") from e
+                raise ValueError(
+                    f"Chat template '{self.chat_template}' not found"
+                ) from e
+
+        # Default
+        else:
+            if (
+                hasattr(self.tokenizer, "chat_template")
+                and self.tokenizer.chat_template  # type: ignore[reportOptionalMemberAccess]
+            ):
+                logger.info("ℹ️  Using model's default chat template")
+            else:
+                logger.warning("⚠️  No chat template found or specified!")
 
         self._set_padding_strategy()
 
@@ -244,7 +273,7 @@ class TestHandlerPlain:
             )
 
         logger.info(f"📦 Base model: {self.base_model_name}")
-        logger.info(f"🔧 Loading from: {self.lora_model_dir}")
+        logger.info(f"🔧 Loading from: {self.lora_path}")
 
         try:
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
@@ -261,7 +290,7 @@ class TestHandlerPlain:
 
             logger.info("✅ Base model and tokenizer loaded successfully")
 
-            self.model.load_adapter(self.lora_model_dir)  # type: ignore
+            self.model.load_adapter(self.lora_path)  # type: ignore
             logger.info("✅ LoRA adapter applied successfully.")
 
             FastLanguageModel.for_inference(model=self.model)
@@ -292,9 +321,9 @@ class TestHandlerPlain:
 
     def run_inference(
         self, input_code: str, n_retries: int = 3, **override_params
-    ) -> str:
+    ) -> ExpectedModelResponse:
         """
-        Perform inference on a single C code snippet with retry logic.
+        Performs prediction (with retry logic) and validates output for a single code snippet.
 
         Parameters
         ----------
@@ -327,7 +356,8 @@ class TestHandlerPlain:
         messages: list[dict] = self.prompt_config.as_messages(
             func_code=input_code,
             phase=self.prompt_mode,
-            mode=self.assumption_mode
+            mode=self.assumption_mode,
+            add_hierarchy=self.add_hierarchy
         )
 
         input_text = self.tokenizer.apply_chat_template(
@@ -349,7 +379,7 @@ class TestHandlerPlain:
             "do_sample": True,
             "temperature": 0.2,
             "top_p": 0.95,
-            "top_k": 50,  # Number of highest probability vocabulary tokens to keep for top-k-filtering (default)
+            "top_k": 50,
             "min_p": 0.1,
             "repetition_penalty": 1.05,
             "num_return_sequences": 1,
@@ -369,10 +399,8 @@ class TestHandlerPlain:
                         cleanup_tokenization_spaces=True,
                     )[0]
 
-                    # validate JSON structure
                     try:
-                        ExpectedModelResponse.model_validate_json(decoded_output)
-                        return decoded_output.strip()  # Success!
+                        return ExpectedModelResponse.model_validate_json(decoded_output)
 
                     except (
                         json.JSONDecodeError,
@@ -471,7 +499,8 @@ class TestHandlerPlain:
         # add predictions to dataset
         aligned_dataset = test_dataset.select(success_indices)
         results_dataset = aligned_dataset.add_column(  # type: ignore[reportCallIssue]
-            name="model_prediction", column=predictions
+            name="model_prediction",
+            column=[p.model_dump_json() for p in predictions],
         )
 
         self.save_evaluation_results(results_dataset=results_dataset)
@@ -550,7 +579,7 @@ class TestHandlerPlain:
 
     def _sequential_inference(
         self, test_dataset: Dataset, n_retries: int = 3
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[ExpectedModelResponse], list[int]]:
         """
         Run inference sequentially with retry logic and proper error tracking.
 
@@ -563,11 +592,11 @@ class TestHandlerPlain:
 
         Returns
         -------
-        tuple[list[str], list[int]]
+        tuple[list[ExpectedModelResponse], list[int]]
             (predictions, success_indices)
         """
 
-        predictions: list[str] = []
+        predictions: list[ExpectedModelResponse] = []
         success_indices: list[int] = []
         n_failures: int = 0
         n_ok: int = 0
@@ -630,7 +659,8 @@ class TestHandlerPlain:
             messages = self.prompt_config.as_messages(
                 func_code=func,
                 phase=self.prompt_mode,
-                mode=self.assumption_mode
+                mode=self.assumption_mode,
+                add_hierarchy=self.add_hierarchy
             )
             batch.append(messages)
 
@@ -643,8 +673,9 @@ class TestHandlerPlain:
 
     def _batched_inference(
         self, test_dataset: Dataset, batch_size: int, n_retries: int = 3
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[ExpectedModelResponse], list[int]]:
         """
+        !!! Unused and unmaintained
         Run batched inference with sequential fallback for failures.
 
         Strategy:
@@ -673,7 +704,7 @@ class TestHandlerPlain:
                 "Model and tokenizer must be loaded before running evaluation."
             )
 
-        all_predictions: list[str] = []
+        all_predictions: list[ExpectedModelResponse] = []
         success_indices: list[int] = []
 
         n_failures: int = 0
@@ -727,14 +758,13 @@ class TestHandlerPlain:
                     )
 
                     # validation
-                    batch_results: list[str | None] = []
+                    batch_results: list[ExpectedModelResponse | None] = []
                     failed_indices: list[int] = []
 
                     for i, pred in enumerate(decoded_predictions):
                         pred = pred.strip()
                         try:
-                            ExpectedModelResponse.model_validate_json(json_data=pred)
-                            batch_results.append(pred)
+                            batch_results.append(ExpectedModelResponse.model_validate_json(json_data=pred))
                         except (
                             json.JSONDecodeError,
                             ValidationError,
@@ -829,29 +859,44 @@ class TestHandlerPlain:
 
         return all_predictions, success_indices
 
-    def diagnose_model(self, test_dataset: Dataset, n_samples=5):
-        """Diagnose if model learned properly."""
+    def diagnose_model(self, test_dataset: Dataset, output_dir: str, n_samples: int = 5) -> None:
+        """Diagnose model behavior on known-vulnerable samples."""
+        # import yaml
+        from datetime import datetime
 
-        # Get some vulnerable samples
+        dir = Path(output_dir)
+        dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_path = dir / f"diagnosis_{timestamp}.yaml"
+
         vuln_samples = [ex for ex in test_dataset if ex["target"] == 1][:n_samples]  # type: ignore[reportCallIssue, reportArgumentType]
 
-        for i, sample in enumerate(vuln_samples):
-            print(f"\n{'='*80}")
-            print(f"SAMPLE {i+1} (Ground truth: VULNERABLE, CWEs: {sample['cwe']})")  # type: ignore[reportCallIssue, reportArgumentType]
-            print(f"{'='*80}")
-
-            # Test raw generation
-            raw = self.run_inference(sample["func"])  # type: ignore[reportCallIssue, reportArgumentType]
-            rich_print("Prediction:", color=RichColors.GREEN_YELLOW)
-            rich_print(raw)
-
-            # Check if model detected vulnerability
-            if (
-                '"is_vulnerable": true' in raw.lower()
-                or '"is_vulnerable":true' in raw.lower()
+        with open(file=output_path, mode="w") as f:
+            for i, sample in rich_progress(
+                enumerate(vuln_samples),
+                total=len(vuln_samples),
+                description="Diagnosing",
+                status_fn=lambda x: f"Sample {x[0] + 1}/{len(vuln_samples)}",
             ):
-                print("✅ Model correctly identified as vulnerable (raw)")
-            else:
-                print("❌ Model incorrectly marked as safe (raw)")
+                result = self.run_inference(sample["func"])  # type: ignore[reportCallIssue, reportArgumentType]
+                pair = CWEPair(
+                    cwes_gt=sample["cwe"],  # type: ignore[reportCallIssue, reportArgumentType]
+                    cwes_pred=result.cwe_list,
+                )
 
-            print()
+                record = {
+                    "sample_id": i + 1,
+                    "ground_truth_cwes": pair.cwes_gt,
+                    "predicted_cwes": pair.cwes_pred,
+                    "detected_vulnerable": result.is_vulnerable,
+                    "strict_match": pair.is_strict_match,
+                    "hierarchical_match": pair.is_hierarchical_match,
+                    "reasoning": result.reasoning,
+                    "verdict": {
+                        "is_vulnerable": result.verdict.is_vulnerable,
+                        "cwe_list": result.verdict.cwe_list,
+                    },
+                }
+
+                dump_yaml(data=record, stream=f)
+                f.write("---\n")
