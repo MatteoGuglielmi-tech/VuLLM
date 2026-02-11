@@ -8,10 +8,10 @@ from pathlib import Path
 from dataclasses import dataclass
 from transformers import PreTrainedTokenizer
 from datasets import Dataset, DatasetDict, Features, Value, Sequence
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 from .prompt_config import Message, VulnerabilityPromptConfig
-from ..utilities import rich_table, load_dataset_from_disk, rich_rule
+from ..utilities import load_dataset_from_disk, rich_rule, build_table, rich_panel, RichColors
 from .datatypes import AssumptionMode, PromptPhase, VerdictStruct, VulnInfo, ExpectedModelResponse
 
 
@@ -53,9 +53,12 @@ class DatasetHandler:
     num_cpus: int
     debug_mode: bool
 
-    prompt_config = VulnerabilityPromptConfig()
     prompt_mode: PromptPhase
     assumption_mode: AssumptionMode
+    add_hierarchy: bool
+
+    def __post_init__(self):
+        self.prompt_config = VulnerabilityPromptConfig(debug_mode=self.debug_mode)
 
     def load_and_split_dataset(
         self,
@@ -509,7 +512,8 @@ class DatasetHandler:
         }
 
         rich_rule()
-        rich_table(
+        global split_stats_tb
+        split_stats_tb = build_table(
             data=data,
             title="✅ Split Statistics - Labels",
             columns=[
@@ -563,70 +567,125 @@ class DatasetHandler:
         seed: int = 42,
     ) -> DatasetDict:
         """
-        Balance the training set by duplicating minority class samples.
+        Balance training set with CWE-stratified oversampling.
 
-        Only modifies the training split; validation and test remain unchanged
-        to ensure realistic evaluation.
-
-        Parameters
-        ----------
-        dataset_dict : DatasetDict
-            Dataset dictionary with 'train', 'validation', 'test' splits.
-        target_ratio : float
-            Desired ratio of vulnerable samples in training (0.5 = balanced).
-        seed : int
-            Random seed for reproducibility.
-
-        Returns
-        -------
-        DatasetDict
-            Dataset dictionary with balanced training set.
+        Ensures low-frequency CWEs get proportionally more representation.
         """
-        train_dataset = dataset_dict["train"]
+        train_dataset: Dataset = dataset_dict["train"]
 
-        vulnerable_indices = [
-            i for i, ex in enumerate(train_dataset) if ex["target"] == 1  # type: ignore[reportCallIssue, reportArgumentType]
-        ]
-        safe_indices = [i for i, ex in enumerate(train_dataset) if ex["target"] == 0]  # type: ignore[reportCallIssue, reportArgumentType]
+        # Group indices by CWE
+        from collections import defaultdict
 
-        n_vulnerable = len(vulnerable_indices)
+        cwe_to_indices: dict[str, list[int]] = defaultdict(list)
+        safe_indices: list[int] = []
+
+        for i, ex in enumerate(train_dataset):
+            if ex["target"] == 1:  # type: ignore[reportCallIssue, reportArgumentType ]
+                for cwe in ex.get("cwe", []):  # type: ignore[reportAttributeAccessIssue]
+                    cwe_to_indices[cwe].append(i)
+            else:
+                safe_indices.append(i)
+
         n_safe = len(safe_indices)
-        original_total = n_vulnerable + n_safe
-
-        logger.info(
-            f"📊 Training set before balancing: {n_vulnerable} vulnerable "
-            f"({n_vulnerable/original_total:.1%}), {n_safe} safe ({n_safe/original_total:.1%})"
-        )
-
-        # Calculate target count for vulnerable samples
-        # target_ratio = n_vuln_new / (n_vuln_new + n_safe)
-        # Solving: n_vuln_new = n_safe * target_ratio / (1 - target_ratio)
         n_vulnerable_target = int(n_safe * target_ratio / (1 - target_ratio))
 
-        if n_vulnerable_target <= n_vulnerable:
+        # Get unique vulnerable indices and current count
+        all_vulnerable_indices = set()
+        for indices in cwe_to_indices.values():
+            all_vulnerable_indices.update(indices)
+        n_vulnerable_current = len(all_vulnerable_indices)
+
+        # Store original distribution for comparison
+        original_cwe_counts = {cwe: len(indices) for cwe, indices in cwe_to_indices.items()}
+
+        if n_vulnerable_target <= n_vulnerable_current:
             logger.info(
-                "✅ Training set already balanced or has sufficient vulnerable samples"
+                "✅ No need for upsampling. Vulnerable samples already over desired ratio"
             )
             return dataset_dict
 
-        n_to_add = n_vulnerable_target - n_vulnerable
+        n_to_add = n_vulnerable_target - n_vulnerable_current
 
+        # Calculate per-CWE sampling weights (inverse frequency)
+        cwe_counts = {cwe: len(indices) for cwe, indices in cwe_to_indices.items()}
+        total_cwe_samples = sum(cwe_counts.values())
+
+        # Inverse frequency weighting: rare CWEs get higher weight
+        cwe_weights = {
+            cwe: total_cwe_samples / count for cwe, count in cwe_counts.items()
+        }
+        total_weight = sum(cwe_weights.values())
+        cwe_probs = {cwe: w / total_weight for cwe, w in cwe_weights.items()}
+
+        freq_data: dict[str, list[int|float|str]] = defaultdict(list)
+        for cwe, prob in sorted(cwe_probs.items(), key=lambda x: -x[1]):
+            freq_data[cwe].extend([f"{prob:.3f}", cwe_counts[cwe]])
+
+        freq_tb = build_table(
+            data=freq_data,
+            title="📊 CWE sampling weights (inverse frequency)",
+            columns=["CWE", "Weight", "Count"],
+        )
+        # Sample CWEs according to weights, then sample index from that CWE
         rng = random.Random(seed)
-        duplicated_indices = rng.choices(vulnerable_indices, k=n_to_add)
+        cwes = list(cwe_probs.keys())
+        probs = [cwe_probs[c] for c in cwes]
 
-        all_indices = safe_indices + vulnerable_indices + duplicated_indices
+        duplicated_indices = []
+        duplicated_cwe_counts: Counter[str] = Counter()
+        for _ in range(n_to_add):
+            # Pick CWE weighted by inverse frequency
+            chosen_cwe = rng.choices(cwes, weights=probs, k=1)[0]
+            # Pick random sample from that CWE
+            chosen_idx = rng.choice(cwe_to_indices[chosen_cwe])
+            duplicated_indices.append(chosen_idx)
+            duplicated_cwe_counts[chosen_cwe] += 1
+
+        # Combine and shuffle
+        all_indices = safe_indices + list(all_vulnerable_indices) + duplicated_indices
         rng.shuffle(all_indices)
 
         balanced_train = train_dataset.select(all_indices)
 
-        new_total = len(balanced_train)
-        logger.info(
-            f"✅ Training set after balancing: {n_vulnerable_target} vulnerable "
-            f"({n_vulnerable_target/new_total:.1%}), {n_safe} safe ({n_safe/new_total:.1%})"
+        # =========================================================================
+        # LOG CWE DISTRIBUTION BEFORE/AFTER
+        # =========================================================================
+        final_cwe_counts = {
+            cwe: original_cwe_counts[cwe] + duplicated_cwe_counts.get(cwe, 0)
+            for cwe in original_cwe_counts
+        }
+
+        data: dict[str, list[int|float|str]] = defaultdict(list)
+        for cwe in sorted(original_cwe_counts.keys(), key=lambda x: int(x.split("-")[1])):
+            before = original_cwe_counts[cwe]
+            added = duplicated_cwe_counts.get(cwe, 0)
+            after = final_cwe_counts[cwe]
+            change_pct = (after - before) / before * 100 if before > 0 else 0
+            data[cwe].extend([before, added, after, f"{+round(change_pct,2)}%"])
+
+        data["TOTAL"] = [
+            sum(original_cwe_counts.values()),
+            sum(duplicated_cwe_counts.values()),
+            sum(final_cwe_counts.values()),
+            "-",
+        ]
+        before_after_tb = build_table(
+            data=data,
+            title="📊 CWE DISTRIBUTION BEFORE/AFTER BALANCING",
+            columns=["CWE", "Before", "Added", "After", "Change"],
         )
+
+        rich_panel(
+            tables=[freq_tb, before_after_tb],
+            panel_title="Training set CWE distribution after balancing",
+            border_style=RichColors.STEEL_BLUE,
+        )
+
+        total_samples = len(balanced_train)
+        total_vulnerable = n_vulnerable_target
         logger.info(
-            f"   Added {n_to_add} duplicated vulnerable samples "
-            f"(total: {original_total} → {new_total})"
+            f"✅ Final balance: {total_vulnerable} vulnerable ({total_vulnerable/total_samples:.1%}), "
+            f"{n_safe} safe ({n_safe/total_samples:.1%})"
         )
 
         return DatasetDict(
@@ -691,10 +750,17 @@ class DatasetHandler:
 
             data[cwe_display] = [train, val, test, total]
 
-        rich_table(
+
+        coverage_details_table = build_table(
             data=data,
             title="📊 CWE Coverage Details",
             columns=["CWE", "Train", "Validation", "Test", "Total"],
+        )
+
+        rich_panel(
+            tables=[split_stats_tb, coverage_details_table],
+            panel_title="Training set original stats",
+            border_style=RichColors.STEEL_BLUE,
         )
 
         # Log summary
@@ -808,9 +874,10 @@ class DatasetHandler:
         # convert to formatted JSON
         messages = self.prompt_config.as_messages(
             func_code=example["func"],
-            ground_truth=response_data.model_dump_json(indent=None, ensure_ascii=False),
             phase=self.prompt_mode,
-            mode=self.assumption_mode
+            mode=self.assumption_mode,
+            add_hierarchy=self.add_hierarchy,
+            ground_truth=response_data.model_dump_json(indent=None, ensure_ascii=False),
         )
 
         return {"text": self.tokenizer.apply_chat_template(messages, tokenize=False)}
@@ -908,15 +975,7 @@ class DatasetHandler:
                 num_proc=self.num_cpus,
             )
 
-            # if save_jsonl:
-            #     op=output_dir/ "dataset"
-            #     op.mkdir(exist_ok=True, parents=True)
-            #     op = op / f"{split_name}_chat_template.json"
-            #     self._save_to_jsonl(
-            #         dataset=formatted,
-            #         split_name=split_name,
-            #         output_path=op,
-            #     )
+            logger.debug(f"✅ {split_name} split columns after formatting: {formatted.column_names}")
 
             formatted_splits[split_name] = formatted
 
@@ -951,7 +1010,7 @@ class DatasetHandler:
 
         logger.info(f"✅ Saved {len(dataset)} examples to {output_path}")
 
-    def save_to_disk(self, dataset_dict: DatasetDict) -> None:
+    def save_to_disk(self, dataset_dict: DatasetDict, subdir: str = "dataset") -> None:
         """Save formatted dataset.
 
         Parameters
@@ -962,7 +1021,7 @@ class DatasetHandler:
 
         from ..utilities import save_dataset
 
-        op: Path = self.formatted_dataset_dir / "dataset"
+        op: Path = self.formatted_dataset_dir / subdir
         op.mkdir(exist_ok=True, parents=True)
 
         save_dataset(
@@ -986,17 +1045,21 @@ class DatasetHandler:
             Formatted dataset ready for training.
         """
         if self.formatted_dataset_dir.exists() and any(self.formatted_dataset_dir.iterdir()):
-            dataset_dict: DatasetDict = load_dataset_from_disk(input_dir=self.formatted_dataset_dir)
-            logger.info(f"✅ DatasetDict loaded from disk: {self.formatted_dataset_dir}")
+            dataset_dir: Path = self.formatted_dataset_dir / "dataset"
+            dataset_dict: DatasetDict = load_dataset_from_disk(input_dir=dataset_dir)
+            logger.info(f"✅ DatasetDict loaded from disk: {dataset_dir}")
             return dataset_dict
 
         dataset_dict: DatasetDict = self.load_and_split_dataset()
+        self.save_to_disk(dataset_dict=dataset_dict, subdir="pre-formatting")
 
         if target_vulnerable_ratio is not None:
             dataset_dict = self._balance_training_set(
                 dataset_dict=dataset_dict,
                 target_ratio=target_vulnerable_ratio,
             )
+
+        self.save_to_disk(dataset_dict=dataset_dict, subdir="pre-formatting-post-balancing")
 
         formatted_dataset_dict: DatasetDict = self.format_dataset(dataset_dict=dataset_dict)
         self.save_to_disk(dataset_dict=formatted_dataset_dict)
