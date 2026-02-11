@@ -1,5 +1,4 @@
 from unsloth import FastLanguageModel, is_bfloat16_supported
-from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
 import logging
 import torch
@@ -12,7 +11,7 @@ from dataclasses import dataclass, field
 from transformers import PreTrainedTokenizer
 from peft import LoftQConfig
 
-from ..utilities import rich_table, rich_status
+from ..utilities import rich_status
 
 logger = logging.getLogger(name=__name__)
 
@@ -65,7 +64,7 @@ class ModelHandler:
         - Encoder-decoder (T5, BART): Right padding
         """
 
-        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"} # deepseek uses "llama"
+        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma", "deepseek_v2" }
         model_type = getattr(self.base_model.config, "model_type", "").lower()  # type: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
         if any(arch in model_type for arch in decoder_only_models):
@@ -84,48 +83,69 @@ class ModelHandler:
 
     def _configure_tokenizer(self):
         """Configure tokenizer settings (chat template, padding, special tokens)."""
+
         model_name_lower = self.base_model_name.lower()
 
-        # Check if DeepSeek model
+        # DeepSeek models
         if "deepseek" in model_name_lower:
-            logger.info("🔍 Detected DeepSeek model - applying custom chat template")
+            logger.info("🔍 Detected DeepSeek model - applying fixed chat template")
 
-            # Override DeepSeek's default template to remove automatic system prompt
-            self.tokenizer.chat_template = (  # type: ignore[reportOptionalMemberAccess]
-                "{{ bos_token }}"
-                "{% for message in messages %}"
-                "{% if message['role'] == 'system' %}"
-                "{{ message['content'] + '\\n' }}"
-                "{% elif message['role'] == 'user' %}"
-                "{{ '### Instruction:\\n' + message['content'] + '\\n' }}"
-                "{% elif message['role'] == 'assistant' %}"
-                "{{ '### Response:\\n' + message['content'] + '\\n<|EOT|>\\n' }}"
+            # CRITICAL: Use \\n (double backslash) for actual newlines in Jinja!
+            self.tokenizer.chat_template = ( # type: ignore[reportOptionalMemberAccess]
+                "{% if not add_generation_prompt is defined %}"
+                "{% set add_generation_prompt = false %}"
                 "{% endif %}"
-                "{% endfor %}"
+                "{{ bos_token }}"
+                "{%- for message in messages %}"
+                "    {%- if message['role'] == 'system' %}"
+                "{{ message['content'] + '\\n' }}"
+                "    {%- else %}"
+                "        {%- if message['role'] == 'user' %}"
+                "{{ '### Instruction:\\n' + message['content'] + '\\n' }}"
+                "        {%- else %}"
+                "{{ '### Response:\\n' + message['content'] + '\\n' + eos_token + '\\n' }}"
+                "        {%- endif %}"
+                "    {%- endif %}"
+                "{%- endfor %}"
                 "{% if add_generation_prompt %}"
                 "{{ '### Response:\\n' }}"
                 "{% endif %}"
             )
+            logger.info("✅ Applied fixed DeepSeek chat template")
 
-            logger.info(
-                "✅ Applied custom DeepSeek chat template (removed default system prompt)"
-            )
+        # CodeLlama models
+        elif "codellama" in model_name_lower:
+            logger.info("🔍 Detected CodeLlama model - applying Llama 2 chat template")
+            from unsloth.chat_templates import get_chat_template
 
+            self.tokenizer = get_chat_template(self.tokenizer, chat_template="llama")
+            logger.info("✅ Applied Llama 2 chat template")
+
+        # Custom template
         elif self.chat_template is not None:
-            # Use Unsloth's built-in templates for non-DeepSeek models
-            logger.info(
-                f"🎨 Applying chat template for non-DeepSeek models: {self.chat_template}"
-            )
+            logger.info(f"🎨 Applying chat template: {self.chat_template}")
             try:
+                from unsloth.chat_templates import get_chat_template
+
                 self.tokenizer = get_chat_template(
                     self.tokenizer, chat_template=self.chat_template
                 )
+                logger.info(f"✅ Applied {self.chat_template} chat template")
             except ValueError as e:
                 logger.error(f"Invalid chat template: {self.chat_template}")
-                logger.error(f"Available templates: {list(CHAT_TEMPLATES.keys())}")
                 raise ValueError(
                     f"Chat template '{self.chat_template}' not found"
                 ) from e
+
+        # Default
+        else:
+            if (
+                hasattr(self.tokenizer, "chat_template")
+                and self.tokenizer.chat_template # type: ignore[reportOptionalMemberAccess]
+            ):
+                logger.info("ℹ️  Using model's default chat template")
+            else:
+                logger.warning("⚠️  No chat template found or specified!")
 
         self._set_padding_strategy()
 
