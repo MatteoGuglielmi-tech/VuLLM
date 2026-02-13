@@ -52,6 +52,8 @@ class VulnPromptV1(BaseVulnPrompt):
     @property
     def PESSIMISTIC_ASSUMPTIONS(self) -> str:
         return (
+            "## Pessimistic Assumptions\n\n"
+
             "### External Functions\n"
             "Assume ALL unknown/external functions may:\n"
             " - Violate their implied contract\n"
