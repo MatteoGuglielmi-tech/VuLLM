@@ -25,6 +25,8 @@ tests/
 scripts/
 cluster_logs/
 cluster_old_version_stuff/
+diagnostics/
+test.c
 
 accelerate/
 results/
@@ -51,6 +53,7 @@ src/core/cot/generation/todo.md
 # src/core/cot_training/
 src/core/cot_training/__pycache__/
 src/core/cot_training/todo.md
+src/core/cot_training/results.md
 src/core/cot_training/processing_lib/inference_legacy.py
 src/core/cot_training/processing_lib/unused/
 src/core/cot_training/run/
