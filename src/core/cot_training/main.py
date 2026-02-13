@@ -83,6 +83,7 @@ if __name__ == "__main__":
                 prompt_mode=args.prompt_mode,
                 assumption_mode=args.assumption_mode,
                 add_hierarchy=args.add_hierarchy,
+                prompt_version=args.prompt_version,
 
                 # -- model loading --
                 base_model_name=args.base_model_name,
@@ -179,9 +180,10 @@ if __name__ == "__main__":
                     max_new_tokens=args.max_tokens_per_answer,
                     chat_template=args.chat_template,
                     evaluated_testset_path=args.evaluated_test_path,
-                    prompt_mode=args.prompt_mode,
+                    prompt_phase=args.prompt_mode,
                     assumption_mode=args.assumption_mode,
-                    add_hierarchy=args.add_hierarchy,
+                    add_cwe_guidelines=args.add_hierarchy,
+                    prompt_version=args.prompt_version
                 )
                 test_set: Dataset = TestHandler.load_test_dataset(input_dir=args.formatted_dataset_dir)
                 logging.info(f"🌟 Dataset loaded from {args.formatted_dataset_dir}")

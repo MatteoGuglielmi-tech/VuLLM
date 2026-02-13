@@ -1,4 +1,3 @@
-from .datatypes import TypedDataset, TestDatasetSchema, PromptPhase, AssumptionMode
 from .finetuning_handler import FineTuningHandler
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
@@ -8,6 +7,14 @@ from .evaluation_handler import Evaluator
 from .hpo_handler import LLMHyperparameterOptimizer
 from .schema_generation import JSONGenerator
 from .cwe_diagostic_mixin import CWEDiagnosticMixin
+
+from .datatypes import (
+    TypedDataset,
+    TestDatasetSchema,
+    PromptPhase,
+    AssumptionMode,
+    PromptVersion,
+)
 
 __all__ = [
     "TypedDataset",
@@ -23,5 +30,6 @@ __all__ = [
     "JSONGenerator",
     "PromptPhase",
     "AssumptionMode",
+    "PromptVersion",
     "CWEDiagnosticMixin"
 ]

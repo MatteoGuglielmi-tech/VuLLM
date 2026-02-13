@@ -2,7 +2,7 @@ from rich.table import Table
 from unsloth import is_bfloat16_supported
 from unsloth.chat_templates import train_on_responses_only
 
-from .datatypes import PromptPhase, AssumptionMode
+from .datatypes import PromptPhase, AssumptionMode, PromptVersion
 from .dataset_handler import DatasetHandler
 from .model_handler import ModelHandler
 from .custom import WeightedCoTTrainer
@@ -61,6 +61,7 @@ class FineTuningHandler:
         prompt_mode: PromptPhase,
         assumption_mode: AssumptionMode,
         add_hierarchy: bool,
+        prompt_version: PromptVersion,
         # -- model loading --
         base_model_name: str,
         chat_template: str,
@@ -121,6 +122,9 @@ class FineTuningHandler:
 
         add_hierarchy: bool
             whether to add cwe hierarchy guidelines to system prompt
+
+        prompt_version: PromptVersion
+            Prompt version to use
 
         base_model_name: str
             Name of the model to load (from huggingface or unsloth)
@@ -220,6 +224,7 @@ class FineTuningHandler:
         self.prompt_mode = prompt_mode
         self.assumption_mode = assumption_mode
         self.add_hierarchy = add_hierarchy
+        self.prompt_version = prompt_version
 
         self.model_loader_class = model_loader_class
         self.base_model_name = base_model_name
@@ -358,9 +363,10 @@ class FineTuningHandler:
             tokenizer=tokenizer,
             num_cpus=self.num_cpus,
             debug_mode=self.debug,
-            prompt_mode=self.prompt_mode,
+            prompt_phase=self.prompt_mode,
             assumption_mode=self.assumption_mode,
-            add_hierarchy=self.add_hierarchy
+            add_cwe_guidelines=self.add_hierarchy,
+            prompt_version=self.prompt_version
         )
         self._dataset_dict = dataset_handler.run_pipeline(
             target_vulnerable_ratio=self.target_vulnerable_ratio

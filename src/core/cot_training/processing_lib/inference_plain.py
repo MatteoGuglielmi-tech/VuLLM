@@ -1,6 +1,5 @@
 from pydantic import ValidationError
 from unsloth import FastLanguageModel, is_bfloat16_supported
-# from unsloth.chat_templates import CHAT_TEMPLATES, get_chat_template
 
 import json
 import torch
@@ -14,22 +13,22 @@ from dataclasses import dataclass, field
 from datasets import Dataset
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-
-from .prompt_config import VulnerabilityPromptConfig
+from .prompts import VulnPromptFactory
 from .datatypes import (
     AssumptionMode,
     EmptyReasoningError,
     ExpectedModelResponse,
     MismatchCWEError,
     PromptPhase,
+    PromptVersion,
     TestDatasetSchema,
     TypedDataset,
     GenerationError,
+    Messages
 )
 
 from .cwe_diagostic_mixin import CWEDiagnosticMixin
 from .evaluation_handler import CWEPair
-from .prompt_config import Messages, VulnerabilityPromptConfig
 from ..utilities import (
     RichColors,
     is_main_process,
@@ -50,15 +49,15 @@ class TestHandlerPlain(CWEDiagnosticMixin):
     evaluated_testset_path: Path
     max_seq_length: int
     max_new_tokens: int
-    prompt_mode: PromptPhase
+    prompt_phase: PromptPhase
     assumption_mode: AssumptionMode
-    add_hierarchy: bool
+    add_cwe_guidelines: bool
+    prompt_version: PromptVersion
     chat_template: str | None = None
 
     model: FastLanguageModel | None = field(init=False, default=None, repr=False)
     tokenizer: PreTrainedTokenizer | None = field(init=False, default=None, repr=False)
 
-    prompt_config = VulnerabilityPromptConfig()
     _counter_fails: int = field(init=False, default=0, repr=False)
 
     def __post_init__(self):
@@ -78,6 +77,13 @@ class TestHandlerPlain(CWEDiagnosticMixin):
             border_style=RichColors.MEDIUM_PURPLE1,
         )
 
+        self.prompt_config = VulnPromptFactory.create(
+            version=self.prompt_version,
+            prompt_phase=self.prompt_phase,
+            assumptions_mode=self.assumption_mode,
+            add_cwe_guidelines=self.add_cwe_guidelines,
+        )
+
         self._load_finetuned_model()
 
     def _validate_inputs(self):
@@ -86,12 +92,12 @@ class TestHandlerPlain(CWEDiagnosticMixin):
         if isinstance(self.lora_path, str):
             self.lora_path = Path(self.lora_path)
 
-        if self.prompt_mode in [
+        if self.prompt_phase in [
             PromptPhase.CONSTRAINED_TRAINING,
             PromptPhase.FREE_TRAINING,
         ]:
             raise ValueError(
-                f"THIS IS INFERENCE! Provided {self.prompt_mode} prompt mode!"
+                f"THIS IS INFERENCE! Provided {self.prompt_phase} prompt mode!"
             )
 
         # Check checkpoint exists
@@ -353,12 +359,7 @@ class TestHandlerPlain(CWEDiagnosticMixin):
             )
 
         # build message structure
-        messages: list[dict] = self.prompt_config.as_messages(
-            func_code=input_code,
-            phase=self.prompt_mode,
-            mode=self.assumption_mode,
-            add_hierarchy=self.add_hierarchy
-        )
+        messages: list[dict] = self.prompt_config.as_messages(func_code=input_code)
 
         input_text = self.tokenizer.apply_chat_template(
             messages,
@@ -656,12 +657,7 @@ class TestHandlerPlain(CWEDiagnosticMixin):
         batch: list[Messages] = []
 
         for func in dataset["func"]:
-            messages = self.prompt_config.as_messages(
-                func_code=func,
-                phase=self.prompt_mode,
-                mode=self.assumption_mode,
-                add_hierarchy=self.add_hierarchy
-            )
+            messages = self.prompt_config.as_messages(func_code=func)
             batch.append(messages)
 
             if len(batch) == batch_size:

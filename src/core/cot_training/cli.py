@@ -88,6 +88,13 @@ def get_parser():
         action="store_true",
         help="Add cwe hierarchy guidelines in system prompt",
     )
+    common_group.add_argument(
+        "--prompt_version",
+        "-v",
+        type=str,
+        choices=["v1", "v2"],
+        help="Prompt version to use.",
+    )
 
     # ============================================================================
     # MODE SELECTION (Mutually Exclusive)
@@ -315,7 +322,9 @@ def validate_args(args):
         "lora_dropout",
         "batch_size_eval",
         "target_vulnerable_ratio",
-        "resume_from_checkpoint"
+        "resume_from_checkpoint",
+        "prompt_version"
+
     }
 
     # hpo only args
@@ -481,6 +490,7 @@ def get_default_value(arg_name):
         "batch_size_eval": 8,
         "target_vulnerable_ratio": None,
         "resume_from_checkpoint": None,
+        "prompt_version": None,
         # HPO only
         "n_trials": 5,
         "run_cap": 100,

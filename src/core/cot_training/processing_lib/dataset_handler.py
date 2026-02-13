@@ -10,10 +10,23 @@ from transformers import PreTrainedTokenizer
 from datasets import Dataset, DatasetDict, Features, Value, Sequence
 from collections import defaultdict, Counter
 
-from .prompt_config import Message, VulnerabilityPromptConfig
-from ..utilities import load_dataset_from_disk, rich_rule, build_table, rich_panel, RichColors
-from .datatypes import AssumptionMode, PromptPhase, VerdictStruct, VulnInfo, ExpectedModelResponse
-
+from .prompts import VulnPromptFactory
+from .datatypes import (
+    AssumptionMode,
+    PromptPhase,
+    VerdictStruct,
+    VulnInfo,
+    ExpectedModelResponse,
+    Message,
+    PromptVersion
+)
+from ..utilities import (
+    load_dataset_from_disk,
+    rich_rule,
+    build_table,
+    rich_panel,
+    RichColors,
+)
 
 logger = logging.getLogger(name=__name__)
 
@@ -53,12 +66,19 @@ class DatasetHandler:
     num_cpus: int
     debug_mode: bool
 
-    prompt_mode: PromptPhase
+    prompt_phase: PromptPhase
     assumption_mode: AssumptionMode
-    add_hierarchy: bool
+    add_cwe_guidelines: bool
+    prompt_version: PromptVersion
 
     def __post_init__(self):
-        self.prompt_config = VulnerabilityPromptConfig(debug_mode=self.debug_mode)
+        self.prompt_config = VulnPromptFactory.create(
+            version=self.prompt_version,
+            prompt_phase=self.prompt_phase,
+            assumptions_mode=self.assumption_mode,
+            add_cwe_guidelines=self.add_cwe_guidelines,
+            debug_mode=self.debug_mode,
+        )
 
     def load_and_split_dataset(
         self,
@@ -874,9 +894,6 @@ class DatasetHandler:
         # convert to formatted JSON
         messages = self.prompt_config.as_messages(
             func_code=example["func"],
-            phase=self.prompt_mode,
-            mode=self.assumption_mode,
-            add_hierarchy=self.add_hierarchy,
             ground_truth=response_data.model_dump_json(indent=None, ensure_ascii=False),
         )
 

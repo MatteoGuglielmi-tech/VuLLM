@@ -1,8 +1,9 @@
 from enum import StrEnum
-from typing import TypeVar, Generic, Iterator, TypedDict
+from typing import TypeVar, Generic, Iterator, TypedDict, Literal
 from dataclasses import dataclass, fields
 from datasets import Dataset
 from pydantic import BaseModel, Field, model_validator, field_validator
+from transformers import BatchEncoding
 
 T = TypeVar("T")
 
@@ -200,8 +201,31 @@ class AssumptionMode(StrEnum):
 class PromptPhase(StrEnum):
     """Phase of prompt usage."""
 
-    CONSTRAINED_TRAINING = "training" # ass + reminder
-    FREE_TRAINING = "training_no_assumptions" # no ass + no reminder
-    FULL_CONSTRAINED_INFERENCE = "inference" # full inference -> attacks + assumptions + reminder
-    ATTACK_CONSTRAINED_INFERENCE = "inference_attacks_only"  # attacks only, no assumptions no reminder
-    FREE_INFERENCE = "inference_barebone" # pure inference -> no attacks, no assumptions, no reminder
+    CONSTRAINED_TRAINING = "training"
+    FREE_TRAINING = "training_no_assumptions"
+    FULL_CONSTRAINED_INFERENCE = "inference"
+    ATTACK_CONSTRAINED_INFERENCE = "inference_attacks_only"
+    FREE_INFERENCE = "inference_barebone" # free generation
+
+    @property
+    def needs_assumptions_reminder(self) -> bool:
+        """Whether this phase requires assumptions and reminder."""
+        return self in {
+            PromptPhase.CONSTRAINED_TRAINING,
+            PromptPhase.FULL_CONSTRAINED_INFERENCE,
+        }
+
+    @property
+    def is_trainig(self) -> bool:
+        """Whether this phase requires assumptions and reminder."""
+        return self in {
+            PromptPhase.CONSTRAINED_TRAINING,
+            PromptPhase.FREE_TRAINING,
+        }
+
+
+Message = dict[str, str | list[int] | list[str] | list[list[int]] | BatchEncoding]
+Messages = list[dict[str,str]]
+
+
+PromptVersion = Literal["v1", "v2"]
