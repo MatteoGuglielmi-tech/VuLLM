@@ -1,14 +1,15 @@
+import warnings
 from typing import Literal
 from transformers import PreTrainedTokenizer
 
+from .base import BaseSequenceLengthAnalyzer
+from .finetuningv2 import FineTunePromptAnalyzerV2
+from .finetuningv3 import FineTunePromptAnalyzerV3
+from .assessment import JudgePromptAnalyzer
+
 from ..datatypes import AssumptionMode, PromptPhase
 
-from .finetuningv2 import FineTunePromptAnalyzerV2
-from .assessment import JudgePromptAnalyzer
-from .base import BaseSequenceLengthAnalyzer
-
-
-AnalyzerVersion = Literal["v1", "v2", "judge"]
+AnalyzerVersion = Literal["v1", "v2", "v3", "judge"]
 
 
 class AnalyzerFactory:
@@ -49,27 +50,43 @@ class AnalyzerFactory:
             Configured analyzer instance
         """
 
-        # if version == "v1":
-        #     pass
+        match version:
+            case "v2":
+                # Validate V2-specific parameters
+                if assumption_mode is None or prompt_phase is None:
+                    raise ValueError("V2 analyzer requires 'assumption_mode' and 'prompt_mode'")
 
-        if version == "v2":
-            # Validate V2-specific parameters
-            if assumption_mode is None or prompt_phase is None:
-                raise ValueError("V2 analyzer requires 'assumption_mode' and 'prompt_mode'")
+                return FineTunePromptAnalyzerV2(
+                    tokenizer=tokenizer,
+                    chat_template=chat_template,
+                    assumption_mode=assumption_mode,
+                    prompt_phase=prompt_phase,
+                    add_hierarchy=add_hierarchy,
+                )
+            case "v1"| "v3":
 
-            return FineTunePromptAnalyzerV2(
-                tokenizer=tokenizer,
-                chat_template=chat_template,
-                assumption_mode=assumption_mode,
-                prompt_phase=prompt_phase,
-                add_hierarchy=add_hierarchy,
-            )
+                if version == "v1":
+                    warnings.warn(
+                        "This prompt version is deprecated, use `v2` or `v3` instead. Defaulting to v3" ,
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
 
-        elif version == "judge":
-            return JudgePromptAnalyzer(
-                tokenizer=tokenizer,
-                chat_template=chat_template,
-            )
+                # Validate V3-specific parameters
+                if assumption_mode is None or prompt_phase is None:
+                    raise ValueError("V3 analyzer requires 'assumption_mode' and 'prompt_mode'")
 
-        else:
-            raise ValueError(f"Unknown analyzer version: {version}")
+                return FineTunePromptAnalyzerV3(
+                    tokenizer=tokenizer,
+                    chat_template=chat_template,
+                    assumption_mode=assumption_mode,
+                    prompt_phase=prompt_phase,
+                    add_hierarchy=add_hierarchy,
+                )
+            case "judge":
+                return JudgePromptAnalyzer(
+                    tokenizer=tokenizer,
+                    chat_template=chat_template,
+                )
+            case _:
+                raise ValueError(f"Unknown analyzer version: {version}")

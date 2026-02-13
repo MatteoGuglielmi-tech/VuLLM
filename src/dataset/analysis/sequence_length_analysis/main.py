@@ -26,6 +26,8 @@ if __name__ == "__main__":
                 analyzer_version = "v1"
             elif args.version == 2:
                 analyzer_version = "v2"
+            elif args.version == 3:
+                analyzer_version = "v3"
             else:
                 raise ValueError(f"Unknown version: {args.version}")
         elif args.assessment:
@@ -40,7 +42,7 @@ if __name__ == "__main__":
             "max_samples": args.max_samples,
         }
 
-        if analyzer_version == "v2":
+        if analyzer_version in {"v2", "v3"}:
             common_kwargs.update(
                 {
                     "assumption_mode": args.assumption_mode,

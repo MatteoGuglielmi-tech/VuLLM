@@ -103,7 +103,7 @@ def _get_parser() -> argparse.ArgumentParser:
     )
 
     finetune_group = parser.add_argument_group("FineTuning prompt version")
-    finetune_group.add_argument("--version", "-v", type=int, choices=[1, 2], help="Prompt version to use.")
+    finetune_group.add_argument("--version", "-v", type=int, choices=[1, 2, 3], help="Prompt version to use.")
     finetune_group.add_argument(
         "--prompt_mode",
         type=PromptPhase,

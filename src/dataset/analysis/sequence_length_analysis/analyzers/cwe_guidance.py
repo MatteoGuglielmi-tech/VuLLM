@@ -1,4 +1,4 @@
-CWE_MAPPING_GUIDANCE: str = """## CWE Mapping Guidelines (Source: MITRE CWE)
+CWE_MAPPING_GUIDANCE_V1: str = """## CWE Mapping Guidelines (Source: MITRE CWE)
 
 ### Abstraction Levels
 - **Pillar**: Highest-level, most abstract. Should not be used for mapping unless no alternative exists.
@@ -69,3 +69,40 @@ Integer/Numeric:
 
 Pointer:
   CWE-476 (Base, ALLOWED) - NULL Pointer Dereference"""
+
+CWE_MAPPING_GUIDANCE_V2: str = """## [CRITICAL] CWE Mapping Guidelines
+
+### Mapping Rules
+1. Use the MOST SPECIFIC CWE that fits
+2. Report ROOT CAUSE, not consequence
+3. Never output parent and child together (e.g., never [119, 787])
+
+### [REQUIRED] CWE Reference
+
+**Memory Buffer (prefer children over CWE-119):**
+- CWE-787: Out-of-bounds Write [PREFERRED]
+- CWE-125: Out-of-bounds Read [PREFERRED]
+- CWE-120: Buffer Copy without Size Check [USE FOR inappropriately validated memory copying APIs: strcpy, gets, sprintf, memcpy, etc.]
+- CWE-119: Improper Buffer Operations [DISCOURAGED - use 787/125/120 instead]
+
+**Memory Lifecycle:**
+- CWE-416: Use After Free [PREFERRED]
+- CWE-415: Double Free [PREFERRED]
+- CWE-401: Memory Leak [PREFERRED - use instead of CWE-400]
+- CWE-400: Uncontrolled Resource Consumption [DISCOURAGED - use 401 for leaks]
+
+**Pointer/Numeric:**
+- CWE-476: NULL Pointer Dereference [PREFERRED]
+- CWE-190: Integer Overflow [PREFERRED] — if overflow causes buffer issue, report 190 as root cause
+
+**Other:**
+- CWE-362: Race Condition [ALLOWED] — if race causes UAF/NULL deref, report 362 as root cause
+- CWE-200: Information Exposure [ALLOWED in this context]
+- CWE-703: Improper Exception Handling [ALLOWED in this context]
+- CWE-20: Improper Input Validation [DISCOURAGED - too abstract unless purely validation issue]
+
+### [CRITICAL] Causal Chain Rule
+When A causes B, report A:
+- Integer overflow causes buffer overflow: report CWE-190
+- Race condition causes use-after-free: report CWE-362
+- Missing validation causes buffer overflow: consider CWE-20 if validation is the root cause"""
