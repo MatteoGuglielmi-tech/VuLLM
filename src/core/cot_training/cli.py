@@ -323,8 +323,6 @@ def validate_args(args):
         "batch_size_eval",
         "target_vulnerable_ratio",
         "resume_from_checkpoint",
-        "prompt_version"
-
     }
 
     # hpo only args
@@ -490,7 +488,6 @@ def get_default_value(arg_name):
         "batch_size_eval": 8,
         "target_vulnerable_ratio": None,
         "resume_from_checkpoint": None,
-        "prompt_version": None,
         # HPO only
         "n_trials": 5,
         "run_cap": 100,

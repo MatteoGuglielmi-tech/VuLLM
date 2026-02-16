@@ -332,23 +332,40 @@ class FineTuningHandler:
         date: str = datetime.today().strftime("%Y-%m-%d")
         time: str = datetime.now().strftime("%H-%M-%S")
 
-        common_suffix: str = os.path.join(provider, model_id, date, time)
-        history_dir: str = "./checkpoints"
+        history_dir = Path("./checkpoints")
+        guidelines : str = "guidelines" if self.add_hierarchy else "plain"
 
-        self.lora_best_model_dir: str = os.path.join(
-            history_dir,
-            "best_model",
-            self.base_model_name,
-            self.prompt_mode,
-            self.assumption_mode,
-            date,
-            time
+        self.lora_best_model_dir = (
+            history_dir
+            / "best_model"
+            / self.base_model_name
+            / self.prompt_mode
+            / self.assumption_mode
+            / guidelines
+            / self.prompt_version
+            / date
+            / time
         )
-        self.checkpoint_dir: str = os.path.join(history_dir, common_suffix)
-        self.output_dir: str = os.path.join("./results", f"{model_id}_{date}_{time}")
 
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-        os.makedirs(self.lora_best_model_dir, exist_ok=True)
+        self.checkpoint_dir = (
+            history_dir
+            / "ft_checkpoints"
+            / self.prompt_mode
+            / self.assumption_mode
+            / guidelines
+            / self.prompt_version
+            / model_id
+            / date
+            / time
+        )
+
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.lora_best_model_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create/update "latest" symlink -> easier to reference path with SLURM
+        latest_link = self.lora_best_model_dir.parent.parent / "latest"
+        latest_link.unlink(missing_ok=True)
+        latest_link.symlink_to(Path(date) / time)
 
     def _prepare_dataset_with_tokenizer(self, tokenizer: PreTrainedTokenizer):
         """Prepare dataset using the provided tokenizer."""
@@ -366,7 +383,7 @@ class FineTuningHandler:
             prompt_phase=self.prompt_mode,
             assumption_mode=self.assumption_mode,
             add_cwe_guidelines=self.add_hierarchy,
-            prompt_version=self.prompt_version
+            prompt_version=self.prompt_version # type: ignore[reportArgumentType]
         )
         self._dataset_dict = dataset_handler.run_pipeline(
             target_vulnerable_ratio=self.target_vulnerable_ratio
@@ -491,7 +508,8 @@ class FineTuningHandler:
                 "assumption_mode": self.assumption_mode,
                 "RsLora?": self.use_rslora,
                 "LoftQ?": self.use_loftq,
-                "guidelines?": self.add_hierarchy
+                "guidelines?": self.add_hierarchy,
+                "prompt_version": self.prompt_version
             },
         )
 

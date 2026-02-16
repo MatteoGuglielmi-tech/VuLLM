@@ -36,7 +36,6 @@ from ..utilities import (
     build_table,
     rich_panel,
     rich_progress,
-    # validate_filepath_extension
     dump_yaml
 )
 
@@ -57,8 +56,6 @@ class TestHandlerPlain(CWEDiagnosticMixin):
 
     model: FastLanguageModel | None = field(init=False, default=None, repr=False)
     tokenizer: PreTrainedTokenizer | None = field(init=False, default=None, repr=False)
-
-    _counter_fails: int = field(init=False, default=0, repr=False)
 
     def __post_init__(self):
         self._validate_inputs()

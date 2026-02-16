@@ -48,7 +48,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "If YES → NOT A VULNERABILITY.\n"
             "Focus solely on bugs provable from visible code alone."
         )
-    
+
     @property
     def PESSIMISTIC_ASSUMPTIONS(self) -> str:
         return (

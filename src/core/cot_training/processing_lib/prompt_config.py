@@ -307,7 +307,7 @@ class VulnerabilityPromptConfig:
                 return (assumption, reminder)
             case (
                 PromptPhase.FREE_TRAINING
-                | PromptPhase.ATTACK_CONSTRAINED_INFERENCE
+                # | PromptPhase.ATTACK_CONSTRAINED_INFERENCE
                 | PromptPhase.FREE_INFERENCE
             ):
                 return (None, None)

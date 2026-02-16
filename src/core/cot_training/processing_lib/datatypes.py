@@ -204,7 +204,7 @@ class PromptPhase(StrEnum):
     CONSTRAINED_TRAINING = "training"
     FREE_TRAINING = "training_no_assumptions"
     FULL_CONSTRAINED_INFERENCE = "inference"
-    ATTACK_CONSTRAINED_INFERENCE = "inference_attacks_only"
+    # ATTACK_CONSTRAINED_INFERENCE = "inference_attacks_only"
     FREE_INFERENCE = "inference_barebone" # free generation
 
     @property
