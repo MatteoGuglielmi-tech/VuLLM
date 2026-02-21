@@ -192,9 +192,16 @@ if __name__ == "__main__":
                     batch_size=args.batch_size,
                     use_batching=args.use_batching,
                 )
+
+                diagnostic_dir_prefix = f"diagnostics/{args.assumption_mode}/{"guidelines" if args.add_hierarchy else "plain"}"
                 report = test_handler.run_cwe_diagnostic(verbose=True)
-                test_handler.save_diagnostic_report(report=report, filepath="diagnostics/diagnostic_results.yaml")
-                test_handler.diagnose_model(test_dataset=test_set, output_dir="diagnostics", n_samples=20)
+                test_handler.save_diagnostic_report(
+                    report=report,
+                    filepath=Path(diagnostic_dir_prefix) / "diagnostic_results.yaml",
+                )
+                test_handler.diagnose_model(
+                    test_dataset=test_set, output_dir=diagnostic_dir_prefix, n_samples=20
+                )
 
                 evaluator = Evaluator(output_dir=args.assets_dir, test_typeddataset=pred_testset)
                 evaluator.validate_cwe_format() # validate predicted cwe quality
