@@ -363,11 +363,11 @@ void copy_data(char *dst, char *src, int len) {
     memcpy(buf, src, len);
 }
 """,
-        expected_cwes=[190],
-        acceptable_cwes=[787],
-        ambiguity=AmbiguityLevel.UNAMBIGUOUS,
+        expected_cwes=[475],
+        acceptable_cwes=[703],
+        ambiguity=AmbiguityLevel.LOW_AMBIGUITY,
         category="integer_arith",
-        _notes="Integer overflow leads to undersized allocation -> OOB write",
+        _notes="malloc can fail on huge size (from negative ints as well). Missing NULL check → NULL deref. CWE-703 valid but less specific.",
     ),
     DiagnosticCase(
         id="case_d03",
@@ -458,10 +458,10 @@ void handle_request(char *input) {
 }
 """,
         expected_cwes=[401],
-        acceptable_cwes=[],
+        acceptable_cwes=[476],
         ambiguity=AmbiguityLevel.UNAMBIGUOUS,
         category="ptr_lifetime",
-        _notes="Loop with allocation and no free - clear DoS vector",
+        _notes="Memory leak in infinite loop. Model should NOT speculate about process() freeing memory. CWE-476 (missing NULL check) also acceptable.",
     ),
     DiagnosticCase(
         id="case_e04_v3",
@@ -475,10 +475,11 @@ void handle_request(char *input) {
 }
 """,
         expected_cwes=[401],
-        acceptable_cwes=[],
+        acceptable_cwes=[476],
         ambiguity=AmbiguityLevel.UNAMBIGUOUS,
         category="ptr_lifetime",
-        _notes="Loop with allocation and no free - clear DoS vector",
+        _notes="malloc in infinite loop, no free visible. Pessimistic: do NOT assume process() frees it. CWE-476 also acceptable (no NULL check).",
+
     ),
     # ------------------------------------------------------------------------
     # Category: null_access (Expected: CWE-476)
