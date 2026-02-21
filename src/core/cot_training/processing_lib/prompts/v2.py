@@ -55,9 +55,12 @@ class VulnPromptV2(BaseVulnPrompt):
             "## Analysis Rules\n\n"
 
             "### External Functions\n"
-            "Assume ALL unknown/external functions may violate their implied contract and "
-            "return invalid, NULL, out-of-bounds, or malicious values. "
-            "Assume incorrect sizes and non-null-terminated strings.\n\n"
+            "Assume ALL unknown/external functions may:\n"
+            "- Return invalid, NULL, out-of-bounds, or malicious values\n"
+            "- Provide incorrect sizes and non-null-terminated strings\n\n"
+            "Analyze OBSERVABLE behavior only.\n"
+            "[CRITICAL] Do NOT speculate about what unknown functions do internally "
+            "(e.g., do not assume they free passed memory/pointers - report leak as observable).\n"
 
             "### FLAG as Vulnerable [NO EXCEPTIONS]\n"
             "[CRITICAL] No external input needed — these are vulnerabilities by themselves:\n"
@@ -66,7 +69,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "- Dereferencing NULL pointer -> CWE-476\n"
             "- Dereferencing freed pointer (use-after-free) -> CWE-416\n"
             "- Freeing same memory twice (double-free) -> CWE-415\n"
-            "- Allocated memory becomes unreachable -> CWE-401 (critical in loops)\n"
+            "- Allocated memory never freed or returned -> CWE-401 (e.g., allocation in loop with no free)\n"
             "- Integer overflow in size/index calculation -> CWE-190\n"
             "- Copy without size check (strcpy, gets, sprintf) -> CWE-120\n"
             "- External data used without validation\n"
@@ -151,7 +154,7 @@ class VulnPromptV2(BaseVulnPrompt):
                 "{% endraw %}\n"
                 "```\n\n"
 
-                # ==== FIELD RULES (condensed) ====
+                # ==== FIELD RULES ====
                 "## Field Rules\n"
                 "- **reasoning**: Critic and objective security analysis. MUST include: (1) Local bugs found (or confirmed absent),"
                 " (2) Data flow concerns, (3) Dangerous patterns, (4) Final assessment with CWE justification\n"
@@ -183,7 +186,7 @@ class VulnPromptV2(BaseVulnPrompt):
                 "{{func_code}}\n"
                 "```"
 
-                # ==== ANALYSIS RULES (condensed, no code examples) ====
+                # ==== ANALYSIS RULES ====
                 "{% if assumptions %}"
                 "\n\n"
                 "{{ assumptions }}"
