@@ -89,8 +89,16 @@ src/dataset/balance/assets/
 
 src/dataset/selection_1
 
-
 src/mem_consumption
+
 ####### RUST #######
 rusty/target
 rusty/src/mitre
+rusty/src/.DS_Store
+rusty/.DS_Store
+
+####### MacOS #######
+2026-02-04/
+FAST/
+scripts_bak/
+v3/
