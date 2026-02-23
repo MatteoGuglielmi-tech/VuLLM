@@ -68,9 +68,12 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
             "## Analysis Rules\n\n"
 
             "### External Functions\n"
-            "Assume ALL unknown/external functions may violate their implied contract and "
-            "return invalid, NULL, out-of-bounds, or malicious values. "
-            "Assume incorrect sizes and non-null-terminated strings.\n\n"
+            "Assume ALL unknown/external functions may violate their implied contract and:\n"
+            "- Return invalid, NULL, out-of-bounds, or malicious values\n"
+            "- Provide incorrect sizes and non-null-terminated strings\n\n"
+            "Analyze OBSERVABLE behavior only.\n"
+            "[CRITICAL] Do NOT speculate about what unknown functions do internally "
+            "(e.g., do not assume they free passed memory/pointers - report leak as observable).\n"
 
             "### FLAG as Vulnerable [NO EXCEPTIONS]\n"
             "[CRITICAL] No external input needed — these are vulnerabilities by themselves:\n"
@@ -79,7 +82,7 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
             "- Dereferencing NULL pointer -> CWE-476\n"
             "- Dereferencing freed pointer (use-after-free) -> CWE-416\n"
             "- Freeing same memory twice (double-free) -> CWE-415\n"
-            "- Allocated memory becomes unreachable -> CWE-401 (critical in loops)\n"
+            "- Allocated memory never freed or returned (unreachable memory) -> CWE-401 (especially in loops)\n"
             "- Integer overflow in size/index calculation -> CWE-190\n"
             "- Copy without size check (strcpy, gets, sprintf) -> CWE-120\n"
             "- External data used without validation\n"
@@ -92,7 +95,7 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
             "- **Utility wrappers that propagate errors (NULL) to caller are acceptable**\n\n"
 
             "### Output Rules [MUST FOLLOW]\n"
-            "- Use MOST SPECIFIC CWE FOR ALL VULNERABILITIES. Example: 787 not 119, 125 not 119, 120 not 119\n"
+            "- Use MOST SPECIFIC CWE FOR ALL VULNERABILITIES. Example: 787 not 119, 125 not 119, 120 not 119, 401 not 400, etc.\n"
             "- NEVER output parent and child together (e.g., never [119, 787])\n"
             "- When in doubt -> FLAG with most specific CWE\n"
         )
@@ -116,7 +119,6 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
         # ====================================================================
         self.SYSTEM_PROMPT: Template = Template(
             (
-                # ==== PERSONA ====
                 "You are a C security analyst. Analyze code and produce structured security assessments with pedagogical reasoning.\n\n"
 
                 # ==== CRITICAL CONSTRAINT (high attention position) ====
@@ -161,7 +163,7 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
                 "{% endraw %}\n"
                 "```\n\n"
 
-                # ==== FIELD RULES (condensed) ====
+                # ==== FIELD RULES ====
                 "## Field Rules\n"
                 "- **reasoning**: Critic and objective security analysis. MUST include: (1) Local bugs found (or confirmed absent),"
                 " (2) Data flow concerns, (3) Dangerous patterns, (4) Final assessment with CWE justification\n"
@@ -191,7 +193,7 @@ class FineTunePromptAnalyzerV3(BaseSequenceLengthAnalyzer):
                 "{{func_code}}\n"
                 "```"
 
-                # ==== ANALYSIS RULES (condensed, no code examples) ====
+                # ==== ANALYSIS RULES ====
                 "{% if assumptions %}"
                 "\n\n"
                 "{{ assumptions }}"
