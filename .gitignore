@@ -79,6 +79,7 @@ src/dataset/analysis/analysis/distribution/assets/
 src/dataset/analysis/sequence_length_analysis/__pycache__/
 src/dataset/analysis/sequence_length_analysis/results/
 src/dataset/analysis/project_analysis/assets/
+src/dataset/analysis/sequence_length_analysis_/
 src/dataset/analysis/reasoning_analysis/results/
 src/dataset/filter/stats/
 src/dataset/judge_analysis/assets/
