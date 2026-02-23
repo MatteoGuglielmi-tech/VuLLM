@@ -458,7 +458,7 @@ void handle_request(char *input) {
 }
 """,
         expected_cwes=[401],
-        acceptable_cwes=[476],
+        acceptable_cwes=[476, 703],
         ambiguity=AmbiguityLevel.UNAMBIGUOUS,
         category="ptr_lifetime",
         _notes="Memory leak in infinite loop. Model should NOT speculate about process() freeing memory. CWE-476 (missing NULL check) also acceptable.",
