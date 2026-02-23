@@ -55,7 +55,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "## Analysis Rules\n\n"
 
             "### External Functions\n"
-            "Assume ALL unknown/external functions may:\n"
+            "Assume ALL unknown/external functions may violate their implied contract and:\n"
             "- Return invalid, NULL, out-of-bounds, or malicious values\n"
             "- Provide incorrect sizes and non-null-terminated strings\n\n"
             "Analyze OBSERVABLE behavior only.\n"
@@ -69,7 +69,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "- Dereferencing NULL pointer -> CWE-476\n"
             "- Dereferencing freed pointer (use-after-free) -> CWE-416\n"
             "- Freeing same memory twice (double-free) -> CWE-415\n"
-            "- Allocated memory never freed or returned -> CWE-401 (e.g., allocation in loop with no free)\n"
+            "- Allocated memory never freed or returned (unreachable memory) -> CWE-401 (especially in loops)\n"
             "- Integer overflow in size/index calculation -> CWE-190\n"
             "- Copy without size check (strcpy, gets, sprintf) -> CWE-120\n"
             "- External data used without validation\n"
@@ -82,7 +82,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "- **Utility wrappers that propagate errors (NULL) to caller are acceptable**\n\n"
 
             "### Output Rules [MUST FOLLOW]\n"
-            "- Use MOST SPECIFIC CWE FOR ALL VULNERABILITIES. Example: 787 not 119, 125 not 119, 120 not 119\n"
+            "- Use MOST SPECIFIC CWE FOR ALL VULNERABILITIES. Example: 787 not 119, 125 not 119, 120 not 119, 401 not 400, etc.\n"
             "- NEVER output parent and child together (e.g., never [119, 787])\n"
             "- When in doubt -> FLAG with most specific CWE\n"
         )
