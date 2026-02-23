@@ -14,6 +14,7 @@ DEFAULT_TOKENIZER_LIST = [
     ("unsloth/Qwen2.5-72B-Instruct-bnb-4bit", "qwen-2.5"),
     ("deepseek-ai/deepseek-coder-33b-instruct", "custom"),
     ("deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct", "custom"),
+    ("Qwen/Qwen3-Coder-30B-A3B-Instruct", None),
     ("microsoft/Phi-4", "phi-4"),
     ("microsoft/Phi-4-reasoning-plus", "phi-4"),
     ("unsloth/Llama-3.3-70B-Instruct-bnb-4bit", "llama-3.3"),
