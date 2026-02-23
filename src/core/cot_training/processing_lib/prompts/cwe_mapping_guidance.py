@@ -98,11 +98,19 @@ CWE_MAPPING_GUIDANCE_V2: str = """## [CRITICAL] CWE Mapping Guidelines
 **Other:**
 - CWE-362: Race Condition [ALLOWED] — if race causes UAF/NULL deref, report 362 as root cause
 - CWE-200: Information Exposure [ALLOWED in this context]
-- CWE-703: Improper Exception Handling [ALLOWED in this context]
+- CWE-703: Improper Exception Handling [DISCOURAGED - prefer specific consequence: 476 (NULL deref), 416 (UAF) or 401 (Memory leak)]
 - CWE-20: Improper Input Validation [DISCOURAGED - too abstract unless purely validation issue]
+
+ALL CWEs listed above are valid findings — do NOT dismiss any as 'unrelated' or 'not applicable in the absence of external influence'.
 
 ### [CRITICAL] Causal Chain Rule
 When A causes B, report A:
 - Integer overflow causes buffer overflow: report CWE-190
 - Race condition causes use-after-free: report CWE-362
-- Missing validation causes buffer overflow: consider CWE-20 if validation is the root cause"""
+- Missing validation causes buffer overflow: consider CWE-20 if validation is the root cause
+
+[CRITICAL] Prefer specific CWE over CWE-703:
+- Missing NULL check after heap allocation (malloc, calloc, etc.) causes NULL deref: report CWE-476
+- Allocation without visible free or return: report CWE-401
+- Unchecked return value leads to specific bug: report that bug's CWE
+- CWE-703 allowed ONLY when no specific consequence CWE fits"""
