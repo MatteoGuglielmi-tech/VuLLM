@@ -26,11 +26,11 @@ def collect_project_data(dataset_dict: DatasetDict) -> ProjectData:
 
     for split in splits:
         for ex in dataset_dict[split]:
-            if ex["target"] == 1:  # type: ignore[reportCallIssue, reportArgumentType]
-                prj_name = ex.get("project", [])  # type: ignore[reportAttributeAccessIssue]
-                if prj_name:
-                    prj_names[split].add(prj_name)
-                    prj_sample_counts[split][prj_name] += 1
+            # if ex["target"] == 1:  # type: ignore[reportCallIssue, reportArgumentType]
+            prj_name = ex.get("project", [])  # type: ignore[reportAttributeAccessIssue]
+            if prj_name:
+                prj_names[split].add(prj_name)
+                prj_sample_counts[split][prj_name] += 1
 
     return ProjectData(project_names=prj_names, sample_counts=prj_sample_counts)
 
