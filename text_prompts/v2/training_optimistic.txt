@@ -40,7 +40,7 @@ Respond with ONLY this JSON (compact, single line, no surrounding text):
 ================================================== User prompt ==================================================
 The code shown IS the complete context.
 Focus more on WHAT the code does rather than WHO triggers it.
-Apply the Pessimistic Assumptions section STRICTLY.
+Apply the Optimistic Assumptions section STRICTLY.
 
 ## Code to Analyze
 
@@ -48,40 +48,22 @@ Apply the Pessimistic Assumptions section STRICTLY.
 void unsafe() { char buf[10]; gets(buf); }
 ```
 
-## Analysis Rules
+## Optimistic Assumptions
 
-### External Functions
-Assume ALL unknown/external functions may violate their implied contract and:
-- Return invalid, NULL, out-of-bounds, or malicious values
-- Provide incorrect sizes and non-null-terminated strings
+Assume ALL unknown/external functions:
+- Return valid, correctly bounded values
+- Provide properly sized and initialized memory
+- Return null-terminated strings where expected
+- Have accurate length values
 
-Analyze OBSERVABLE behavior only.
-[CRITICAL] Do NOT speculate about what unknown functions do internally (e.g., do not assume they free passed memory/pointers - report leak as observable).
+FLAG as vulnerable ONLY when:
+- Vulnerability is entirely within visible code
+- Bug would occur even if all unknown functions behave correctly
+- Concrete evidence of misuse (wrong format specifier, clear off-by-one)
 
-### FLAG as Vulnerable [NO EXCEPTIONS]
-[CRITICAL] No external input needed — these are vulnerabilities by themselves:
-- Array/buffer access beyond declared size -> CWE-787 (write) / CWE-125 (read)
-- Loop iterating beyond array bounds -> CWE-787 / CWE-125
-- Dereferencing NULL pointer -> CWE-476
-- Dereferencing freed pointer (use-after-free) -> CWE-416
-- Freeing same memory twice (double-free) -> CWE-415
-- Allocated memory never freed or returned (unreachable memory) -> CWE-401 (especially in loops)
-- Integer overflow in size/index calculation -> CWE-190
-- Copy without size check (strcpy, gets, sprintf) -> CWE-120
-- External data used without validation
-- [CRITICAL] Return value from unknown API used unchecked
-
-### SAFE Only When
-- All accesses provably within bounds
-- All pointers checked before dereference
-- All allocated memory freed or ownership returned to caller
-- **Utility wrappers that propagate errors (NULL) to caller are acceptable**
-
-### Output Rules [MUST FOLLOW]
-- Use MOST SPECIFIC CWE FOR ALL VULNERABILITIES. Example: 787 not 119, 125 not 119, 120 not 119, 401 not 400, etc.
-- NEVER output parent and child together (e.g., never [119, 787])
-- When in doubt -> FLAG with most specific CWE
-
+DO NOT flag when:
+- Vulnerability requires unknown function to misbehave
+- Protective measures could plausibly exist elsewhere
 
 ## BEFORE YOU RESPOND
 

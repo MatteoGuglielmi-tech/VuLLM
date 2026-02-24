@@ -60,7 +60,7 @@ class VulnPromptV2(BaseVulnPrompt):
             "- Provide incorrect sizes and non-null-terminated strings\n\n"
             "Analyze OBSERVABLE behavior only.\n"
             "[CRITICAL] Do NOT speculate about what unknown functions do internally "
-            "(e.g., do not assume they free passed memory/pointers - report leak as observable).\n"
+            "(e.g., do not assume they free passed memory/pointers - report leak as observable).\n\n"
 
             "### FLAG as Vulnerable [NO EXCEPTIONS]\n"
             "[CRITICAL] No external input needed — these are vulnerabilities by themselves:\n"

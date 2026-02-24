@@ -94,5 +94,3 @@ Analyze OBSERVABLE behavior only.
 Do NOT second-guess. Do NOT dismiss bugs as 'not exploitable'.
 
 
-================================================== Assistant prompt ==================================================
-{"reasoning": "...", "vulnerabilities": [...], "verdict": {...}}
