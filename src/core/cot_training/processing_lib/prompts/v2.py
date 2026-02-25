@@ -95,14 +95,16 @@ class VulnPromptV2(BaseVulnPrompt):
     def FINAL_ENFORCEMENT(self) -> str:
         return (
             "## BEFORE YOU RESPOND\n\n"
-
+            
             "1. Did you apply the Analysis Rules above?\n"
             "2. Did you check for LOCAL BUGS? (OOB, NULL deref, UAF, double-free, leaks)\n"
             "3. Is ANY operation unsafe? -> FLAG it\n"
-            "4. Did you use the MOST SPECIFIC CWE for each detected vulnerability?\n\n"
-
+            "4. If you found parent AND child CWE (e.g., 119 + 787) -> OUTPUT ONLY THE CHILD\n"
+            "5. Did you use the MOST SPECIFIC CWE for each detected vulnerability?\n\n"
+            
+            "Do NOT second-guess. "
+            "Do NOT dismiss bugs as 'not exploitable'. "
             "'No external input' is NOT a defense.\n"
-            "Do NOT second-guess. Do NOT dismiss bugs as 'not exploitable'.\n"
         )
 
     @property

@@ -101,7 +101,7 @@ CWE_MAPPING_GUIDANCE_V2: str = """## [CRITICAL] CWE Mapping Guidelines
 - CWE-703: Improper Exception Handling [DISCOURAGED - prefer specific consequence: 476 (NULL deref), 416 (UAF) or 401 (Memory leak)]
 - CWE-20: Improper Input Validation [DISCOURAGED - too abstract unless purely validation issue]
 
-ALL CWEs listed above are valid findings — do NOT dismiss any as 'unrelated' or 'not applicable in the absence of external influence'.
+Any CWE above may apply — do NOT dismiss vulnerabilities as 'unrelated' or due to lack of external input (e.g. 'not applicable without external input'). However, still report ONLY the most specific CWE per issue.
 
 ### [CRITICAL] Causal Chain Rule
 When A causes B, report A:
