@@ -20,12 +20,6 @@ This repository contains the code and experimental pipeline for my master's thes
 VuLLM/
 ├── .clang-format               # Clang-format config file
 ├── deepspeed                   # Deepspeed files
-├── diagnostics                 # 24-case diagnostic suite
-│   ├── assets                  # Results diagnostic suite
-│   ├── none                    # Predictions Free (no assumptions)
-│   ├── optimistic              # Predictions Optimistic assumptions
-│   ├── pessimistic             # Predictions Pessimistic assumptions
-│   └── yaml_parser             # Results renderer
 ├── DoneBot                     # Submodule for async notifications
 ├── LICENSE
 ├── pixi.toml                   # Dependency management
