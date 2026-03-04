@@ -1,0 +1,3 @@
+[submodule "DoneBot"]
+	path = DoneBot
+	url = git@github.com:MatteoGuglielmi-tech/DoneBot.git

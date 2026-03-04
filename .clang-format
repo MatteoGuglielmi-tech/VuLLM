@@ -1,0 +1,89 @@
+---
+BasedOnStyle: LLVM
+IndentWidth: 2
+ContinuationIndentWidth: 2
+UseTab: Never
+ColumnLimit: 100
+Language: C
+Standard: Cpp11
+Cpp11BracedListStyle: true
+AlignAfterOpenBracket: Align
+# AlignArrayOfStructures: Right
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterEnum: false
+  AfterStruct: false
+  AfterClass: false
+  AfterFunction: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeWhile: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  AfterControlStatement: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+BreakAdjacentStringLiterals: true
+# BreakAfterReturnType: All
+BreakArrays: false
+BreakFunctionDefinitionParameters: false
+# BinPackParameters: BinPack
+BreakStringLiterals: true
+IndentCaseLabels: true
+# IndentExportBlock: true  # present from clang-format 21
+# IndentExternalBlock: true  # present from clang-format 21
+IndentGotoLabels: true
+IndentPPDirectives: BeforeHash
+MacroBlockBegin: ^NS_MAP_BEGIN|NS_TABLE_HEAD$
+MacroBlockEnd: ^NS_MAP_END|NS_TABLE_.*_END$
+PointerAlignment: Right
+QualifierAlignment: Custom
+QualifierOrder: [inline, static, volatile, const, type]
+ReferenceAlignment: Right
+RemoveBracesLLVM: false
+# RemoveEmptyLinesInUnwrappedLines: true  # present from clang-format 21
+RemoveParentheses: ReturnStatement
+RemoveSemicolon: true
+SeparateDefinitionBlocks: Leave
+SortIncludes: CaseSensitive
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAroundPointerQualifiers: After
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: true
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: false
+  AfterForeachMacros: false
+  AfterFunctionDefinitionName: false
+  BeforeNonEmptyParentheses: false
+SpaceBeforeRangeBasedForLoopColon: false
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
+SpacesInAngles: false
+SpacesInParens: Never
+SkipMacroDefinitionBody: true
+BreakBeforeConceptDeclarations: Never
+# BreakBeforeTemplateCloser: false  # from clang-format 21
+BreakTemplateDeclarations: false
+AllowShortNamespacesOnASingleLine: false
+FixNamespaceComments: false
+
+ForEachMacros:
+  - list_for_each_entry
+  - list_for_each_safe
+  - list_for_each_entry_safe
+  - list_for_each
+  - hlist_for_each_entry
+  - sk_for_each
+  - sctp_walk_params
+  - sctp_tsnmap_init
+  - receive_queue_for_each_sk
+
+IfMacros:
+  - IFDBG
