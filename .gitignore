@@ -103,3 +103,9 @@ rusty/.DS_Store
 FAST/
 scripts_bak/
 v3/
+
+.DS_Store
+src/.DS_Store
+src/core/.DS_Store
+src/dataset/.DS_Store
+
