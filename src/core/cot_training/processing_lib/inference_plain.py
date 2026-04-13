@@ -146,7 +146,7 @@ class TestHandlerPlain(CWEDiagnosticMixin):
         - Encoder-decoder (T5, BART): Right padding
         """
 
-        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma"} # deepseek uses "llama"
+        decoder_only_models: set[str] = { "llama", "mistral", "qwen", "opt", "phi", "gemma", "deepseek_v2" } # deepseek uses "llama"
         model_type = getattr(self.model.config, "model_type", "").lower()  # type: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
         if any(arch in model_type for arch in decoder_only_models):
