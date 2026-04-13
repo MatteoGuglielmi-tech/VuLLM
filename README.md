@@ -2,8 +2,12 @@
 
 Fine-tuning Large Language Models for C Vulnerability Detection and Classification (CWE) with Structured Reasoning
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+[![DOI](https://zenodo.org/badge/903396673.svg)](https://doi.org/10.5281/zenodo.18867850)
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+> [!CAUTION]
+> Ongoing experimental work — **agentic RAG pipeline** with a CWE knowledge base over the full MITRE corpus, vector retrieval, multi-pass inference (LangGraph), and an MCP server — lives on the [`agent`](../../tree/agent) branch. `main` is the frozen fine-tuning baseline.
 
 ## Overview
 
