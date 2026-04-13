@@ -21,6 +21,7 @@ optuna = ">=4.6.0,<5"
 python-telegram-bot = ">=22.5,<23"
 outlines = ">=1.2.4,<2"
 matplotlib-venn = ">=1.1.2,<2"
+pytest-benchmark = ">=5.2.3,<6"
 
 [pypi-dependencies]
 tiktoken = ">=0.12.0, <0.13"
@@ -29,6 +30,8 @@ rich = ">=14.2.0, <15"
 kaleido = ">=1.2.0, <2"
 dataframe-image = ">=0.2.7, <0.3"
 flawfinder = ">=2.0.19, <3"
+cwe2 = ">=3.0.0, <4"
+sentence-transformers = ">=5.4.0, <6"
 
 # [feature.dev.dependencies]
 # black = "*"

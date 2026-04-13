@@ -15,6 +15,7 @@ src/core/__pycache__/
 
 unsloth_compiled_cache/
 .pytest_cache/
+.cache/
 
 ignore/
 misc/
@@ -108,4 +109,8 @@ v3/
 src/.DS_Store
 src/core/.DS_Store
 src/dataset/.DS_Store
+
+
+CLAUDE.md
+CLAUDE.original.md
 
