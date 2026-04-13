@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tiktoken_rs::CoreBPE;
 use tiktoken_rs::cl100k_base;
 
@@ -45,8 +46,17 @@ impl FeatureExtractor {
     pub fn extract_features(input_fp: &Path) -> Result<Vec<ProcessedEntry>> {
         let entries: Vec<JsonlEntry> = read_jsonl(input_fp)?;
         info!("Read {} entries from file.", entries.len());
+        let total_entries = entries.len();
 
-        let pb = create_progress_bar(entries.len() as u64, "🚀 Premature filtering ");
+        let pb = create_progress_bar(total_entries as u64, "🚀 Premature filtering ");
+
+        let already_empty_count = AtomicUsize::new(0);
+        let comments_only_count = AtomicUsize::new(0);
+        let cpp_count = AtomicUsize::new(0);
+
+        // Track C++ label distribution
+        let cpp_vulnerable_count = AtomicUsize::new(0);
+        let cpp_safe_count = AtomicUsize::new(0);
 
         let filtered_entries: Vec<JsonlEntry> = entries
             .into_par_iter()
@@ -55,26 +65,45 @@ impl FeatureExtractor {
                 PROCESSOR.with(|processor_cell| {
                     // borrow the processor for this thread
                     let processor = processor_cell.borrow();
+
+                    // Check 1: Already empty BEFORE removing comments
+                    if entry.func.trim().is_empty() {
+                        already_empty_count.fetch_add(1, Ordering::Relaxed);
+                        return None;
+                    }
+
+                    // Step 1: remove comments
                     let code_without_comments = processor
                         .get_sanitizer()
                         .remove_comments(&entry.func, processor.get_main_ts());
 
+                    // Check 2: Empty AFTER removing comments (comments only)
                     if code_without_comments.trim().is_empty() {
+                        comments_only_count.fetch_add(1, Ordering::Relaxed);
                         return None;
                     }
 
+                    // Step 2: Remove non-ASCII
                     let ascii_code = processor
                         .get_sanitizer()
                         .remove_non_ascii(&code_without_comments);
+
+                    // Filter 2: C++ code
                     if processor
                         .get_sanitizer()
                         .is_cpp(&ascii_code, processor.get_cpp_ts())
                     {
+                        cpp_count.fetch_add(1, Ordering::Relaxed);
+                        if entry.target == 1 {
+                            cpp_vulnerable_count.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            cpp_safe_count.fetch_add(1, Ordering::Relaxed);
+                        }
                         return None;
                     }
 
                     // update func field
-                    entry.func = code_without_comments.into_owned();
+                    entry.func = ascii_code;
                     Some(entry)
                 })
             })
@@ -84,14 +113,78 @@ impl FeatureExtractor {
             return Err(anyhow!("No valid C functions found after filtering"));
         }
 
+        // Print statistics
+        let kept_count = filtered_entries.len();
+        let filtered_total = already_empty_count.load(Ordering::Relaxed)
+            + comments_only_count.load(Ordering::Relaxed)
+            + cpp_count.load(Ordering::Relaxed);
+
+        println!("\n=== Filtering Results ===");
+        println!("Total entries: {}", total_entries);
+        println!("Filtered out:");
+        println!(
+            "  - Already empty: {} ({:.1}%)",
+            already_empty_count.load(Ordering::Relaxed),
+            (already_empty_count.load(Ordering::Relaxed) as f64 / total_entries as f64) * 100.0
+        );
+        println!(
+            "  - Comments only: {} ({:.1}%)",
+            comments_only_count.load(Ordering::Relaxed),
+            (comments_only_count.load(Ordering::Relaxed) as f64 / total_entries as f64) * 100.0
+        );
+        println!(
+            "  - C++ code: {} ({:.1}%)",
+            cpp_count.load(Ordering::Relaxed),
+            (cpp_count.load(Ordering::Relaxed) as f64 / total_entries as f64) * 100.0
+        );
+        println!(
+            "  - Total filtered: {} ({:.1}%)",
+            filtered_total,
+            (filtered_total as f64 / total_entries as f64) * 100.0
+        );
+        println!(
+            "Kept: {} ({:.1}%)",
+            kept_count,
+            (kept_count as f64 / total_entries as f64) * 100.0
+        );
+
         let vulnerable_count = filtered_entries
             .iter()
             .filter(|entry| entry.target == 1)
             .count();
+
+        println!("\n=== Label Distribution Comparison ===");
         println!(
-            "Binary labels distribution after C-only filtering:\n\t(target=1): {}\n\t(target=0): {}",
-            vulnerable_count,
-            filtered_entries.len() - vulnerable_count
+            "{:<30} {:>10} {:>10} {:>10}",
+            "", "Total", "Vulnerable", "Safe"
+        );
+        println!("{:-<62}", "");
+
+        let cpp_vuln = cpp_vulnerable_count.load(Ordering::Relaxed);
+        let cpp_safe = cpp_safe_count.load(Ordering::Relaxed);
+        let cpp_total = cpp_count.load(Ordering::Relaxed);
+
+        println!(
+            "{:<30} {:>10} {:>10} ({:>5.1}%) {:>10} ({:>5.1}%)",
+            "C++ (filtered out)",
+            cpp_total,
+            cpp_vuln,
+            (cpp_vuln as f64 / cpp_total as f64) * 100.0,
+            cpp_safe,
+            (cpp_safe as f64 / cpp_total as f64) * 100.0
+        );
+
+        let c_vuln = vulnerable_count;
+        let c_safe = kept_count - vulnerable_count;
+
+        println!(
+            "{:<30} {:>10} {:>10} ({:>5.1}%) {:>10} ({:>5.1}%)",
+            "C (kept)",
+            kept_count,
+            c_vuln,
+            (c_vuln as f64 / kept_count as f64) * 100.0,
+            c_safe,
+            (c_safe as f64 / kept_count as f64) * 100.0
         );
 
         info!(
