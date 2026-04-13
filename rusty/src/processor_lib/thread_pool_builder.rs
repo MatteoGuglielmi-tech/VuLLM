@@ -18,7 +18,7 @@ pub fn setup_global_thread_pool() {
                 if let Err(e) = set_current_thread_priority(ThreadPriority::Crossplatform(
                     47u8.try_into().unwrap(),
                 )) {
-                    erro!("Failed to set QoS for thread {}: {:?}", thread_index, e);
+                    error!("Failed to set QoS for thread {}: {:?}", thread_index, e);
                 }
             }
 
