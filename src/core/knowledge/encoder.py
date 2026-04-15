@@ -1,22 +1,38 @@
 import numpy as np
+from typing import Iterable
 from sentence_transformers import SentenceTransformer
 
 
-def encode(
+def _to_np(x: Iterable) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(x), dtype=np.float32)
+
+
+def encode_documents(
     texts: list[str],
     model: SentenceTransformer,
-    batch_size: int = 8,
-    normalize_embeddings: bool = True,
+    batch_size: int,
+    normalize: bool,
 ) -> np.ndarray:
-    if not texts:
-        return np.empty((0, 0), dtype=np.float32)
-
-    vec = model.encode(
-        texts,
-        batch_size=batch_size,
-        normalize_embeddings=normalize_embeddings,
-        convert_to_numpy=True,
-        convert_to_tensor=False,
-        show_progress_bar=True,
+    return _to_np(
+        model.encode_document(
+            texts,
+            batch_size=batch_size,
+            normalize_embeddings=normalize,
+            convert_to_numpy=True,
+            convert_to_tensor=False,
+            show_progress_bar=True,
+        )
     )
-    return np.asarray(vec)
+
+
+def encode_query(
+    text: str, model: SentenceTransformer, normalize: bool = True
+) -> np.ndarray:
+    return _to_np(
+        model.encode_query(
+            [text],
+            normalize_embeddings=normalize,
+            convert_to_numpy=True,
+            convert_to_tensor=False,
+        )
+    )

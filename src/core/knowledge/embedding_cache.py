@@ -88,7 +88,7 @@ def load_or_build(
     if _cache_valid(cache_dir, fp):
         return _load(cache_dir)
 
-    logging.warning("Fingerprint mismatch -> Start cache embeddings rebuild")
+    logger.warning("Fingerprint mismatch -> Start cache embeddings rebuild")
     ordered: list[CWEEntry] = sorted(docs, key=lambda e: e.cwe_id)
     texts: list[str] = [build_embedding_text(e) for e in ordered]
     raw: npt.NDArray[np.floating] = encode_fn(texts)

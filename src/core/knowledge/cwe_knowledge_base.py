@@ -133,8 +133,14 @@ class CWEKnowledgeBase:
     def __len__(self) -> int:
         return len(self._entries)
 
-    def get_by_id(self, cwe_id: int) -> CWEEntry | None:
+    def get_by_id_fallible(self, cwe_id: int) -> CWEEntry | None:
         return self._entries.get(cwe_id)
+
+    def require(self, cwe_id: int) -> CWEEntry:
+        entry = self._entries.get(cwe_id)
+        if entry is None:
+            raise KeyError(f"CWE-{cwe_id} not in knowledge base")
+        return entry
 
     def get_all(self) -> list[CWEEntry]:
         return list(self._entries.values())
