@@ -22,6 +22,7 @@ python-telegram-bot = ">=22.5,<23"
 outlines = ">=1.2.4,<2"
 matplotlib-venn = ">=1.1.2,<2"
 pytest-benchmark = ">=5.2.3,<6"
+faiss-cpu = ">=1.10.0,<2"
 
 [pypi-dependencies]
 tiktoken = ">=0.12.0, <0.13"
